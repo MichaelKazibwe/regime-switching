@@ -17,6 +17,8 @@ from blacklitterman import (
     BlackLittermanModel,
 )
 
+from covarianceengine import CovarianceEngine
+
 from forwardriskmetrics import ForwardRiskMetrics
 
 from marketdataloader import MarketDataLoader
@@ -112,10 +114,6 @@ from sqlalchemy import (
 from sqlalchemy.orm import (
     declarative_base,
     sessionmaker
-)
-
-from sklearn.covariance import (
-    LedoitWolf
 )
 
 # ============================================================
@@ -2738,14 +2736,15 @@ class WalkForwardOptimizer:
             # ===================================
             # COVARIANCE ESTIMATION
             # ===================================
+            
+            covariance_engine = CovarianceEngine()
 
             covariance = (
-                CovarianceEstimator
+                covariance_engine
                 .ledoit_wolf(
-                    train
-                )
+                train
             )
-
+        )
             # ===================================
             # VALIDATION
             # ===================================
@@ -4017,94 +4016,34 @@ class Visualization:
         )    
     
 # ============================================================
-# COVARIANCE ESTIMATION
+# COVARIANCE ENGINE TEST
 # ============================================================
 
-class CovarianceEstimator:
-
-    @staticmethod
-    def sample_covariance(
-        returns
-    ):
-
-        covariance = (
-            returns
-            .cov()
-            .values
-        )
-
-        return covariance
-
-    @staticmethod
-    def ledoit_wolf(
-        returns
-    ):
-
-        returns = (
-            returns
-            .dropna()
-        )
-
-        lw = LedoitWolf()
-
-        lw.fit(
-            returns
-        )
-
-        covariance = (
-            lw.covariance_
-        )
-
-        assert (
-            covariance.shape[0]
-            ==
-            covariance.shape[1]
-        ), (
-            "Covariance matrix "
-            "must be square"
-        )
-
-        assert (
-            covariance.shape[0]
-            ==
-            len(returns.columns)
-        ), (
-            f"Covariance dimension "
-            f"{covariance.shape[0]} "
-            f"!= asset count "
-            f"{len(returns.columns)}"
-        )
-
-        assert np.isfinite(
-            covariance
-        ).all(), (
-            "Non-finite values "
-            "in covariance matrix"
-        )
-
-        return covariance
-    
-
-# ============================================================
-# COVARIANCE ESTIMATOR TEST
-# ============================================================
-
-def test_covariance_estimator():
+def test_covariance_engine():
 
     returns = pd.DataFrame(
 
         np.random.normal(
+
             0,
+
             0.01,
+
             (500, 10)
+
         )
+
     )
 
+    engine = CovarianceEngine()
+
     cov = (
-        CovarianceEstimator
+
+        engine
         .ledoit_wolf(
             returns
         )
+
     )
 
     assert cov.shape == (
@@ -4116,8 +4055,36 @@ def test_covariance_estimator():
         cov
     ).all()
 
+    assert np.allclose(
+
+        cov,
+
+        cov.T,
+
+        atol=1e-10
+
+    )
+
+    eig = np.linalg.eigvalsh(
+        cov
+    )
+
+    assert eig.min() >= -1e-8
+
+    diagnostics = (
+        engine.last_diagnostics
+    )
+
+    assert diagnostics is not None
+
+    assert (
+        engine.last_method
+        ==
+        "ledoit_wolf"
+    )
+
     logger.info(
-        "Covariance estimator test passed"
+        "Covariance engine test passed"
     )
 
 # ============================================================
@@ -4539,13 +4506,17 @@ def test_hrp_live():
         loader.load_returns()
     )
 
-    cov = (
-    CovarianceEstimator
-    .ledoit_wolf(
-        returns
-    )
-)
+    engine = CovarianceEngine()
 
+    cov = (
+
+        engine
+        .ledoit_wolf(
+            returns
+    )
+
+)
+    
     weights = (
     HRPOptimizer()
     .optimize(
