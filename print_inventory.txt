@@ -1,0 +1,99 @@
+435:    print(
+439:    print(
+649:    print(
+1000:            print(
+1077:    print(
+1081:    print(weights)
+1117:    print(
+1742:    print(
+1838:    print(
+1988:    print(
+2074:    print(
+2506:    print(
+2556:    print(
+3013:    print(
+3017:    print(
+3022:    print(
+3027:    print(
+4185:    print(
+4340:    print(
+4621:    print(
+4990:    print("HRP test passed")
+4991:    print(weights)
+5021:    print(
+5025:    print(
+5059:    print(weights)
+5061:    print(
+5075:    print(
+5120:    print(
+5344:    print(
+5389:    print("\n========== RESULTS ==========")
+5393:        print(
+5399:    print("=============================\n")
+5405:    print(
+5463:    print(
+5731:    print(
+5780:    print(
+5807:    print(
+6026:    print(
+6211:    print(
+6443:    print(
+6495:    print(
+6637:    print(
+6791:    print(
+6932:    print(
+6983:    print(
+7030:    print(
+7173:    print(
+7304:    print(
+7353:    print(
+7443:    print(
+7791:    print(
+7834:    print(
+8149:    print(
+8238:    print(
+8277:    print(
+8303:    print(
+8455:    print(
+8481:    print(
+8594:        print()
+8596:        print("=" * 60)
+8597:        print("PORTFOLIO REPORT")
+8598:        print("=" * 60)
+8600:        print()
+8602:        print(
+8607:        print(
+8614:        print(
+8621:        print()
+8631:                print(
+8636:        print()
+8640:            print(
+8650:                print(
+8655:        print()
+8657:        print("=" * 60)
+8720:    print(
+8855:    print(
+8882:    print(
+8898:        print("\n" + "=" * 70)
+8899:        print("                PORTFOLIO DASHBOARD")
+8900:        print("=" * 70)
+8902:        print(f"Current Regime : {result['regime']}")
+8903:        print(f"Cash Weight    : {result['cash']:.2%}")
+8906:            print(
+8911:        print("=" * 70)
+8913:        print("\nPortfolio Allocation")
+8922:        print(
+8928:            print("\nRisk Budget Report")
+8930:            print(
+8940:            print("\nPerformance")
+8950:                print(
+9025:        print("\n")
+9026:        print("=" * 80)
+9027:        print("                 REGIME DASHBOARD")
+9028:        print("=" * 80)
+9030:        print(
+9034:        print(
+9038:        print(
+9043:        print(
+9048:        print(
+9053:        print("=" * 80)
