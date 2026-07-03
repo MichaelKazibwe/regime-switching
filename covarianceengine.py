@@ -26,90 +26,83 @@ import numpy as np
 import pandas as pd
 
 from sklearn.covariance import LedoitWolf
-
+from basecovariancemodel import BaseCovarianceModel
 
 # ============================================================
 # COVARIANCE ENGINE
 # ============================================================
 
-class CovarianceEngine:
+class CovarianceEngine(BaseCovarianceModel):
+
+    """
+    Institutional covariance estimation engine.
+
+    Provides a unified interface for multiple covariance
+    estimators together with diagnostics and validation.
+
+    Supported estimators
+
+        • Ledoit-Wolf
+        • EWMA
+        • Rolling
+
+    Every estimator automatically performs
+
+        • Validation
+        • Diagnostics
+        • State tracking
+    """
 
     API_VERSION = "1.0.0"
 
     PUBLIC_METHODS = (
 
-    "estimate",
+        "estimate",
 
-    "ledoit_wolf",
+        "ledoit_wolf",
 
-    "ewma",
+        "ewma",
 
-    "rolling",
+        "rolling",
 
-    "validate",
+        "validate",
 
-    "diagnostics"
+        "diagnostics"
 
-)
-    
-    @property
-    def metadata(self):
-
-     return {
-
-        "version": self.API_VERSION,
-
-        "available_methods": self.available_methods,
-
-        "last_method": self.last_method,
-
-        "dimension": (
-
-            None
-
-            if self.last_covariance is None
-
-            else self.last_covariance.shape[0]
-
-        )
-
-    }
-
-    """
-    Institutional covariance estimation engine.
-
-    Public API
-    ----------
-
-    estimate()
-
-    ledoit_wolf()
-
-    ewma()
-
-    rolling()
-
-    validate()
-
-    diagnostics()
-
-    available_methods
-
-    Everything beginning with "_"
-    is considered private implementation.
-    """
-
-    # ========================================================
-    # CONSTRUCTOR
-    # ========================================================
+    )
 
     def __init__(self):
 
-        self.last_covariance = None
+        super().__init__()
 
         self.last_method = None
 
         self.last_diagnostics = None
+
+    @property
+    def metadata(
+        self
+    ):
+
+        metadata = super().metadata
+
+        metadata.update(
+
+            {
+
+                "available_methods":
+
+                    self.available_methods,
+
+                "last_method":
+
+                    self.last_method
+
+            }
+
+        )
+
+        return metadata
 
     # ========================================================
     # INTERNAL HELPERS
