@@ -11,12 +11,13 @@ class.
 """
 
 from abc import ABC, abstractmethod
+from basecomponent import BaseObject
 
 # ============================================================
 # BASE COVARIANCE MODEL
 # ============================================================
 
-class BaseCovarianceModel(ABC):
+class BaseCovarianceModel(BaseObject,ABC):
 
     """
     Abstract base class for covariance models.
@@ -40,9 +41,11 @@ class BaseCovarianceModel(ABC):
 
     def __init__(self):
 
+        super().__init__()
+
         self.last_covariance = None
 
-        self.last_summary = None
+        self.last_summary = {}
 
     # ========================================================
     # ABSTRACT API
@@ -64,42 +67,40 @@ class BaseCovarianceModel(ABC):
     # ========================================================
 
     def summary(
-        self
-    ):
+    self
+):
 
-        if self.last_summary is None:
-
-            raise RuntimeError(
-                "No covariance estimate available."
-            )
-
-        return dict(
-            self.last_summary
-        )
+     return dict(
+        self.last_summary
+    )
 
     # ========================================================
     # METADATA
     # ========================================================
 
-    @property
-    def metadata(
-        self
-    ):
+@property
+def metadata(
+    self
+):
 
-        dimension = None
+    metadata = super().metadata
 
-        if self.last_covariance is not None:
+    dimension = None
 
-            dimension = self.last_covariance.shape[0]
+    if self.last_covariance is not None:
 
-        return {
+        dimension = self.last_covariance.shape[0]
 
-            "version":
+    metadata.update(
 
-                self.API_VERSION,
+        {
 
             "dimension":
 
                 dimension
 
         }
+
+    )
+
+    return metadata
