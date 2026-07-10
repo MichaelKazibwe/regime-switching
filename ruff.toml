@@ -1,0 +1,7 @@
+line-length = 88
+target-version = "py311"
+
+exclude = [
+    "archive",
+    "__pycache__",
+]

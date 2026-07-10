@@ -332,7 +332,10 @@ class RebalanceEngine(BaseObject):
 
                     total_slippage
 
-                )
+                ),
+                
+            "average_cost_per_order":
+             average_cost_per_order
 
         }
 
