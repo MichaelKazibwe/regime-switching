@@ -11,6 +11,8 @@ Estimates trading costs including commissions and slippage.
 
 from __future__ import annotations
 
+from trade import Trade
+
 import numpy as np
 import pandas as pd
 
@@ -75,52 +77,72 @@ class TransactionCostModel(BaseObject):
 
     def _validate_trades(
         self,
-        trades: pd.DataFrame
+        trades: list[Trade]
     ):
 
         if not isinstance(
             trades,
-            pd.DataFrame
+            list
         ):
 
             raise TypeError(
-                "Trades must be a pandas DataFrame."
+
+                "Trades must be a list of Trade objects."
+
             )
 
-        if "Trade Value" not in trades.columns:
+        if not trades:
 
             raise ValueError(
-                "Trades must contain 'Trade Value'."
+
+                "Trades cannot be empty."
+
             )
 
-        if trades.empty:
+        for trade in trades:
 
-            raise ValueError(
-                "Trades are empty."
-            )
-        
+            if not isinstance(
+                trade,
+                Trade
+            ):
+
+                raise TypeError(
+
+                    "All items must be Trade objects."
+
+                )
+
+            trade.validate()    
     # ========================================================
     # COMMISSION
     # ========================================================
 
     def commission_cost(
         self,
-        trades: pd.DataFrame
-    ):
+        trades: list[Trade]
+    ) -> float:
+
+        """
+        Estimate total commissions for a list of trades.
+        """
 
         self._validate_trades(
+
             trades
+
         )
 
-        traded = np.abs(
+        traded = sum(
 
-            trades[
-                "Trade Value"
-            ]
+            trade.trade_value
 
-        ).sum()
+            for trade in trades
 
-        return (
+        )
+
+        self.last_trade_value = traded
+
+        commission = (
 
             traded
 
@@ -130,14 +152,18 @@ class TransactionCostModel(BaseObject):
 
         )
 
+        self.last_cost = commission
+
+        return commission
+
     # ========================================================
     # SLIPPAGE
     # ========================================================
 
     def slippage_cost(
-        self,
-        trades: pd.DataFrame
-    ):
+    self,
+    trades: list[Trade]
+) -> float:
 
         self._validate_trades(
             trades
@@ -168,28 +194,24 @@ class TransactionCostModel(BaseObject):
         shares: float,
         price: float
     ) -> float:
+        """
+        Estimate the total transaction cost.
+        """
 
-        """
-        Estimate total transaction cost.
-        """
+        trade_value = shares * price
 
         commission, slippage = self.estimate(
-
             shares,
-
             price
-
         )
 
-        return (
+        total = commission + slippage
 
-            commission
+        self.last_trade_value = trade_value
+        self.last_cost = total
 
-            +
+        return total
 
-            slippage
-
-        )
     # ========================================================
     # ESTIMATE
     # ========================================================
@@ -199,7 +221,6 @@ class TransactionCostModel(BaseObject):
         shares: float,
         price: float
     ) -> tuple[float, float]:
-
         """
         Estimate commission and slippage for a trade.
 
@@ -208,68 +229,73 @@ class TransactionCostModel(BaseObject):
         (commission, slippage)
         """
 
+        # ========================================================
+        # INPUT VALIDATION
+        # ========================================================
+
+        if not isinstance(shares, (int, float)):
+            raise TypeError(
+                "shares must be numeric."
+            )
+
+        if not isinstance(price, (int, float)):
+            raise TypeError(
+                "price must be numeric."
+            )
+
+        if shares < 0:
+            raise ValueError(
+                "shares cannot be negative."
+            )
+
+        if price < 0:
+            raise ValueError(
+                "price cannot be negative."
+            )
+
+        # ========================================================
+        # CALCULATIONS
+        # ========================================================
+
         trade_value = (
-
             shares
-
-            *
-
-            price
-
+            * price
         )
 
         commission = (
-
             trade_value
-
-            *
-
-            self.commission_rate
-
+            * self.commission_rate
         )
 
         slippage = (
-
             trade_value
-
-            *
-
-            self.slippage_rate
-
+            * self.slippage_rate
         )
 
         return (
-
             commission,
-
             slippage
-
-        )    
-    
+        )
     # ========================================================
     # SUMMARY
     # ========================================================
 
     def summary(
         self
-    ):
+    ) -> dict:
 
         return {
 
             "commission_rate":
-
                 self.commission_rate,
 
             "slippage_rate":
-
                 self.slippage_rate,
 
             "last_trade_value":
-
                 self.last_trade_value,
 
             "last_cost":
-
                 self.last_cost
 
         }
@@ -281,7 +307,7 @@ class TransactionCostModel(BaseObject):
     @property
     def metadata(
         self
-    ):
+    ) -> dict:
 
         metadata = super().metadata
 
@@ -299,21 +325,24 @@ class TransactionCostModel(BaseObject):
 
     def to_dict(
         self
-    ):
+    ) -> dict:
 
         return {
 
             "metadata":
-
                 self.metadata,
 
             "commission_rate":
-
                 self.commission_rate,
 
             "slippage_rate":
+                self.slippage_rate,
 
-                self.slippage_rate
+            "last_trade_value":
+                self.last_trade_value,
+
+            "last_cost":
+                self.last_cost
 
         }
 
@@ -324,29 +353,32 @@ class TransactionCostModel(BaseObject):
     @classmethod
     def from_dict(
         cls,
-        data
-    ):
+        data: dict
+    ) -> "TransactionCostModel":
 
-        return cls(
+        obj = cls(
 
             commission_rate=data.get(
-
                 "commission_rate",
-
                 0.0005
-
             ),
 
             slippage_rate=data.get(
-
                 "slippage_rate",
-
                 0.0010
-
             )
 
         )
-    
+
+        obj.last_trade_value = data.get(
+            "last_trade_value"
+        )
+
+        obj.last_cost = data.get(
+            "last_cost"
+        )
+
+        return obj
     # ========================================================
     # HEALTH CHECK
     # ========================================================
@@ -377,25 +409,33 @@ class TransactionCostModel(BaseObject):
 # REGRESSION TESTS
 # ============================================================
 
+
 def test_transaction_cost_model():
 
-    trades = pd.DataFrame(
+    trades = [
 
-        {
+    Trade(
+        ticker="SPY",
+        shares=20,
+        price=500.0,
+        side="BUY"
+    ),
 
-            "Trade Value": [
+    Trade(
+        ticker="QQQ",
+        shares=10,
+        price=500.0,
+        side="SELL"
+    ),
 
-                10000.0,
-
-                -5000.0,
-
-                20000.0
-
-            ]
-
-        }
-
+    Trade(
+        ticker="TLT",
+        shares=40,
+        price=500.0,
+        side="BUY"
     )
+
+]
 
     model = TransactionCostModel(
 
@@ -467,37 +507,95 @@ def test_transaction_cost_model():
 
     total = model.total_cost(
 
-        trades
+    shares=100,
 
-    )
+    price=500.0
 
-    assert np.isclose(
+)
 
-        total,
+    expected_total = (
 
-        expected_commission
+    100
+
+    * 500.0
+
+    * (
+
+        model.commission_rate
 
         +
 
-        expected_slippage
+        model.slippage_rate
 
     )
+
+)
+
+    assert np.isclose(
+
+    total,
+
+    expected_total
+
+)
 
     # ========================================================
     # ESTIMATE
     # ========================================================
 
-    estimate = model.estimate(
+    shares = 100
 
-        trades
+    price = 350.0
+
+    commission, slippage = model.estimate(
+
+        shares,
+
+        price
+
+    )
+
+    expected_commission = (
+
+        shares
+
+        *
+
+        price
+
+        *
+
+        model.commission_rate
+
+    )
+
+    expected_slippage = (
+
+        shares
+
+        *
+
+        price
+
+        *
+
+        model.slippage_rate
 
     )
 
     assert np.isclose(
 
-        estimate,
+        commission,
 
-        total
+        expected_commission
+
+    )
+
+    assert np.isclose(
+
+        slippage,
+
+        expected_slippage
 
     )
 
@@ -507,11 +605,15 @@ def test_transaction_cost_model():
 
     summary = model.summary()
 
+    print("\nSummary:", summary)
+    print("last_trade_value:", summary["last_trade_value"])
+    print("last_cost:", summary["last_cost"])
+
     assert summary["commission_rate"] == 0.0005
 
     assert summary["slippage_rate"] == 0.0010
 
-    assert summary["last_trade_value"] == 35000.0
+    assert summary["last_trade_value"] == 50000.0
 
     assert summary["last_cost"] == total
 
@@ -553,17 +655,19 @@ def test_transaction_cost_model():
 
         model.estimate(
 
-            pd.DataFrame()
+            pd.DataFrame(),
+
+            100.0
 
         )
 
         raise AssertionError(
 
-            "Expected ValueError"
+            "Expected TypeError"
 
         )
 
-    except ValueError:
+    except TypeError:
 
         pass
 

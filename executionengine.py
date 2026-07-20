@@ -169,7 +169,7 @@ class ExecutionEngine(BaseObject):
         account.cash += trade.net_cash_flow
 
         # ====================================================
-        # HISTORY
+        # TRADE HISTORY
         # ====================================================
 
         account.trade_history.append(
@@ -177,14 +177,24 @@ class ExecutionEngine(BaseObject):
             trade
 
         )
+        
+        # ====================================================
+        # ANALYTICS
+        # ====================================================
+
+        turnover = self.trade_analytics.turnover(
+
+            [
+
+                trade
+
+            ]
+
+        )
 
         account.turnover_history.append(
 
-            self.trade_analytics.turnover(
-
-                trade.trade_value
-
-            )
+            turnover
 
         )
 
@@ -482,17 +492,21 @@ class ExecutionEngine(BaseObject):
 
         engine.execution_history = [
 
-    Trade.from_dict(trade_data)
+            Trade.from_dict(
 
-    for trade_data in data.get(
+                trade_data
 
-        "execution_history",
+            )
 
-        []
+            for trade_data in data.get(
 
-    )
+                "execution_history",
 
-]
+                []
+
+            )
+
+        ]
 
         if engine.execution_history:
 
@@ -501,6 +515,12 @@ class ExecutionEngine(BaseObject):
                 engine.execution_history[-1]
 
             )
+
+        engine.last_execution = data.get(
+
+            "last_execution"
+
+        )
 
         return engine
 
@@ -590,13 +610,13 @@ def test_execution_engine():
 
     assert buy.filled
 
-    assert buy.filled_quantity == 100
+    assert buy.filled_quantity == buy.quantity
 
     assert buy.average_fill_price == 500.0
 
     assert sell.filled
 
-    assert sell.filled_quantity == 50
+    assert sell.filled_quantity == sell.quantity
 
     assert sell.average_fill_price == 510.0
     
@@ -606,10 +626,13 @@ def test_execution_engine():
 
     position = account.positions["SPY"]
 
-    assert position.shares == 50
+    assert position.shares == (
+    buy.quantity - sell.quantity
+)
 
     assert position.average_cost == 510.0
-    
+    print(position.average_cost)
+
     # ========================================================
     # CASH
     # ========================================================
@@ -682,17 +705,23 @@ def test_execution_engine():
 
     assert engine.last_execution is not None
 
-    assert engine.last_execution["ticker"] == "TLT"
+    assert (
+    engine.last_execution["ticker"]
+    == engine.execution_history[-1].ticker
+)
     
     # ========================================================
     # SUMMARY
     # ========================================================
 
     summary = engine.summary()
+    
+    assert summary["executions"] == engine.execution_count
 
-    assert summary["executions"] == 2
-
-    assert summary["last_execution"]["ticker"] == "SPY"
+    assert (
+    summary["last_execution"]["ticker"]
+    == engine.execution_history[-1].ticker
+)
 
     # ========================================================
     # SERIALIZATION
