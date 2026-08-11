@@ -774,3 +774,59 @@ ReconciliationEngine
 PostTradeExecutionMonitor
   ↓
 ExecutionAnalytics
+
+
+
+                    MARKET DATA
+                        │
+                        ▼
+              ┌──────────────────┐
+              │ Macro / Regime   │
+              │ Detection        │
+              └────────┬─────────┘
+                       │
+                       ▼
+              ┌──────────────────┐
+              │ Forecast / Alpha │
+              │ Engine           │
+              └────────┬─────────┘
+                       │
+                       ▼
+              ┌──────────────────┐
+              │ Expected Return  │
+              │ Model            │
+              └────────┬─────────┘
+                       │
+                       ▼
+              ┌──────────────────┐
+              │ Risk / Covariance│
+              │ Architecture     │
+              └────────┬─────────┘
+                       │
+                       ▼
+              ┌──────────────────┐
+              │ Black-Litterman  │
+              │ / Portfolio      │
+              │ Optimizer        │
+              └────────┬─────────┘
+                       │
+                       ▼
+              ┌──────────────────┐
+              │ Constraints /    │
+              │ Risk Budgeting   │
+              └────────┬─────────┘
+                       │
+                       ▼
+                TARGET PORTFOLIO
+                       │
+                       ▼
+                REBALANCE ENGINE
+                       │
+                       ▼
+                TRADE GENERATOR
+                       │
+                       ▼
+              ─── EXECUTION STACK ───
+                       │
+                       ▼
+                  ANALYTICS
