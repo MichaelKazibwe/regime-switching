@@ -543,14 +543,11 @@ def test_execution_engine():
     # ========================================================
 
     buy = Order(
-
-        ticker="SPY",
-
-        side="BUY",
-
-        quantity=100
-
-    )
+    order_id="ORD-EXEC-000001",
+    ticker="SPY",
+    side="BUY",
+    quantity=100
+)
 
     trade = engine.execute(
 
@@ -579,14 +576,11 @@ def test_execution_engine():
     # ========================================================
 
     sell = Order(
-
-        ticker="SPY",
-
-        side="SELL",
-
-        quantity=40
-
-    )
+    order_id="ORD-EXEC-000002",
+    ticker="SPY",
+    side="SELL",
+    quantity=40
+)
 
     engine.execute(
 
@@ -648,6 +642,7 @@ def test_execution_engine():
         (
 
             Order(
+                order_id="ORD-EXEC-000003",
 
                 ticker="QQQ",
 
@@ -664,6 +659,8 @@ def test_execution_engine():
         (
 
             Order(
+
+                order_id="ORD-EXEC-000004",
 
                 ticker="TLT",
 

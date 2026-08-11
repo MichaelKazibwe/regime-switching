@@ -186,21 +186,23 @@ class RebalanceEngine(BaseObject):
 
             orders.append(
 
-                Order(
+            Order(
 
-                    ticker=ticker,
+              order_id=f"ORD-REBAL-{len(orders) + 1:06d}",
 
-                    side=side,
+              ticker=ticker,
 
-                    quantity=abs(
+              side=side,
 
-                        difference
+              quantity=abs(
 
-                    )
+                difference
 
-                )
+        )
 
-            )
+    )
+
+)
 
         self.last_orders = orders
 

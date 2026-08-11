@@ -372,3 +372,405 @@ before release.
 | FactorExposureModel | Planned | Not Started |
 | Portfolio | Planned | Not Started |
 | ExecutionEngine | Planned | Not Started |
+
+                    ┌─────────────────────┐
+                    │   RebalanceEngine   │
+                    └──────────┬──────────┘
+                               │
+                               ▼
+                    ┌─────────────────────┐
+                    │        OMS          │
+                    │                     │
+                    │  Order Submission   │
+                    │  Validation         │
+                    │  Order Lifecycle    │
+                    │  Cancellation       │
+                    │  Rejection          │
+                    │  Execution Routing  │
+                    └──────┬───────┬──────┘
+                           │       │
+                ┌──────────┘       └──────────┐
+                ▼                             ▼
+        ┌──────────────┐              ┌──────────────┐
+        │  OrderBook   │              │ Execution    │
+        │              │              │ Engine       │
+        └──────────────┘              └──────┬───────┘
+                                             │
+                                             ▼
+                                      ┌──────────────┐
+                                      │    Trade     │
+                                      └──────────────┘
+
+
+CORE              ████████████████████  Stable
+DATA              ████████████████████  Stable
+UNIVERSE          ████████████████████  Stable
+FORECAST          ████████████████████  Stable
+COVARIANCE        ████████████████████  Stable
+RISK              ████████████████████  Stable
+PORTFOLIO         ███████████░░░░░░░░░  Development
+ANALYTICS         █████████████████░░░  Integration
+SIMULATION        ███████████████░░░░░  Development
+EXECUTION         ████████████████░░░░  Integration
+LIVE TRADING      ███░░░░░░░░░░░░░░░░░  Planned
+
+MARKET DATA
+     ↓
+UNIVERSE
+     ↓
+FORECAST
+     ↓
+COVARIANCE
+     ↓
+RISK
+     ↓
+PORTFOLIO
+     ↓
+REBALANCE
+     ↓
+OMS
+     ↓
+ORDER BOOK
+     ↓
+EXECUTION ENGINE
+     ↓
+TRADE
+     ↓
+PORTFOLIO ACCOUNT
+
+                    RebalanceEngine
+                           │
+                           ▼
+                    ┌─────────────┐
+                    │     OMS     │
+                    └──────┬──────┘
+                           │
+             ┌─────────────┼─────────────┐
+             ▼             ▼             ▼
+        Validation     Risk Gates    Duplicate Check
+             │             │             │
+             └─────────────┼─────────────┘
+                           ▼
+                    ┌─────────────┐
+                    │  OrderBook  │
+                    └──────┬──────┘
+                           │
+             ┌─────────────┼─────────────┐
+             ▼             ▼             ▼
+         Submit        Cancel        Reject
+             │             │             │
+             └─────────────┼─────────────┘
+                           ▼
+                  ExecutionEngine
+                           │
+                           ▼
+                         Trade
+                           │
+                           ▼
+                   PortfolioAccount
+                           │
+                           ▼
+                    Reconciliation
+
+
+test_oms()
+│
+├── lifecycle_oms
+│   ├── submit
+│   ├── execute
+│   ├── cancel
+│   └── reject
+│
+├── risk_oms
+│   ├── risk approval
+│   └── risk rejection
+│
+└── serialization / health
+
+Portfolio / Rebalance
+        │
+        ▼
+       OMS
+        │
+        ▼
+PreTradeRiskGate
+        │
+   ┌────┴────┐
+   │         │
+REJECT     APPROVE
+   │         │
+   │         ▼
+   │     OrderBook
+   │         │
+   │         ▼
+   │  ExecutionEngine
+   │         │
+   │         ▼
+   │       Trade
+   │         │
+   └─────────┴──────► PortfolioAccount
+
+Portfolio Target
+      │
+      ▼
+RebalanceEngine
+      │
+      ▼
+TradeGenerator        ← WHAT should we trade?
+      │
+      ▼
+PreTradeRiskGate      ← Is the proposed trade allowed?
+      │
+      ▼
+OMS                   ← Manage the order lifecycle
+      │
+      ▼
+BrokerRouter          ← WHERE/HOW should the order be routed?
+      │
+      ▼
+ExecutionEngine / Broker
+      │
+      ▼
+Trade
+
+TradeGenerator
+├── target/current position reconciliation
+├── delta calculation
+├── BUY/SELL determination
+├── quantity generation
+├── minimum trade threshold
+├── deterministic order IDs
+├── Order creation
+├── batch generation
+├── metadata
+├── health_check()
+├── to_dict()
+├── from_dict()
+└── regression tests
+
+Current Portfolio
+       │
+       ▼
+Target Portfolio
+       │
+       ▼
+TradeGenerator
+       │
+       ├── BUY orders
+       ├── SELL orders
+       └── no-op / threshold filtering
+              │
+              ▼
+            Order
+              │
+              ▼
+        PreTradeRiskGate
+              │
+              ▼
+             OMS
+
+BrokerRouter
+     │
+     ▼
+PaperBroker
+     │
+     ├── accepts routed orders
+     ├── maintains broker-side order state
+     ├── supports cancellation
+     ├── simulates fills deterministically
+     ├── records execution receipts
+     ├── NEVER modifies PortfolioAccount
+     └── NEVER bypasses OMS
+
+
+                  EXECUTION STACK
+
+TradeGenerator
+      │
+      ▼
+PreTradeRiskGate
+      │
+      ▼
+OMS
+      │
+      ▼
+BrokerRouter
+      │
+      ▼
+PaperBroker
+      │
+      │  broker-side execution receipt
+      ▼
+Execution / Accounting Layer
+      │
+      ▼
+PortfolioAccount
+
+
+TradeGenerator
+      │
+      ▼
+PreTradeRiskGate
+      │
+      ▼
+OMS
+      │
+      ▼
+BrokerRouter
+      │
+      ▼
+PaperBroker
+      │
+      ├── Broker acknowledgement
+      ├── Broker Order ID
+      ├── Partial fill
+      ├── Full fill
+      ├── Cancellation
+      ├── Rejection
+      └── Execution receipt
+             │
+             ▼
+       Execution / Accounting
+
+
+RebalanceEngine
+       │
+       ▼
+TradeGenerator
+       │
+       ▼
+PreTradeRiskGate
+       │
+       ▼
+OMS
+       │
+       ▼
+BrokerRouter
+       │
+       ├───────────────┐
+       ▼               ▼
+ PaperBroker        LiveBroker
+       │
+       ▼
+Execution Receipt
+       │
+       ▼
+ExecutionEngine
+       │
+       ▼
+PortfolioAccount
+
+
+Portfolio
+    ↓
+RebalanceEngine
+    ↓
+TradeGenerator
+    ↓
+PreTradeRiskGate
+    ↓
+OMS
+    ↓
+BrokerRouter
+    ↓
+PaperBroker
+    ↓
+BrokerExecutionEngine
+    ↓
+ExecutionEngine
+    ↓
+Trade
+    ↓
+PortfolioAccount
+    ↓
+Reconciliation
+
+RebalanceEngine
+      ↓
+TradeGenerator
+      ↓
+PreTradeRiskGate
+      ↓
+OMS
+      ↓
+BrokerRouter
+      ↓
+PaperBroker
+      ↓
+BrokerExecutionEngine
+      ↓
+ExecutionEngine
+      ↓
+PortfolioAccount
+      ↓
+Reconciliation
+
+                 OMS
+                  │
+                  ▼
+            BrokerRouter
+                  │
+        ┌─────────┴─────────┐
+        ▼                   ▼
+   PaperBroker          LiveBroker
+        │                   │
+        └─────────┬─────────┘
+                  ▼
+       BrokerExecutionEngine
+                  │
+                  ▼
+        Execution Receipt
+                  │
+                  ▼
+       ┌───────────────────┐
+       │ Reconciliation    │
+       │ Engine            │
+       └─────────┬─────────┘
+                 │
+        ┌────────┼────────┐
+        ▼        ▼        ▼
+      OMS      Broker   Account
+     State      State    State
+
+ReconciliationEngine
+        │
+        ├── observes OMS
+        ├── observes broker
+        ├── observes account
+        │
+        └── produces decision
+                 │
+                 ├── MATCHED
+                 └── DISCREPANCY
+
+Order
+  ↓
+OrderStatus
+  ↓
+OrderBook
+  ↓
+TransactionCostModel
+  ↓
+ExecutionEngine
+  ↓
+RebalanceEngine
+  ↓
+TradeGenerator
+  ↓
+PreTradeRiskGate
+  ↓
+OMS
+  ↓
+BrokerRouter
+  ↓
+PaperBroker
+  ↓
+BrokerExecutionEngine
+  ↓
+LiveBroker
+  ↓
+ReconciliationEngine
+  ↓
+PostTradeExecutionMonitor
+  ↓
+ExecutionAnalytics
