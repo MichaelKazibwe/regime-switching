@@ -830,3 +830,304 @@ ExecutionAnalytics
                        │
                        ▼
                   ANALYTICS
+
+                    MARKET / PORTFOLIO STATE
+                              │
+                              ▼
+                    ┌─────────────────────┐
+                    │ PortfolioDecision   │
+                    │ Engine               │
+                    └──────────┬──────────┘
+                               │
+             ┌─────────────────┼─────────────────┐
+             │                 │                 │
+             ▼                 ▼                 ▼
+        MacroRegime       Expected Return     Covariance
+             │                 │                 │
+             └─────────────────┼─────────────────┘
+                               ▼
+                       Black-Litterman
+                               │
+                               ▼
+                     Portfolio Optimizer
+                               │
+                               ▼
+                       Constraints
+                               │
+                               ▼
+                         Risk Model
+                               │
+                               ▼
+                   Risk Contributions
+                               │
+                               ▼
+                     Scenario Analysis
+                               │
+                               ▼
+                    ┌───────────────────┐
+                    │ PortfolioDecision │
+                    └─────────┬─────────┘
+                              │
+                              ▼
+                      RebalanceEngine
+                              │
+                              ▼
+                       TradeGenerator
+                              │
+                              ▼
+                       Execution Stack
+
+#==============================
+#portfolio decision engine
+#==============================
+
+INPUT
+  ↓
+TICKERS
+  ↓
+REGIME
+  ↓
+EXPECTED RETURNS
+  ↓
+COVARIANCE
+  ↓
+BLACK-LITTERMAN
+  ↓
+OPTIMIZATION
+  ↓
+CONSTRAINTS
+  ↓
+WEIGHT VALIDATION
+  ↓
+RISK METRICS
+  ↓
+PORTFOLIO METRICS
+  ↓
+SCENARIOS
+  ↓
+APPROVED / REJECTED
+  ↓
+PortfolioDecision
+  ↓
+AUDIT + SUMMARY + SERIALIZATION
+
+
+                    MARKET DATA
+                         │
+                         ▼
+                 ┌───────────────┐
+                 │ AssetUniverse │
+                 └───────┬───────┘
+                         │
+             ┌───────────┴───────────┐
+             ▼                       ▼
+       MacroRegimeModel       ExpectedReturnForecaster
+             │                       │
+             │                       │
+             └───────────┬───────────┘
+                         ▼
+                 Regime Selection
+                         │
+                         ▼
+              ┌────────────────────┐
+              │ RegimeCovariance   │
+              │        +           │
+              │ EnsembleCovariance │
+              │        +           │
+              │ FactorCovariance   │
+              └──────────┬─────────┘
+                         │
+                         ▼
+                 Covariance Matrix
+                         │
+                         ▼
+              ┌────────────────────┐
+              │ Black-Litterman    │
+              └──────────┬─────────┘
+                         │
+                         ▼
+              Posterior Expected Return
+                         │
+                         ▼
+              ┌────────────────────┐
+              │ PortfolioOptimizer │
+              └──────────┬─────────┘
+                         │
+                         ▼
+              PortfolioConstraints
+                         │
+                         ▼
+                  RiskModel
+                         │
+                         ▼
+             RiskContributionAnalyzer
+                         │
+                         ▼
+                  ScenarioEngine
+                         │
+                         ▼
+             PortfolioDecisionEngine
+                         │
+                         ▼
+                Portfolio Target
+                         │
+                         ▼
+                  RebalanceEngine
+                         │
+                         ▼
+                 TradeGenerator
+                         │
+                         ▼
+                 PreTradeRiskGate
+                         │
+                         ▼
+                       OMS
+                         │
+                         ▼
+                  BrokerRouter
+                         │
+                         ▼
+                   PaperBroker
+                         │
+                         ▼
+             BrokerExecutionEngine
+                         │
+                         ▼
+                 ExecutionEngine
+                         │
+                         ▼
+                PortfolioAccount
+
+#===============================
+# Risk budget engine
+#===============================
+
+                    PRODUCTION COMPOSITION
+                             │
+          ┌──────────────────┼──────────────────┐
+          │                  │                  │
+          ▼                  ▼                  ▼
+   RiskBudgetEngine   ExpectedReturn       Black-Litterman
+          │             Forecaster             Model
+          │                  │                  │
+          └──────────────────┼──────────────────┘
+                             ▼
+                    PortfolioOptimizer
+                             │
+                    ┌────────┴────────┐
+                    │                 │
+                    ▼                 ▼
+               Constraints       Risk Budgets
+                    │
+                    ▼
+             PortfolioDecisionEngine
+
+IV-B.5 Execution Gate
+        │
+        ▼
+IV-B.3 Decision Execution       ✅
+        │
+        ▼
+IV-B.2 Integration              ✅
+        │
+        ▼
+Portfolio Decision Engine       ✅
+        │
+        ├── Asset Universe       ✅
+        ├── Regime Model         ✅
+        ├── Expected Returns     ✅
+        ├── Covariance           ✅
+        ├── Regime Covariance    ✅
+        ├── Ensemble Covariance  ✅
+        ├── Black-Litterman      ✅
+        ├── Optimizer            ✅
+        ├── Constraints          ✅
+        ├── Risk Model           ✅
+        ├── Risk Contribution    ✅
+        └── Scenario Engine      ✅
+
+
+                    ┌──────────────────────┐
+                    │   Market / Portfolio │
+                    │        State         │
+                    └──────────┬───────────┘
+                               │
+                               ▼
+                  ┌─────────────────────────┐
+                  │ PortfolioDecisionEngine │
+                  │        PHASE IV-A       │
+                  └───────────┬─────────────┘
+                              │
+             ┌────────────────┼────────────────┐
+             │                │                │
+             ▼                ▼                ▼
+       Regime Model      Expected Return    Covariance
+                                              │
+                         ┌────────────────────┼──────────────┐
+                         │                    │              │
+                         ▼                    ▼              ▼
+                  CovarianceEngine    RegimeCovariance   Factor...
+                         │                    │
+                         └─────────┬──────────┘
+                                   ▼
+                         EnsembleCovariance
+                            60% base
+                            40% regime
+                                   │
+                                   ▼
+                         Black-Litterman
+                                   │
+                                   ▼
+                           PortfolioOptimizer
+                                   │
+                    ┌──────────────┴──────────────┐
+                    ▼                             ▼
+             RiskBudgetEngine             Constraints
+                    │
+                    ▼
+             Risk Contribution
+                    │
+                    ▼
+             Scenario Analysis
+                    │
+                    ▼
+              Portfolio Decision
+                    │
+                    ▼
+             ┌─────────────────┐
+             │  IV-B PIPELINE  │
+             └────────┬────────┘
+                      │
+          ┌───────────┼───────────┐
+          ▼           ▼           ▼
+       Decision     Risk       Execution
+       Execution  Validation     Gate
+          │           │           │
+          └───────────┴───────────┘
+                      │
+                      ▼
+             Production Pipeline
+
+market/returns
+      ↓
+regime
+      ↓
+expected returns
+      ↓
+base covariance
+      +
+regime covariance
+      ↓
+60/40 ensemble
+      ↓
+Black-Litterman
+      ↓
+optimizer
+      ↓
+RiskBudgetEngine
+      ↓
+PortfolioDecision
+      ↓
+ProductionRiskValidation
+      ↓
+ExecutionGate

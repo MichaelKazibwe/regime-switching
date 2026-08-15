@@ -1,125 +1,241 @@
-"""
-===============================================================
-COVARIANCE ENGINE
+# ======================================================================
+# COVARIANCE ENGINE
+# ======================================================================
 
+"""
 Institutional covariance estimation engine.
 
 Provides a unified interface for covariance estimation,
 validation, diagnostics and state management.
 
-Current estimators
-
-    • Ledoit-Wolf
-    • EWMA
-    • Rolling
-
-Future estimators
-
-    • Regime Covariance
-    • Factor Covariance
-    • Ensemble Covariance
-
-===============================================================
+Supported estimators
+--------------------
+- Ledoit-Wolf
+- EWMA
+- Rolling
 """
+
+# ======================================================================
+# SECTION 1
+# IMPORTS
+# ======================================================================
+
+from __future__ import annotations
 
 import numpy as np
 import pandas as pd
 
 from sklearn.covariance import LedoitWolf
-from basecovariancemodel import BaseCovarianceModel
 
-# ============================================================
+from basecovariancemodel import (
+    BaseCovarianceModel,
+)
+
+
+# ======================================================================
+# SECTION 2
 # COVARIANCE ENGINE
-# ============================================================
+# ======================================================================
 
-class CovarianceEngine(BaseCovarianceModel):
 
+class CovarianceEngine(
+    BaseCovarianceModel,
+):
     """
     Institutional covariance estimation engine.
-
-    Provides a unified interface for multiple covariance
-    estimators together with diagnostics and validation.
-
-    Supported estimators
-
-        • Ledoit-Wolf
-        • EWMA
-        • Rolling
-
-    Every estimator automatically performs
-
-        • Validation
-        • Diagnostics
-        • State tracking
     """
 
-    API_VERSION = "1.0.0"
+    # ------------------------------------------------------------------
+    # 2.1 API METADATA
+    # ------------------------------------------------------------------
 
-    PUBLIC_METHODS = (
-
-        "estimate",
-
-        "ledoit_wolf",
-
-        "ewma",
-
-        "rolling",
-
-        "validate",
-
-        "diagnostics"
-
+    API_VERSION = (
+        "1.0.0"
     )
 
-    def __init__(self):
+    PUBLIC_METHODS = (
+        "estimate",
+        "ledoit_wolf",
+        "ewma",
+        "rolling",
+        "validate",
+        "diagnostics",
+        "health_check",
+    )
+
+    # ==================================================================
+    # 2.2 CONSTRUCTOR
+    # ==================================================================
+
+    def __init__(
+        self,
+    ) -> None:
 
         super().__init__()
 
-        self.last_method = None
+        self.last_method = (
+            None
+        )
 
-        self.last_diagnostics = None
+        self.last_diagnostics = (
+            None
+        )
+
+    # ==================================================================
+    # SECTION 3
+    # METADATA
+    # ==================================================================
 
     @property
     def metadata(
-        self
-    ):
+        self,
+    ) -> dict:
 
-        metadata = super().metadata
+        metadata = (
+            super().metadata
+        )
 
         metadata.update(
-
             {
-
-                "available_methods":
-
-                    self.available_methods,
-
-                "last_method":
-
+                "available_methods": (
+                    self.available_methods
+                ),
+                "last_method": (
                     self.last_method
-
+                ),
             }
-
         )
 
         return metadata
 
-    # ========================================================
+    # ==================================================================
+    # SECTION 4
+    # PRODUCTION HEALTH CHECK
+    # ==================================================================
+
+    def health_check(
+        self,
+    ) -> dict:
+        """
+        Return the production health state.
+
+        Important
+        ---------
+        `validate()` is deliberately NOT called here because validate()
+        requires an actual covariance matrix.
+
+        Health checking validates the component's internal state and
+        production interface rather than manufacturing a covariance
+        matrix merely for diagnostics.
+        """
+
+        try:
+
+            methods = (
+                self.available_methods
+            )
+
+            required_methods = (
+                "ledoit_wolf",
+                "ewma",
+                "rolling",
+                "validate",
+                "diagnostics",
+                "estimate",
+            )
+
+            missing_methods = [
+                method
+                for method in required_methods
+                if not hasattr(
+                    self,
+                    method,
+                )
+            ]
+
+            if missing_methods:
+
+                return {
+                    "api_version": (
+                        self.API_VERSION
+                    ),
+                    "component": (
+                        self.__class__.__name__
+                    ),
+                    "healthy": False,
+                    "error": (
+                        "Missing required covariance "
+                        f"methods: {missing_methods}"
+                    ),
+                }
+
+            if not isinstance(
+                methods,
+                (list, tuple),
+            ):
+
+                return {
+                    "api_version": (
+                        self.API_VERSION
+                    ),
+                    "component": (
+                        self.__class__.__name__
+                    ),
+                    "healthy": False,
+                    "error": (
+                        "available_methods must be "
+                        "a list or tuple."
+                    ),
+                }
+
+            return {
+                "api_version": (
+                    self.API_VERSION
+                ),
+                "component": (
+                    self.__class__.__name__
+                ),
+                "healthy": True,
+                "available_methods": (
+                    list(methods)
+                ),
+                "last_method": (
+                    self.last_method
+                ),
+                "has_estimate": (
+                    self.last_covariance
+                    is not None
+                ),
+            }
+
+        except Exception as exc:
+
+            return {
+                "api_version": (
+                    self.API_VERSION
+                ),
+                "component": (
+                    self.__class__.__name__
+                ),
+                "healthy": False,
+                "error": str(
+                    exc
+                ),
+            }
+
+    # ==================================================================
+    # SECTION 5
     # INTERNAL HELPERS
-    # ========================================================
+    # ==================================================================
 
     @staticmethod
     def _ensure_dataframe(
-        returns
+        returns,
     ):
-
-        """
-        Convert ndarray into DataFrame.
-        """
 
         if isinstance(
             returns,
-            np.ndarray
+            np.ndarray,
         ):
 
             returns = pd.DataFrame(
@@ -128,7 +244,7 @@ class CovarianceEngine(BaseCovarianceModel):
 
         if not isinstance(
             returns,
-            pd.DataFrame
+            pd.DataFrame,
         ):
 
             raise TypeError(
@@ -141,12 +257,8 @@ class CovarianceEngine(BaseCovarianceModel):
     @classmethod
     def _clean_returns(
         cls,
-        returns
+        returns,
     ):
-
-        """
-        Standard preprocessing.
-        """
 
         returns = cls._ensure_dataframe(
             returns
@@ -166,14 +278,8 @@ class CovarianceEngine(BaseCovarianceModel):
 
     @staticmethod
     def _effective_rank(
-        covariance
+        covariance,
     ):
-
-        """
-        Effective matrix rank.
-
-        exp(entropy(eigenvalues))
-        """
 
         eig = np.linalg.eigvalsh(
             covariance
@@ -181,7 +287,7 @@ class CovarianceEngine(BaseCovarianceModel):
 
         eig = np.maximum(
             eig,
-            0.0
+            0.0,
         )
 
         total = eig.sum()
@@ -190,12 +296,18 @@ class CovarianceEngine(BaseCovarianceModel):
 
             return 0.0
 
-        p = eig / total
+        p = (
+            eig
+            / total
+        )
 
-        p = p[p > 0]
+        p = p[
+            p > 0
+        ]
 
         entropy = -np.sum(
-            p * np.log(
+            p
+            * np.log(
                 p
             )
         )
@@ -206,22 +318,19 @@ class CovarianceEngine(BaseCovarianceModel):
             )
         )
 
-    # ========================================================
+    # ==================================================================
+    # SECTION 6
     # VALIDATION
-    # ========================================================
+    # ==================================================================
 
     def validate(
         self,
-        covariance
+        covariance,
     ):
-
-        """
-        Validate covariance matrix.
-        """
 
         covariance = np.asarray(
             covariance,
-            dtype=float
+            dtype=float,
         )
 
         if covariance.ndim != 2:
@@ -230,7 +339,9 @@ class CovarianceEngine(BaseCovarianceModel):
                 "Covariance must be two-dimensional."
             )
 
-        rows, cols = covariance.shape
+        rows, cols = (
+            covariance.shape
+        )
 
         if rows != cols:
 
@@ -247,21 +358,19 @@ class CovarianceEngine(BaseCovarianceModel):
             )
 
         if not np.allclose(
-
             covariance,
-
             covariance.T,
-
-            atol=1e-10
-
+            atol=1e-10,
         ):
 
             raise ValueError(
                 "Covariance matrix is not symmetric."
             )
 
-        eigenvalues = np.linalg.eigvalsh(
-            covariance
+        eigenvalues = (
+            np.linalg.eigvalsh(
+                covariance
+            )
         )
 
         if eigenvalues.min() < -1e-8:

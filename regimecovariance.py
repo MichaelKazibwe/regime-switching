@@ -1,86 +1,223 @@
-import numpy as np
-
-import pandas as pd
-
-from covarianceengine import CovarianceEngine
+# ======================================================================
+# REGIME COVARIANCE
+# ======================================================================
 
 """
-===============================================================
-REGIME COVARIANCE
-
 Institutional regime-aware covariance estimator.
 
-Given historical returns and regime labels, estimates a
-covariance matrix using only observations belonging to the
-requested regime.
-
-Public API
-
-    fit()
-
-    estimate()
-
-    summary()
-
-    available_regimes
-
-===============================================================
+Estimates covariance using observations belonging to the requested
+macro regime.
 """
 
-# ============================================================
+# ======================================================================
+# SECTION 1
+# IMPORTS
+# ======================================================================
+
+from __future__ import annotations
+
+import numpy as np
+import pandas as pd
+
+from covarianceengine import (
+    CovarianceEngine,
+)
+
+
+# ======================================================================
+# SECTION 2
 # REGIME COVARIANCE
-# ============================================================
+# ======================================================================
+
 
 class RegimeCovariance:
-
     """
     Regime-specific covariance estimator.
     """
 
-    API_VERSION = "1.0.0"
+    # ------------------------------------------------------------------
+    # 2.1 API METADATA
+    # ------------------------------------------------------------------
 
-    PUBLIC_METHODS = (
-
-        "fit",
-
-        "estimate",
-
-        "summary"
-
+    API_VERSION = (
+        "1.0.0"
     )
 
-    # ========================================================
-    # CONSTRUCTOR
-    # ========================================================
+    PUBLIC_METHODS = (
+        "fit",
+        "estimate",
+        "summary",
+        "health_check",
+    )
 
-    def __init__(self):
+    # ==================================================================
+    # 2.2 CONSTRUCTOR
+    # ==================================================================
 
-        self.engine = CovarianceEngine()
+    def __init__(
+        self,
+    ) -> None:
 
-        self.returns = None
+        self.engine = (
+            CovarianceEngine()
+        )
 
-        self.regimes = None
+        self.returns = (
+            None
+        )
 
-        self.last_covariance = None
+        self.regimes = (
+            None
+        )
 
-        self.last_regime = None
+        self.last_covariance = (
+            None
+        )
 
-        self.last_observations = None
+        self.last_regime = (
+            None
+        )
 
-        self.last_summary = None
+        self.last_observations = (
+            None
+        )
 
-    # ========================================================
+        self.last_summary = (
+            None
+        )
+
+    # ==================================================================
+    # SECTION 3
+    # HEALTH CHECK
+    # ==================================================================
+
+    def health_check(
+        self,
+    ) -> dict:
+        """
+        Validate the production regime-covariance component.
+
+        The component is healthy before fitting because fitting is a
+        runtime data operation, not a construction requirement.
+        """
+
+        try:
+
+            if not hasattr(
+                self.engine,
+                "estimate",
+            ):
+
+                return {
+                    "api_version": (
+                        self.API_VERSION
+                    ),
+                    "component": (
+                        self.__class__.__name__
+                    ),
+                    "healthy": False,
+                    "error": (
+                        "Underlying CovarianceEngine "
+                        "does not provide estimate()."
+                    ),
+                }
+
+            if not hasattr(
+                self.engine,
+                "health_check",
+            ):
+
+                return {
+                    "api_version": (
+                        self.API_VERSION
+                    ),
+                    "component": (
+                        self.__class__.__name__
+                    ),
+                    "healthy": False,
+                    "error": (
+                        "Underlying CovarianceEngine "
+                        "does not provide health_check()."
+                    ),
+                }
+
+            engine_health = (
+                self.engine.health_check()
+            )
+
+            if not engine_health.get(
+                "healthy",
+                False,
+            ):
+
+                return {
+                    "api_version": (
+                        self.API_VERSION
+                    ),
+                    "component": (
+                        self.__class__.__name__
+                    ),
+                    "healthy": False,
+                    "error": (
+                        "Underlying CovarianceEngine "
+                        "is unhealthy."
+                    ),
+                    "engine_health": (
+                        engine_health
+                    ),
+                }
+
+            return {
+                "api_version": (
+                    self.API_VERSION
+                ),
+                "component": (
+                    self.__class__.__name__
+                ),
+                "healthy": True,
+                "fitted": (
+                    self.returns is not None
+                    and self.regimes is not None
+                ),
+                "available_regimes": (
+                    self.available_regimes
+                ),
+                "last_regime": (
+                    self.last_regime
+                ),
+                "last_observations": (
+                    self.last_observations
+                ),
+            }
+
+        except Exception as exc:
+
+            return {
+                "api_version": (
+                    self.API_VERSION
+                ),
+                "component": (
+                    self.__class__.__name__
+                ),
+                "healthy": False,
+                "error": str(
+                    exc
+                ),
+            }
+
+    # ==================================================================
+    # SECTION 4
     # INTERNAL HELPERS
-    # ========================================================
+    # ==================================================================
 
     @staticmethod
     def _ensure_dataframe(
-        returns
+        returns,
     ):
 
         if not isinstance(
             returns,
-            pd.DataFrame
+            pd.DataFrame,
         ):
 
             raise TypeError(
@@ -91,12 +228,12 @@ class RegimeCovariance:
 
     @staticmethod
     def _ensure_series(
-        regimes
+        regimes,
     ):
 
         if isinstance(
             regimes,
-            list
+            list,
         ):
 
             regimes = pd.Series(
@@ -105,7 +242,7 @@ class RegimeCovariance:
 
         if not isinstance(
             regimes,
-            pd.Series
+            pd.Series,
         ):
 
             raise TypeError(
@@ -117,7 +254,7 @@ class RegimeCovariance:
     def _validate_lengths(
         self,
         returns,
-        regimes
+        regimes,
     ):
 
         if len(
@@ -127,64 +264,61 @@ class RegimeCovariance:
         ):
 
             raise ValueError(
-
                 "Returns and regimes "
-
                 "must have identical length."
-
             )
 
     def _select_regime(
         self,
-        regime
+        regime,
     ):
 
         mask = (
             self.regimes
-            ==
-            regime
+            == regime
         )
 
-        subset = self.returns.loc[
-            mask
-        ]
+        subset = (
+            self.returns.loc[
+                mask
+            ]
+        )
 
         if subset.empty:
 
             raise ValueError(
-
                 f"No observations found "
-
                 f"for regime '{regime}'."
-
             )
 
         return subset
 
-    # ========================================================
+    # ==================================================================
+    # SECTION 5
     # FIT
-    # ========================================================
+    # ==================================================================
 
     def fit(
         self,
         returns,
-        regimes
+        regimes,
     ):
 
-        returns = self._ensure_dataframe(
-            returns
+        returns = (
+            self._ensure_dataframe(
+                returns
+            )
         )
 
-        regimes = self._ensure_series(
-            regimes
+        regimes = (
+            self._ensure_series(
+                regimes
+            )
         )
 
         self._validate_lengths(
-
             returns,
-
-            regimes
-
+            regimes,
         )
 
         self.returns = (
@@ -197,13 +331,14 @@ class RegimeCovariance:
 
         return self
 
-    # ========================================================
+    # ==================================================================
+    # SECTION 6
     # AVAILABLE REGIMES
-    # ========================================================
+    # ==================================================================
 
     @property
     def available_regimes(
-        self
+        self,
     ):
 
         if self.regimes is None:
@@ -211,40 +346,22 @@ class RegimeCovariance:
             return []
 
         return sorted(
-
             self.regimes
             .unique()
             .tolist()
-
         )
-    
-    # ========================================================
+
+    # ==================================================================
+    # SECTION 7
     # ESTIMATE
-    # ========================================================
+    # ==================================================================
 
     def estimate(
         self,
         regime,
         method="ledoit_wolf",
-        **kwargs
+        **kwargs,
     ):
-
-        """
-        Estimate a covariance matrix using only
-        observations belonging to the requested regime.
-
-        Parameters
-        ----------
-        regime : str
-            Regime label.
-
-        method : str
-            Covariance estimation method.
-
-        kwargs
-            Additional arguments passed directly
-            to CovarianceEngine.
-        """
 
         if self.returns is None:
 
@@ -252,56 +369,53 @@ class RegimeCovariance:
                 "fit() must be called before estimate()."
             )
 
-        subset = self._select_regime(
+        subset = (
+            self._select_regime(
+                regime
+            )
+        )
+
+        covariance = (
+            self.engine.estimate(
+                subset,
+                method=method,
+                **kwargs,
+            )
+        )
+
+        self.last_covariance = (
+            covariance
+        )
+
+        self.last_regime = (
             regime
         )
 
-        covariance = self.engine.estimate(
-
-            subset,
-
-            method=method,
-
-            **kwargs
-
-        )
-
-        self.last_covariance = covariance
-
-        self.last_regime = regime
-
-        self.last_observations = len(
-            subset
+        self.last_observations = (
+            len(subset)
         )
 
         self.last_summary = {
-
             "regime": regime,
-
             "method": method,
-
-            "observations": len(
-                subset
+            "observations": (
+                len(subset)
             ),
-
-            "dimension": covariance.shape[0]
-
+            "dimension": (
+                covariance.shape[0]
+            ),
         }
 
         return covariance
 
-    # ========================================================
+    # ==================================================================
+    # SECTION 8
     # SUMMARY
-    # ========================================================
+    # ==================================================================
 
     def summary(
-        self
+        self,
     ):
-
-        """
-        Return information describing the most
-        recent estimation.
-        """
 
         if self.last_summary is None:
 
@@ -313,29 +427,29 @@ class RegimeCovariance:
             self.last_summary
         )
 
-    # ========================================================
+    # ==================================================================
+    # SECTION 9
     # METADATA
-    # ========================================================
+    # ==================================================================
 
     @property
     def metadata(
-        self
-    ):
+        self,
+    ) -> dict:
 
         return {
-
-            "version":
-                self.API_VERSION,
-
-            "available_regimes":
-                self.available_regimes,
-
-            "last_regime":
-                self.last_regime,
-
-            "last_observations":
+            "version": (
+                self.API_VERSION
+            ),
+            "available_regimes": (
+                self.available_regimes
+            ),
+            "last_regime": (
+                self.last_regime
+            ),
+            "last_observations": (
                 self.last_observations
-
+            ),
         }
     
 # ============================================================
