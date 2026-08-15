@@ -35,7 +35,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
-
+import numpy as np
 
 # ----------------------------------------------------------------------
 # 1.2 PRODUCTION COMPOSITION
@@ -489,7 +489,18 @@ class ProductionIntegration:
         macro_data: Any,
     ) -> None:
         """
-        Validate macroeconomic input.
+        Validate macroeconomic input required by MacroRegimeModel.
+
+        Required fields
+        ---------------
+        unemployment:
+            Historical unemployment series.
+
+        yield_spread:
+            Current yield-curve spread.
+
+        inflation:
+            Current inflation measure.
         """
 
         if macro_data is None:
@@ -505,6 +516,97 @@ class ProductionIntegration:
 
             raise ProductionIntegrationError(
                 "Macro data must be a dictionary."
+            )
+
+        required = (
+            "unemployment",
+            "yield_spread",
+            "inflation",
+        )
+
+        missing = [
+            key
+            for key in required
+            if key not in macro_data
+        ]
+
+        if missing:
+
+            raise ProductionIntegrationError(
+                "Macro data is missing required fields: "
+                + ", ".join(missing)
+                + "."
+            )
+
+        unemployment = (
+            macro_data["unemployment"]
+        )
+
+        if unemployment is None:
+
+            raise ProductionIntegrationError(
+                "Macro data 'unemployment' cannot be None."
+            )
+
+        try:
+
+            if len(unemployment) == 0:
+
+                raise ProductionIntegrationError(
+                    "Macro data 'unemployment' cannot be empty."
+                )
+
+        except TypeError as exc:
+
+            raise ProductionIntegrationError(
+                "Macro data 'unemployment' must be a "
+                "non-empty historical series."
+            ) from exc
+
+        try:
+
+            yield_spread = float(
+                macro_data["yield_spread"]
+            )
+
+        except (
+            TypeError,
+            ValueError,
+        ) as exc:
+
+            raise ProductionIntegrationError(
+                "Macro data 'yield_spread' must be numeric."
+            ) from exc
+
+        if not np.isfinite(
+            yield_spread
+        ):
+
+            raise ProductionIntegrationError(
+                "Macro data 'yield_spread' must be finite."
+            )
+
+        try:
+
+            inflation = float(
+                macro_data["inflation"]
+            )
+
+        except (
+            TypeError,
+            ValueError,
+        ) as exc:
+
+            raise ProductionIntegrationError(
+                "Macro data 'inflation' must be numeric."
+            ) from exc
+
+        if not np.isfinite(
+            inflation
+        ):
+
+            raise ProductionIntegrationError(
+                "Macro data 'inflation' must be finite."
             )
 
     # ==================================================================

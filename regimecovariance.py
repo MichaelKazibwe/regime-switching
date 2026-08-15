@@ -205,6 +205,7 @@ class RegimeCovariance:
                 ),
             }
 
+
     # ==================================================================
     # SECTION 4
     # INTERNAL HELPERS
@@ -214,6 +215,9 @@ class RegimeCovariance:
     def _ensure_dataframe(
         returns,
     ):
+        """
+        Validate that returns are provided as a pandas DataFrame.
+        """
 
         if not isinstance(
             returns,
@@ -230,6 +234,19 @@ class RegimeCovariance:
     def _ensure_series(
         regimes,
     ):
+        """
+        Validate and canonicalize regime labels.
+
+        Regime labels are normalized to lowercase strings so that
+        historical data, production model output, and enum values
+        use the same internal representation.
+
+        Examples
+        --------
+        "Expansion"      -> "expansion"
+        "EXPANSION"      -> "expansion"
+        Regime.EXPANSION -> "expansion"
+        """
 
         if isinstance(
             regimes,
@@ -249,6 +266,19 @@ class RegimeCovariance:
                 "Regimes must be a pandas Series."
             )
 
+        regimes = regimes.map(
+            lambda value: (
+                value.value
+                if hasattr(
+                    value,
+                    "value",
+                )
+                else str(
+                    value
+                ).strip().lower()
+            )
+        )
+
         return regimes
 
     def _validate_lengths(
@@ -256,6 +286,9 @@ class RegimeCovariance:
         returns,
         regimes,
     ):
+        """
+        Validate that returns and regime observations are aligned.
+        """
 
         if len(
             returns
@@ -272,10 +305,28 @@ class RegimeCovariance:
         self,
         regime,
     ):
+        """
+        Select observations belonging to the requested regime.
+
+        The requested regime is canonicalized before comparison so
+        that labels such as 'Expansion', 'expansion', and
+        'EXPANSION' all resolve to the same internal regime.
+        """
+
+        canonical_regime = (
+            regime.value
+            if hasattr(
+                regime,
+                "value",
+            )
+            else str(
+                regime
+            ).strip().lower()
+        )
 
         mask = (
             self.regimes
-            == regime
+            == canonical_regime
         )
 
         subset = (
@@ -288,11 +339,11 @@ class RegimeCovariance:
 
             raise ValueError(
                 f"No observations found "
-                f"for regime '{regime}'."
+                f"for regime '{canonical_regime}'."
             )
 
         return subset
-
+ 
     # ==================================================================
     # SECTION 5
     # FIT
@@ -517,13 +568,9 @@ def test_regime_covariance():
     assert set(
         engine.available_regimes
     ) == {
-
-        "Expansion",
-
-        "Recession",
-
-        "Recovery"
-
+        "expansion",
+        "recession",
+        "recovery",
     }
 
     # ========================================================

@@ -823,12 +823,38 @@ class PortfolioDecisionEngine:
         expected_returns: Any = None,
         covariance: Any = None,
     ) -> list[str]:
-        """Determine the portfolio asset universe."""
+        """Determine the portfolio asset universe.
+
+        Supported portfolio contracts
+        ------------------------------
+        1. Nested/object contract:
+
+            {
+                "weights": {
+                    "SPY": 0.25,
+                    "TLT": 0.25,
+                }
+            }
+
+        2. Production flat-weight contract:
+
+            {
+                "SPY": 0.25,
+                "TLT": 0.25,
+            }
+
+        The flat mapping is supported because the production integration
+        boundary explicitly defines portfolio as dict[str, float].
+        """
+
+        # --------------------------------------------------------------
+        # 1. Explicit / nested weights
+        # --------------------------------------------------------------
 
         weights = self._get(
             portfolio,
             "weights",
-            {},
+            None,
         )
 
         if (
@@ -839,11 +865,39 @@ class PortfolioDecisionEngine:
             and weights
         ):
             return [
-                str(
-                    ticker
-                )
+                str(ticker)
                 for ticker in weights
             ]
+
+        # --------------------------------------------------------------
+        # 2. Flat production portfolio mapping
+        # --------------------------------------------------------------
+
+        if isinstance(
+            portfolio,
+            dict,
+        ) and portfolio:
+
+            numeric_items = {
+                str(key): value
+                for key, value in portfolio.items()
+                if isinstance(
+                    value,
+                    (int, float, np.integer, np.floating),
+                )
+                and np.isfinite(
+                    float(value)
+                )
+            }
+
+            if numeric_items:
+                return list(
+                    numeric_items.keys()
+                )
+
+        # --------------------------------------------------------------
+        # 3. Explicit expected-return universe
+        # --------------------------------------------------------------
 
         if (
             isinstance(
@@ -853,11 +907,13 @@ class PortfolioDecisionEngine:
             and expected_returns
         ):
             return [
-                str(
-                    ticker
-                )
+                str(ticker)
                 for ticker in expected_returns
             ]
+
+        # --------------------------------------------------------------
+        # 4. Explicit covariance universe
+        # --------------------------------------------------------------
 
         if (
             isinstance(
@@ -867,15 +923,18 @@ class PortfolioDecisionEngine:
             and covariance
         ):
             return [
-                str(
-                    ticker
-                )
+                str(ticker)
                 for ticker in covariance
             ]
+
+        # --------------------------------------------------------------
+        # 5. Production asset universe
+        # --------------------------------------------------------------
 
         universe = self.asset_universe
 
         if universe is not None:
+
             tickers = getattr(
                 universe,
                 "tickers",
@@ -892,9 +951,7 @@ class PortfolioDecisionEngine:
 
             if tickers:
                 return [
-                    str(
-                        ticker
-                    )
+                    str(ticker)
                     for ticker in tickers
                 ]
 
@@ -1165,26 +1222,79 @@ class PortfolioDecisionEngine:
     ) -> Optional[str]:
         """Identify the active macroeconomic regime."""
 
-        result = self._call(
+        if macro_data is None:
+
+            return None
+
+        if not isinstance(
+            macro_data,
+            dict,
+        ):
+
+            raise ValueError(
+                "Macro data must be a dictionary."
+            )
+
+        unemployment = macro_data.get(
+            "unemployment"
+        )
+
+        yield_spread = macro_data.get(
+            "yield_spread"
+        )
+
+        inflation = macro_data.get(
+            "inflation"
+        )
+
+        if unemployment is None:
+
+            raise ValueError(
+                "Macro data is missing 'unemployment'."
+            )
+
+        if yield_spread is None:
+
+            raise ValueError(
+                "Macro data is missing 'yield_spread'."
+            )
+
+        if inflation is None:
+
+            raise ValueError(
+                "Macro data is missing 'inflation'."
+            )
+
+        classifier = getattr(
             self.regime_model,
-            (
-                "classify",
-                "identify_regime",
-                "predict",
-                "forecast",
-            ),
-            macro_data=macro_data,
-            portfolio=portfolio,
-            data=macro_data,
+            "classify",
+            None,
+        )
+
+        if not callable(
+            classifier
+        ):
+
+            raise ValueError(
+                "Configured regime model does not "
+                "provide a callable classify() method."
+            )
+
+        result = classifier(
+            unemployment,
+            yield_spread,
+            inflation,
         )
 
         if result is None:
+
             return None
 
         if isinstance(
             result,
             Enum,
         ):
+
             return str(
                 result.value
             )
@@ -1193,6 +1303,7 @@ class PortfolioDecisionEngine:
             result,
             str,
         ):
+
             return result
 
         for key in (
@@ -1201,6 +1312,7 @@ class PortfolioDecisionEngine:
             "label",
             "name",
         ):
+
             value = self._get(
                 result,
                 key,
@@ -1208,10 +1320,12 @@ class PortfolioDecisionEngine:
             )
 
             if value is not None:
+
                 if isinstance(
                     value,
                     Enum,
                 ):
+
                     return str(
                         value.value
                     )
@@ -1236,12 +1350,41 @@ class PortfolioDecisionEngine:
         regime: Optional[str],
         tickers: list[str],
     ) -> dict[str, float]:
-        """Estimate expected returns using the configured forecaster."""
+        """Estimate expected returns using the configured forecaster.
+
+        The production ExpectedReturnForecaster contract is:
+
+            forecast(prices)
+
+        Additional portfolio/regime metadata belongs to the decision
+        orchestration layer and must not be passed as the positional
+        price-series argument.
+        """
+
+        if self.expected_return_forecaster is None:
+            raise RuntimeError(
+                "Expected-return forecaster is not configured."
+            )
+
+        forecast_method = getattr(
+            self.expected_return_forecaster,
+            "forecast",
+            None,
+        )
+
+        if callable(forecast_method):
+            result = forecast_method(
+                returns
+            )
+
+            return self._normalize_expected_returns(
+                result,
+                tickers,
+            )
 
         result = self._call(
             self.expected_return_forecaster,
             (
-                "forecast",
                 "estimate",
                 "predict",
             ),
@@ -1251,6 +1394,12 @@ class PortfolioDecisionEngine:
             regime=regime,
             tickers=tickers,
         )
+
+        if result is None:
+            raise RuntimeError(
+                "Expected-return forecaster does not expose "
+                "a compatible forecast, estimate, or predict method."
+            )
 
         return self._normalize_expected_returns(
             result,
