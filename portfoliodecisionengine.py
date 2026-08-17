@@ -553,13 +553,7 @@ class PortfolioDecisionEngine:
             else black_litterman
         )
 
-        self.optimizer = (
-            optimizer
-            if optimizer is not None
-            else self._safe_construct(
-                PortfolioOptimizer
-            )
-        )
+        self.optimizer = optimizer
 
         self.constraints = (
             constraints
@@ -1265,6 +1259,87 @@ class PortfolioDecisionEngine:
                 "Macro data is missing 'inflation'."
             )
 
+        # --------------------------------------------------------------
+        # NORMALIZE HISTORICAL MACRO DATA TO LATEST OBSERVATION
+        # --------------------------------------------------------------
+        #
+        # Macro history may be supplied as pandas Series. The regime
+        # classifier requires scalar current observations.
+        #
+
+        if hasattr(
+            unemployment,
+            "iloc",
+        ):
+
+            if unemployment.empty:
+
+                raise ValueError(
+                    "'unemployment' contains no observations."
+                )
+
+            unemployment = (
+                unemployment.iloc[-1]
+            )
+
+        if hasattr(
+            yield_spread,
+            "iloc",
+        ):
+
+            if yield_spread.empty:
+
+                raise ValueError(
+                    "'yield_spread' contains no observations."
+                )
+
+            yield_spread = (
+                yield_spread.iloc[-1]
+            )
+
+        if hasattr(
+            inflation,
+            "iloc",
+        ):
+
+            if inflation.empty:
+
+                raise ValueError(
+                    "'inflation' contains no observations."
+                )
+
+            inflation = (
+                inflation.iloc[-1]
+            )
+
+        # --------------------------------------------------------------
+        # SCALAR VALIDATION
+        # --------------------------------------------------------------
+
+        try:
+
+            unemployment = float(
+                unemployment
+            )
+
+            yield_spread = float(
+                yield_spread
+            )
+
+            inflation = float(
+                inflation
+            )
+
+        except (
+            TypeError,
+            ValueError,
+        ) as exc:
+
+            raise ValueError(
+                "Macro data must contain numeric "
+                "latest observations."
+            ) from exc
+
         classifier = getattr(
             self.regime_model,
             "classify",
@@ -1514,7 +1589,14 @@ class PortfolioDecisionEngine:
         views: Any,
         market_weights: Any,
     ) -> dict[str, float]:
-        """Apply Black-Litterman posterior returns when configured."""
+        """
+        Apply Black-Litterman posterior returns when configured.
+
+        The production decision engine stores covariance and portfolio
+        information in ticker-keyed structures, while the
+        BlackLittermanModel operates on NumPy arrays. This method acts
+        as the explicit integration adapter between the two contracts.
+        """
 
         if views is None:
             return dict(
@@ -1526,6 +1608,186 @@ class PortfolioDecisionEngine:
                 expected_returns
             )
 
+        tickers = list(
+            expected_returns
+        )
+
+        if not tickers:
+            return {}
+
+        # --------------------------------------------------------------
+        # COVARIANCE
+        # --------------------------------------------------------------
+
+        try:
+
+            covariance_matrix = np.asarray(
+                [
+                    [
+                        self._to_float(
+                            covariance.get(
+                                ticker_i,
+                                {},
+                            ).get(
+                                ticker_j,
+                                0.0,
+                            )
+                        )
+                        for ticker_j in tickers
+                    ]
+                    for ticker_i in tickers
+                ],
+                dtype=float,
+            )
+
+        except (
+            TypeError,
+            ValueError,
+        ):
+
+            return dict(
+                expected_returns
+            )
+
+        if covariance_matrix.shape != (
+            len(tickers),
+            len(tickers),
+        ):
+
+            return dict(
+                expected_returns
+            )
+
+        if not np.isfinite(
+            covariance_matrix
+        ).all():
+
+            return dict(
+                expected_returns
+            )
+
+        # --------------------------------------------------------------
+        # MARKET WEIGHTS
+        # --------------------------------------------------------------
+
+        if market_weights is None:
+
+            return dict(
+                expected_returns
+            )
+
+        if isinstance(
+            market_weights,
+            dict,
+        ):
+
+            market_weight_vector = np.asarray(
+                [
+                    self._to_float(
+                        market_weights.get(
+                            ticker,
+                            0.0,
+                        )
+                    )
+                    for ticker in tickers
+                ],
+                dtype=float,
+            )
+
+        else:
+
+            try:
+
+                market_weight_vector = np.asarray(
+                    market_weights,
+                    dtype=float,
+                ).reshape(-1)
+
+            except (
+                TypeError,
+                ValueError,
+            ):
+
+                return dict(
+                    expected_returns
+                )
+
+        if market_weight_vector.shape != (
+            len(tickers),
+        ):
+
+            return dict(
+                expected_returns
+            )
+
+        if not np.isfinite(
+            market_weight_vector
+        ).all():
+
+            return dict(
+                expected_returns
+            )
+
+        # --------------------------------------------------------------
+        # VIEWS
+        # --------------------------------------------------------------
+
+        if isinstance(
+            views,
+            dict,
+        ):
+
+            view_vector = np.asarray(
+                [
+                    self._to_float(
+                        views.get(
+                            ticker,
+                            0.0,
+                        )
+                    )
+                    for ticker in tickers
+                ],
+                dtype=float,
+            )
+
+        else:
+
+            try:
+
+                view_vector = np.asarray(
+                    views,
+                    dtype=float,
+                ).reshape(-1)
+
+            except (
+                TypeError,
+                ValueError,
+            ):
+
+                return dict(
+                    expected_returns
+                )
+
+        if view_vector.shape != (
+            len(tickers),
+        ):
+
+            return dict(
+                expected_returns
+            )
+
+        if not np.isfinite(
+            view_vector
+        ).all():
+
+            return dict(
+                expected_returns
+            )
+
+        # --------------------------------------------------------------
+        # BLACK-LITTERMAN
+        # --------------------------------------------------------------
+
         result = self._call(
             self.black_litterman,
             (
@@ -1533,10 +1795,9 @@ class PortfolioDecisionEngine:
                 "posterior",
                 "estimate",
             ),
-            expected_returns=expected_returns,
-            covariance=covariance,
-            views=views,
-            market_weights=market_weights,
+            covariance=covariance_matrix,
+            market_weights=market_weight_vector,
+            views=view_vector,
         )
 
         if result is None:
@@ -1546,9 +1807,7 @@ class PortfolioDecisionEngine:
 
         return self._normalize_expected_returns(
             result,
-            list(
-                expected_returns
-            ),
+            tickers,
         )
 
     # ==================================================================

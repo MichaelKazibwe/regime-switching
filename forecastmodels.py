@@ -13,7 +13,9 @@ class MomentumForecast:
         if len(prices) < lookback:
 
             raise ValueError(
-                "Insufficient history"
+              f"Insufficient history for momentum forecast: "
+              f"required {lookback} observations, "
+              f"received {len(prices)}."
             )
 
         momentum = (

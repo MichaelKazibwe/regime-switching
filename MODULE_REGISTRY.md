@@ -1131,3 +1131,47 @@ PortfolioDecision
 ProductionRiskValidation
       ↓
 ExecutionGate
+
+
+REAL HISTORICAL DATA
+        │
+        ├── Prices
+        │     ├── SPY
+        │     ├── EFA
+        │     └── EEM
+        │
+        ├── Macro
+        │     ├── Unemployment
+        │     ├── Yield Spread
+        │     └── Inflation
+        │
+        └── Historical Regimes
+                │
+                ▼
+       INPUT VALIDATION
+                │
+                ▼
+     PortfolioDecisionEngine
+                │
+        ┌───────┴────────┐
+        ▼                ▼
+ Expected Returns    Regime Covariance
+        │                │
+        └───────┬────────┘
+                ▼
+       Covariance Ensemble
+                │
+                ▼
+        Black-Litterman
+                │
+                ▼
+       Risk-Budget Optimizer
+                │
+                ▼
+       Portfolio Constraints
+                │
+                ▼
+          Risk Analysis
+                │
+                ▼
+       APPROVED / REJECTED
