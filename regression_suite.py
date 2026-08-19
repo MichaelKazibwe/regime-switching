@@ -97,6 +97,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 import numpy as np
+import pandas as pd
 
 
 from core_constants import (
@@ -108,6 +109,15 @@ from core_constants import (
 
 from productioncomposition import (
     build_production_engine,
+)
+
+from expectedreturnforecaster import (
+    ExpectedReturnForecaster,
+)
+
+from regimeforecastengine import (
+    RegimeForecastEngine,
+    RegimeForecastPolicy,
 )
 
 # ======================================================================
@@ -201,7 +211,6 @@ REQUIRED_MODULES = (
     "executionanalytics.py",
 )
 
-
 # ======================================================================
 # TEST RESULT
 # ======================================================================
@@ -229,6 +238,164 @@ class TestResult:
 
     reason: Optional[str] = None
 
+
+# ============================================================
+# PHASE 11 — DETERMINISTIC SYNTHETIC PRICE DATA
+# ============================================================
+
+
+def build_phase11_price_data(
+    asset_order,
+    observations=300,
+):
+    """
+    Construct deterministic synthetic price history for
+    forecast and Black-Litterman regression testing.
+
+    The data intentionally contains different deterministic
+    trends across assets so that the forecast components
+    produce non-identical signals.
+
+    No network access is required.
+    """
+
+    if observations < 252:
+        raise ValueError(
+            "Phase 11 requires at least 252 "
+            "price observations."
+        )
+
+    if not asset_order:
+        raise ValueError(
+            "asset_order must contain at least one asset."
+        )
+
+    if len(
+        set(asset_order)
+    ) != len(asset_order):
+        raise ValueError(
+            "asset_order contains duplicate assets."
+        )
+
+    dates = pd.date_range(
+        end=pd.Timestamp("2026-01-30"),
+        periods=observations,
+        freq="B",
+    )
+
+    time_index = np.arange(
+        observations,
+        dtype=float,
+    )
+
+    prices = {}
+
+    for index, asset in enumerate(
+        asset_order
+    ):
+        # --------------------------------------------------------
+        # Deterministic asset-specific trend
+        # --------------------------------------------------------
+
+        trend_strength = (
+            0.00025
+            +
+            0.00004 * index
+        )
+
+        # --------------------------------------------------------
+        # Deterministic cyclical component
+        # --------------------------------------------------------
+
+        cycle = (
+            0.003
+            *
+            np.sin(
+                time_index / 17.0
+                +
+                index * 0.35
+            )
+        )
+
+        # --------------------------------------------------------
+        # Deterministic asset-specific curvature
+        # --------------------------------------------------------
+
+        curvature = (
+            0.0000008
+            *
+            (
+                time_index
+                -
+                observations / 2.0
+            )
+            *
+            (index + 1)
+        )
+
+        daily_returns = (
+            trend_strength
+            +
+            cycle
+            +
+            curvature
+        )
+
+        # --------------------------------------------------------
+        # Price path
+        # --------------------------------------------------------
+
+        price_path = (
+            100.0
+            *
+            np.cumprod(
+                1.0
+                +
+                daily_returns
+            )
+        )
+
+        prices[
+            asset
+        ] = price_path
+
+    price_frame = pd.DataFrame(
+        prices,
+        index=dates,
+    )
+
+    # ------------------------------------------------------------
+    # Structural validation
+    # ------------------------------------------------------------
+
+    assert price_frame.shape == (
+        observations,
+        len(asset_order),
+    )
+
+    assert list(
+        price_frame.columns
+    ) == list(
+        asset_order
+    )
+
+    assert price_frame.index.is_monotonic_increasing
+
+    assert np.isfinite(
+        price_frame.to_numpy(
+            dtype=float
+        )
+    ).all()
+
+    assert (
+        price_frame.to_numpy(
+            dtype=float
+        )
+        >
+        0.0
+    ).all()
+
+    return price_frame
 
 # ======================================================================
 # REGRESSION SUITE
@@ -3726,6 +3893,950 @@ class FullSystemRegression:
 
         return all_passed
 
+    # ==============================================================
+    # PHASE 12B — REGIME-CONDITIONED FORECAST REGRESSION
+    # ==============================================================
+
+    def phase12b_regime_forecast_regression(
+        self,
+    ) -> bool:
+        """
+        Validate the production regime-conditioned forecast engine.
+
+        Phase 12B verifies:
+
+            1. RegimeForecastEngine construction.
+            2. Engine health.
+            3. Regime policy definitions.
+            4. Policy weight invariants.
+            5. Synthetic price compatibility.
+            6. Baseline forecast component availability.
+            7. Component dimensional integrity.
+            8. Component numerical integrity.
+            9. Regime-conditioned forecast construction.
+           10. Asset ordering preservation.
+           11. Cross-regime differentiation.
+           12. Forecast combination invariants.
+           13. Engine state integrity.
+           14. Diagnostic integrity.
+           15. Deterministic repeatability.
+
+        This phase does not modify:
+
+            - PortfolioOptimizer
+            - Black-Litterman
+            - RiskBudgetEngine
+            - VolatilityTargeting
+            - execution modules
+
+        It independently validates the regime-conditioned
+        forecasting layer before downstream integration.
+        """
+
+        self._banner(
+            "PHASE 12B — REGIME-CONDITIONED FORECAST REGRESSION"
+        )
+
+        # ==========================================================
+        # SYNTHETIC PRICE DATA
+        # ==========================================================
+
+        asset_order = [
+            "SPY",
+            "QQQ",
+            "IWM",
+            "VEA",
+            "VWO",
+            "TLT",
+            "IEF",
+            "SHY",
+            "LQD",
+            "HYG",
+            "GLD",
+            "SLV",
+            "DBC",
+            "VNQ",
+        ]
+
+        prices = build_phase11_price_data(
+            asset_order,
+            observations=300,
+        )
+
+        assert isinstance(
+            prices,
+            pd.DataFrame,
+        ), (
+            "Phase 12B synthetic prices must "
+            "be a pandas DataFrame."
+        )
+
+        assert list(
+            prices.columns
+        ) == asset_order, (
+            "Phase 12B synthetic price asset "
+            "ordering does not match asset_order."
+        )
+
+        assert len(prices) >= (
+            ExpectedReturnForecaster
+            .minimum_history()
+        ), (
+            "Phase 12B synthetic price history "
+            "is shorter than the production "
+            "forecast requirement."
+        )
+
+        assert np.isfinite(
+            prices.to_numpy(
+                dtype=float
+            )
+        ).all(), (
+            "Phase 12B synthetic prices contain "
+            "non-finite values."
+        )
+
+        assert (
+            prices.to_numpy(
+                dtype=float
+            )
+            >
+            0.0
+        ).all(), (
+            "Phase 12B synthetic prices contain "
+            "non-positive values."
+        )
+
+        print(
+            f"Price observations: {len(prices)}"
+        )
+
+        print(
+            f"Asset count: {len(asset_order)}"
+        )
+
+        print(
+            "[PASS] Phase 12B synthetic price data"
+        )
+
+        # ==========================================================
+        # ENGINE CONSTRUCTION
+        # ==========================================================
+
+        engine = (
+            RegimeForecastEngine()
+        )
+
+        assert isinstance(
+            engine,
+            RegimeForecastEngine,
+        ), (
+            "Phase 12B failed to construct "
+            "RegimeForecastEngine."
+        )
+
+        assert isinstance(
+            engine.forecaster,
+            ExpectedReturnForecaster,
+        ), (
+            "RegimeForecastEngine does not "
+            "contain ExpectedReturnForecaster."
+        )
+
+        print(
+            "[PASS] Regime forecast engine construction"
+        )
+
+        # ==========================================================
+        # ENGINE HEALTH
+        # ==========================================================
+
+        health = (
+            engine.health_check()
+        )
+
+        assert isinstance(
+            health,
+            dict,
+        ), (
+            "Regime forecast health check "
+            "must return a dictionary."
+        )
+
+        assert (
+            health.get("status")
+            ==
+            "HEALTHY"
+        ), (
+            "Regime forecast engine health "
+            f"check failed: {health}"
+        )
+
+        assert (
+            health.get("api_version")
+            ==
+            RegimeForecastEngine.API_VERSION
+        ), (
+            "Regime forecast engine API version "
+            "does not match."
+        )
+
+        assert (
+            health.get("component")
+            ==
+            RegimeForecastEngine.COMPONENT
+        ), (
+            "Regime forecast engine component "
+            "identifier does not match."
+        )
+
+        assert (
+            health.get("regimes")
+            ==
+            list(
+                RegimeForecastEngine.REGIMES
+            )
+        ), (
+            "Regime forecast engine health "
+            "does not expose the expected regimes."
+        )
+
+        assert (
+            health.get("policy_count")
+            ==
+            len(
+                RegimeForecastEngine.POLICIES
+            )
+        ), (
+            "Regime forecast engine policy count "
+            "is inconsistent."
+        )
+
+        print(
+            f"Regime forecast health: {health}"
+        )
+
+        print(
+            "[PASS] Regime forecast engine health"
+        )
+
+        # ==========================================================
+        # REGIME INVENTORY
+        # ==========================================================
+
+        expected_regimes = (
+            "bull",
+            "neutral",
+            "crisis",
+        )
+
+        assert (
+            RegimeForecastEngine.REGIMES
+            ==
+            expected_regimes
+        ), (
+            "Phase 12B regime inventory does "
+            "not match the production regime set."
+        )
+
+        assert set(
+            RegimeForecastEngine.POLICIES.keys()
+        ) == set(
+            expected_regimes
+        ), (
+            "Phase 12B policy inventory does "
+            "not match the production regime set."
+        )
+
+        print(
+            "[PASS] Regime inventory"
+        )
+
+        # ==========================================================
+        # POLICY VALIDATION
+        # ==========================================================
+
+        for regime in expected_regimes:
+
+            policy = (
+                RegimeForecastEngine
+                .policy_for_regime(
+                    regime
+                )
+            )
+
+            assert isinstance(
+                policy,
+                RegimeForecastPolicy,
+            ), (
+                f"{regime}: invalid forecast "
+                "policy type."
+            )
+
+            policy.validate()
+
+            policy_values = np.asarray(
+                [
+                    policy.momentum,
+                    policy.trend,
+                    policy.mean_reversion,
+                ],
+                dtype=float,
+            )
+
+            assert np.isfinite(
+                policy_values
+            ).all(), (
+                f"{regime}: policy contains "
+                "non-finite values."
+            )
+
+            assert np.all(
+                policy_values >= 0.0
+            ), (
+                f"{regime}: policy contains "
+                "negative weights."
+            )
+
+            assert np.isclose(
+                policy_values.sum(),
+                1.0,
+                atol=1e-12,
+            ), (
+                f"{regime}: forecast policy "
+                "weights do not sum to one."
+            )
+
+            print(
+                f"{regime.upper()} policy: "
+                f"momentum={policy.momentum:.12f}, "
+                f"trend={policy.trend:.12f}, "
+                f"mean_reversion="
+                f"{policy.mean_reversion:.12f}"
+            )
+
+        print(
+            "[PASS] Regime forecast policy invariants"
+        )
+
+        # ==========================================================
+        # REGIME VALIDATION
+        # ==========================================================
+
+        for regime in expected_regimes:
+
+            normalized = (
+                RegimeForecastEngine
+                .validate_regime(
+                    regime
+                )
+            )
+
+            assert (
+                normalized
+                ==
+                regime
+            ), (
+                f"{regime}: regime normalization "
+                "changed a valid regime."
+            )
+
+        assert (
+            RegimeForecastEngine
+            .validate_regime(" BULL ")
+            ==
+            "bull"
+        )
+
+        assert (
+            RegimeForecastEngine
+            .validate_regime("Neutral")
+            ==
+            "neutral"
+        )
+
+        assert (
+            RegimeForecastEngine
+            .validate_regime("CRISIS")
+            ==
+            "crisis"
+        )
+
+        print(
+            "[PASS] Regime validation and normalization"
+        )
+
+        # ==========================================================
+        # INVALID REGIME TEST
+        # ==========================================================
+
+        invalid_regime_rejected = False
+
+        try:
+
+            RegimeForecastEngine.validate_regime(
+                "invalid_regime"
+            )
+
+        except Exception:
+
+            invalid_regime_rejected = True
+
+        assert invalid_regime_rejected, (
+            "Invalid regime was not rejected."
+        )
+
+        print(
+            "[PASS] Invalid regime rejection"
+        )
+
+        # ==========================================================
+        # BASELINE FORECAST COMPONENTS
+        # ==========================================================
+
+        baseline_forecast = (
+            engine.forecaster.forecast(
+                prices
+            )
+        )
+
+        assert isinstance(
+            baseline_forecast,
+            pd.Series,
+        ), (
+            "Baseline expected-return forecast "
+            "must be a pandas Series."
+        )
+
+        assert baseline_forecast.index.equals(
+            prices.columns
+        ), (
+            "Baseline forecast asset ordering "
+            "does not match prices."
+        )
+
+        baseline_values = (
+            baseline_forecast.to_numpy(
+                dtype=float
+            )
+        )
+
+        assert baseline_values.size == (
+            len(asset_order)
+        ), (
+            "Baseline forecast has incorrect "
+            "asset dimension."
+        )
+
+        assert np.isfinite(
+            baseline_values
+        ).all(), (
+            "Baseline forecast contains "
+            "non-finite values."
+        )
+
+        components = (
+            engine.forecaster.last_components
+        )
+
+        assert isinstance(
+            components,
+            dict,
+        ), (
+            "Baseline forecaster did not "
+            "expose component forecasts."
+        )
+
+        required_components = {
+            "momentum",
+            "trend",
+            "mean_reversion",
+        }
+
+        assert required_components <= set(
+            components.keys()
+        ), (
+            "Baseline forecaster is missing "
+            "required forecast components."
+        )
+
+        component_arrays = {}
+
+        for name in (
+            "momentum",
+            "trend",
+            "mean_reversion",
+        ):
+
+            component = components[
+                name
+            ]
+
+            assert isinstance(
+                component,
+                pd.Series,
+            ), (
+                f"{name}: forecast component "
+                "must be a pandas Series."
+            )
+
+            assert component.index.equals(
+                prices.columns
+            ), (
+                f"{name}: asset ordering "
+                "does not match prices."
+            )
+
+            values = component.to_numpy(
+                dtype=float
+            )
+
+            assert values.size == (
+                len(asset_order)
+            ), (
+                f"{name}: incorrect forecast "
+                "dimension."
+            )
+
+            assert np.isfinite(
+                values
+            ).all(), (
+                f"{name}: forecast contains "
+                "non-finite values."
+            )
+
+            component_arrays[
+                name
+            ] = values
+
+        print(
+            "[PASS] Baseline forecast components"
+        )
+
+        # ==========================================================
+        # REGIME FORECASTS
+        # ==========================================================
+
+        forecasts = {}
+
+        for regime in expected_regimes:
+
+            forecast = (
+                engine.forecast(
+                    prices=prices,
+                    regime=regime,
+                )
+            )
+
+            assert isinstance(
+                forecast,
+                pd.Series,
+            ), (
+                f"{regime}: regime forecast "
+                "must be a pandas Series."
+            )
+
+            assert forecast.index.equals(
+                prices.columns
+            ), (
+                f"{regime}: forecast asset "
+                "ordering does not match prices."
+            )
+
+            values = forecast.to_numpy(
+                dtype=float
+            )
+
+            assert values.size == (
+                len(asset_order)
+            ), (
+                f"{regime}: forecast has "
+                "incorrect asset dimension."
+            )
+
+            assert np.isfinite(
+                values
+            ).all(), (
+                f"{regime}: forecast contains "
+                "non-finite values."
+            )
+
+            forecasts[
+                regime
+            ] = forecast.copy()
+
+            print(
+                f"{regime.upper()} forecast "
+                "generated."
+            )
+
+        print(
+            "[PASS] Regime-conditioned forecasts"
+        )
+
+        # ==========================================================
+        # EXACT WEIGHTED-COMBINATION INVARIANT
+        # ==========================================================
+
+        for regime in expected_regimes:
+
+            policy = (
+                RegimeForecastEngine
+                .policy_for_regime(
+                    regime
+                )
+            )
+
+            expected_forecast = (
+                policy.momentum
+                * component_arrays[
+                    "momentum"
+                ]
+                +
+                policy.trend
+                * component_arrays[
+                    "trend"
+                ]
+                +
+                policy.mean_reversion
+                * component_arrays[
+                    "mean_reversion"
+                ]
+            )
+
+            actual_forecast = (
+                forecasts[
+                    regime
+                ].to_numpy(
+                    dtype=float
+                )
+            )
+
+            assert np.allclose(
+                actual_forecast,
+                expected_forecast,
+                atol=1e-12,
+                rtol=1e-10,
+            ), (
+                f"{regime}: regime forecast "
+                "does not equal the configured "
+                "weighted forecast components."
+            )
+
+        print(
+            "[PASS] Regime forecast combination invariant"
+        )
+
+        # ==========================================================
+        # CROSS-REGIME DIFFERENTIATION
+        # ==========================================================
+
+        bull_values = (
+            forecasts[
+                "bull"
+            ].to_numpy(
+                dtype=float
+            )
+        )
+
+        neutral_values = (
+            forecasts[
+                "neutral"
+            ].to_numpy(
+                dtype=float
+            )
+        )
+
+        crisis_values = (
+            forecasts[
+                "crisis"
+            ].to_numpy(
+                dtype=float
+            )
+        )
+
+        bull_neutral_difference = float(
+            np.max(
+                np.abs(
+                    bull_values
+                    -
+                    neutral_values
+                )
+            )
+        )
+
+        neutral_crisis_difference = float(
+            np.max(
+                np.abs(
+                    neutral_values
+                    -
+                    crisis_values
+                )
+            )
+        )
+
+        bull_crisis_difference = float(
+            np.max(
+                np.abs(
+                    bull_values
+                    -
+                    crisis_values
+                )
+            )
+        )
+
+        print()
+        print(
+            "Cross-regime maximum forecast "
+            "differences:"
+        )
+
+        print(
+            "Bull vs neutral: "
+            f"{bull_neutral_difference:.12f}"
+        )
+
+        print(
+            "Neutral vs crisis: "
+            f"{neutral_crisis_difference:.12f}"
+        )
+
+        print(
+            "Bull vs crisis: "
+            f"{bull_crisis_difference:.12f}"
+        )
+
+        assert (
+            bull_neutral_difference
+            >
+            1e-12
+        ), (
+            "Bull and neutral forecasts "
+            "are unexpectedly identical."
+        )
+
+        assert (
+            neutral_crisis_difference
+            >
+            1e-12
+        ), (
+            "Neutral and crisis forecasts "
+            "are unexpectedly identical."
+        )
+
+        assert (
+            bull_crisis_difference
+            >
+            1e-12
+        ), (
+            "Bull and crisis forecasts "
+            "are unexpectedly identical."
+        )
+
+        print(
+            "[PASS] Cross-regime forecast differentiation"
+        )
+
+        # ==========================================================
+        # ENGINE STATE
+        # ==========================================================
+
+        assert (
+            engine.last_regime
+            ==
+            "crisis"
+        ), (
+            "Engine state does not contain "
+            "the most recently evaluated regime."
+        )
+
+        assert isinstance(
+            engine.last_forecast,
+            pd.Series,
+        )
+
+        assert engine.last_forecast.index.equals(
+            prices.columns
+        )
+
+        assert np.allclose(
+            engine.last_forecast.to_numpy(
+                dtype=float
+            ),
+            forecasts[
+                "crisis"
+            ].to_numpy(
+                dtype=float
+            ),
+            atol=1e-12,
+            rtol=1e-10,
+        ), (
+            "Engine last_forecast does not "
+            "match the latest crisis forecast."
+        )
+
+        assert isinstance(
+            engine.last_policy,
+            RegimeForecastPolicy,
+        )
+
+        assert (
+            engine.last_policy
+            ==
+            RegimeForecastEngine.POLICIES[
+                "crisis"
+            ]
+        )
+
+        assert isinstance(
+            engine.last_components,
+            dict,
+        )
+
+        assert required_components <= set(
+            engine.last_components.keys()
+        )
+
+        print(
+            "[PASS] Regime forecast engine state"
+        )
+
+        # ==========================================================
+        # DIAGNOSTICS
+        # ==========================================================
+
+        diagnostics = (
+            engine.last_diagnostics
+        )
+
+        assert isinstance(
+            diagnostics,
+            dict,
+        ), (
+            "Regime forecast diagnostics "
+            "must be a dictionary."
+        )
+
+        assert (
+            diagnostics.get("api_version")
+            ==
+            RegimeForecastEngine.API_VERSION
+        )
+
+        assert (
+            diagnostics.get("component")
+            ==
+            RegimeForecastEngine.COMPONENT
+        )
+
+        assert (
+            diagnostics.get("regime")
+            ==
+            "crisis"
+        )
+
+        assert (
+            diagnostics.get("asset_count")
+            ==
+            len(asset_order)
+        )
+
+        assert (
+            diagnostics.get("observations")
+            ==
+            len(prices)
+        )
+
+        diagnostic_weights = (
+            diagnostics.get(
+                "weights"
+            )
+        )
+
+        assert isinstance(
+            diagnostic_weights,
+            dict,
+        )
+
+        assert np.isclose(
+            sum(
+                diagnostic_weights.values()
+            ),
+            1.0,
+            atol=1e-12,
+        )
+
+        assert np.isclose(
+            diagnostic_weights[
+                "momentum"
+            ],
+            0.20,
+            atol=1e-12,
+        )
+
+        assert np.isclose(
+            diagnostic_weights[
+                "trend"
+            ],
+            0.20,
+            atol=1e-12,
+        )
+
+        assert np.isclose(
+            diagnostic_weights[
+                "mean_reversion"
+            ],
+            0.60,
+            atol=1e-12,
+        )
+
+        print(
+            "[PASS] Regime forecast diagnostics"
+        )
+
+        # ==========================================================
+        # DETERMINISTIC REPEATABILITY
+        # ==========================================================
+
+        repeated_crisis = (
+            engine.forecast(
+                prices=prices,
+                regime="crisis",
+            )
+        )
+
+        assert np.allclose(
+            repeated_crisis.to_numpy(
+                dtype=float
+            ),
+            forecasts[
+                "crisis"
+            ].to_numpy(
+                dtype=float
+            ),
+            atol=1e-12,
+            rtol=1e-10,
+        ), (
+            "Repeated crisis forecast is "
+            "not deterministic."
+        )
+
+        print(
+            "[PASS] Regime forecast determinism"
+        )
+
+        # ==========================================================
+        # PHASE COMPLETE
+        # ==========================================================
+
+        print()
+        print(
+            "[PASS] PHASE 12B — "
+            "REGIME-CONDITIONED FORECAST REGRESSION"
+        )
+
+        return True
+
     # ==================================================================
     # REGRESSION MODULE EXISTENCE
     # ==================================================================
@@ -4125,26 +5236,48 @@ class FullSystemRegression:
                     )
 
     # ==================================================================
-    # RUN FULL SUITE
+    # FULL SUITE
     # ==================================================================
 
     def run(
         self,
     ) -> bool:
         """
-        Execute the complete regression suite.
+        Execute the complete system regression gate.
+
+        Mandatory gates execute in dependency order:
+
+            PHASE 0  — Project root
+            PHASE 1  — Python runtime
+            PHASE 2  — Required module files
+            PHASE 3  — Python compilation
+            PHASE 4  — Ruff static analysis
+            PHASE 5  — Import smoke test
+            PHASE 6A — Production portfolio regression
+            PHASE 12B — Regime-conditioned forecast regression
+            PHASE 7  — Regression module inventory
+            PHASE 8  — Execution chain integrity
+            PHASE 9  — Module regression tests
+
+        PHASE 10 — Git status is informational and therefore
+        does not determine the regression result.
+
+        Returns
+        -------
+        bool
+            True when all mandatory gates pass.
+            False when any mandatory gate fails.
         """
 
-        self.started_at = (
-            time.perf_counter()
-        )
+        self.started_at = time.perf_counter()
 
         self._banner(
             "FULL SYSTEM REGRESSION SUITE"
         )
 
         print(
-            "Execution stack regression gate"
+            "Execution stack "
+            "regression gate"
         )
 
         print(
@@ -4157,161 +5290,97 @@ class FullSystemRegression:
             f"{self.project_root}"
         )
 
-        # --------------------------------------------------------------
-        # PHASE 0
-        # --------------------------------------------------------------
+        # ==============================================================
+        # REGRESSION GATES
+        # ==============================================================
 
-        if not self.check_project_root():
-            self.finished_at = (
-                time.perf_counter()
-            )
+        gates = (
+            # ----------------------------------------------------------
+            # PHASE 0 — PROJECT ROOT
+            # ----------------------------------------------------------
+            self.check_project_root,
 
-            self.print_summary()
+            # ----------------------------------------------------------
+            # PHASE 1 — PYTHON RUNTIME
+            # ----------------------------------------------------------
+            self.check_python_version,
 
-            return False
+            # ----------------------------------------------------------
+            # PHASE 2 — REQUIRED MODULE FILES
+            # ----------------------------------------------------------
+            self.check_required_files,
 
-        # --------------------------------------------------------------
-        # PHASE 1
-        # --------------------------------------------------------------
+            # ----------------------------------------------------------
+            # PHASE 3 — PYTHON COMPILATION
+            # ----------------------------------------------------------
+            self.compile_all,
 
-        if not self.check_python_version():
+            # ----------------------------------------------------------
+            # PHASE 4 — RUFF STATIC ANALYSIS
+            # ----------------------------------------------------------
+            self.ruff_check,
 
-            self.finished_at = (
-                time.perf_counter()
-            )
+            # ----------------------------------------------------------
+            # PHASE 5 — IMPORT SMOKE TEST
+            # ----------------------------------------------------------
+            self.import_smoke_test,
 
-            self.print_summary()
+            # ----------------------------------------------------------
+            # PHASE 6A — PRODUCTION PORTFOLIO REGRESSION
+            # ----------------------------------------------------------
+            self.production_portfolio_regression,
 
-            return False
+            # ----------------------------------------------------------
+            # PHASE 12B — REGIME-CONDITIONED FORECAST REGRESSION
+            # ----------------------------------------------------------
+            self.phase12b_regime_forecast_regression,
 
-        # --------------------------------------------------------------
-        # PHASE 2
-        # --------------------------------------------------------------
+            # ----------------------------------------------------------
+            # PHASE 7 — REGRESSION MODULE INVENTORY
+            # ----------------------------------------------------------
+            self.check_regression_modules,
 
-        if not self.check_required_files():
+            # ----------------------------------------------------------
+            # PHASE 8 — EXECUTION CHAIN INTEGRITY
+            # ----------------------------------------------------------
+            self.execution_chain_check,
 
-            self.finished_at = (
-                time.perf_counter()
-            )
+            # ----------------------------------------------------------
+            # PHASE 9 — MODULE REGRESSION TESTS
+            # ----------------------------------------------------------
+            self.run_module_tests,
+        )
 
-            self.print_summary()
+        # ==============================================================
+        # EXECUTE MANDATORY GATES
+        # ==============================================================
 
-            return False
+        for gate in gates:
 
-        # --------------------------------------------------------------
-        # PHASE 3
-        # --------------------------------------------------------------
+            if not gate():
 
-        if not self.compile_all():
+                self.finished_at = (
+                    time.perf_counter()
+                )
 
-            self.finished_at = (
-                time.perf_counter()
-            )
+                self.print_summary()
 
-            self.print_summary()
+                return False
 
-            return False
-
-        # --------------------------------------------------------------
-        # PHASE 4
-        # --------------------------------------------------------------
-
-        if not self.ruff_check():
-
-            self.finished_at = (
-                time.perf_counter()
-            )
-
-            self.print_summary()
-
-            return False
-
-        # --------------------------------------------------------------
-        # PHASE 5
-        # --------------------------------------------------------------
-
-        if not self.import_smoke_test():
-
-            self.finished_at = (
-                time.perf_counter()
-            )
-
-            self.print_summary()
-
-            return False
-
-        # --------------------------------------------------------------
-        # PHASE 6
-        # --------------------------------------------------------------
+        # ==============================================================
+        # PHASE 10 — REPOSITORY STATUS
         #
-        # Production portfolio construction is a hard regression gate.
+        # Informational only.
         #
-        # It must pass before the execution-stack module tests are
-        # allowed to proceed.
-        #
-
-        if not self.production_portfolio_regression():
-
-            self.finished_at = (
-                time.perf_counter()
-            )
-
-            self.print_summary()
-
-            return False
-
-        # --------------------------------------------------------------
-        # PHASE 7
-        # --------------------------------------------------------------
-
-        if not self.check_regression_modules():
-
-            self.finished_at = (
-                time.perf_counter()
-            )
-
-            self.print_summary()
-
-            return False
-
-        # --------------------------------------------------------------
-        # PHASE 8
-        # --------------------------------------------------------------
-
-        if not self.execution_chain_check():
-
-            self.finished_at = (
-                time.perf_counter()
-            )
-
-            self.print_summary()
-
-            return False
-
-        # --------------------------------------------------------------
-        # PHASE 9
-        # --------------------------------------------------------------
-
-        if not self.run_module_tests():
-
-            self.finished_at = (
-                time.perf_counter()
-            )
-
-            self.print_summary()
-
-            return False
-
-        # --------------------------------------------------------------
-        # PHASE 10
-        # --------------------------------------------------------------
+        # Modified/untracked files must NOT cause the production
+        # regression gate to fail.
+        # ==============================================================
 
         self.git_status_check()
 
-        
-        # --------------------------------------------------------------
-        # FINISH
-        # --------------------------------------------------------------
+        # ==============================================================
+        # FINALIZE
+        # ==============================================================
 
         self.finished_at = (
             time.perf_counter()
@@ -4323,9 +5392,9 @@ class FullSystemRegression:
             self.summary()[
                 "system_status"
             ]
-            == "PASS"
+            ==
+            "PASS"
         )
-
 
 # ======================================================================
 # REGRESSION SUITE TEST

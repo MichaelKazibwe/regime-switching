@@ -88,6 +88,9 @@ from portfoliodecisionengine import (
     PortfolioDecisionEngine,
 )
 
+from volatilitytargeting import (
+    VolatilityTargeting,
+)
 
 # ======================================================================
 # SECTION 2
@@ -253,6 +256,9 @@ class ProductionComposition:
 
         self.volatility_targeting_factory = (
             volatility_targeting_factory
+            if volatility_targeting_factory
+            is not None
+            else self._default_volatility_targeting_factory
         )
 
     # ==================================================================
@@ -432,6 +438,7 @@ class ProductionComposition:
             "volatility_targeting",
             "volatility_targeting_engine",
             "vol_targeting",
+            "vol_target_engine",
         ):
 
             if (
@@ -453,21 +460,44 @@ class ProductionComposition:
                     (
                         "PortfolioOptimizer requires "
                         f"'{name}', but no "
-                        "volatility targeting factory "
-                        "was supplied."
+                        "volatility-targeting factory exists."
                     )
                 )
 
-            dependency = (
-                self.volatility_targeting_factory()
-            )
+            try:
+
+                dependency = (
+                    self.volatility_targeting_factory()
+                )
+
+            except Exception as exc:
+
+                raise ProductionCompositionError(
+                    (
+                        "Unable to construct "
+                        "PortfolioOptimizer dependency "
+                        f"'{name}': {exc}"
+                    )
+                ) from exc
 
             if dependency is None:
 
                 raise ProductionCompositionError(
                     (
-                        f"PortfolioOptimizer dependency "
+                        "PortfolioOptimizer dependency "
                         f"'{name}' returned None."
+                    )
+                )
+
+            if not hasattr(
+                dependency,
+                "scale_weights",
+            ):
+
+                raise ProductionCompositionError(
+                    (
+                        "Volatility-targeting dependency "
+                        "must expose scale_weights()."
                     )
                 )
 
@@ -662,6 +692,14 @@ class ProductionComposition:
             RiskBudgetEngine()
         )
 
+    @staticmethod
+    def _default_volatility_targeting_factory():
+        """
+        Construct the production volatility-targeting engine.
+        """
+
+        return VolatilityTargeting()
+    
     # ==================================================================
     # SECTION 12
     # BUILD COMPONENTS

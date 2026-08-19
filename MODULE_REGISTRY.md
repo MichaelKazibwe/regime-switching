@@ -1175,3 +1175,165 @@ REAL HISTORICAL DATA
                 │
                 ▼
        APPROVED / REJECTED
+
+
+                    REGRESSION SUITE
+                           │
+          ┌────────────────┼─────────────────┐
+          │                │                 │
+          ▼                ▼                 ▼
+   Infrastructure    Portfolio Layer    Execution Layer
+          │                │                 │
+          │                │                 ├── Orders
+          │                │                 ├── OMS
+          │                │                 ├── Broker
+          │                │                 ├── Execution
+          │                │                 └── Reconciliation
+          │                │
+          │                ├── Risk budgets
+          │                ├── Constraints
+          │                ├── Position caps
+          │                ├── Vol targeting
+          │                ├── Leverage
+          │                ├── Cash
+          │                └── Risk report
+          │
+          ├── Compilation
+          ├── Ruff
+          ├── Imports
+          └── Required modules
+
+Regime
+   │
+   ▼
+Risk Budget
+   │
+   ▼
+Risk-Budget Optimizer
+   │
+   ▼
+Portfolio Constraints
+   │
+   ▼
+Volatility Targeting
+   │
+   ▼
+Leverage Safety Backstop
+   │
+   ▼
+Cash Sleeve
+   │
+   ▼
+Final Invariants
+   │
+   ▼
+Risk Report
+   │
+   ▼
+Production Portfolio
+
+
+REGIME REGRESSION
+│
+├── bull
+│   ├── optimize
+│   ├── validate
+│   ├── volatility
+│   ├── leverage
+│   ├── cash
+│   └── regime_results["bull"] = ...
+│
+├── neutral
+│   ├── optimize
+│   ├── validate
+│   ├── volatility
+│   ├── leverage
+│   ├── cash
+│   └── regime_results["neutral"] = ...
+│
+└── crisis
+    ├── optimize
+    ├── validate
+    ├── volatility
+    ├── leverage
+    ├── cash
+    └── regime_results["crisis"] = ...
+
+FEASIBLE VOLATILITY TARGET
+│
+├── reads regime_results["bull"]
+├── creates low-exposure portfolio
+├── proves target is feasible
+├── calls optimizer.vol_target_engine
+├── independently calculates final volatility
+└── requires target achievement
+
+CROSS-REGIME DIFFERENTIATION
+│
+├── bull vs neutral
+├── neutral vs crisis
+└── bull vs crisis
+
+# current progress
+Market/Price Data
+      ↓
+Expected Return Forecaster
+      ↓
+Momentum
+Trend
+Mean Reversion
+      ↓
+Combined Forecast
+      ↓
+Black-Litterman
+      ↓
+Regime-Aware Portfolio Optimizer
+      ↓
+Risk Budgeting
+      ↓
+Volatility Targeting
+      ↓
+Portfolio / Cash
+      ↓
+Execution Stack
+
+# test regression structure
+
+PHASE 0 — PROJECT ROOT
+        ↓
+PHASE 1 — PYTHON RUNTIME
+        ↓
+PHASE 2 — REQUIRED MODULE FILES
+        ↓
+PHASE 3 — PYTHON COMPILATION
+        ↓
+PHASE 4 — RUFF STATIC ANALYSIS
+        ↓
+PHASE 5 — IMPORT SMOKE TEST
+        ↓
+PHASE 6A — PRODUCTION PORTFOLIO REGRESSION
+        ↓
+PHASE 12B — REGIME-CONDITIONED FORECAST REGRESSION
+        ↓
+PHASE 7 — REGRESSION MODULE INVENTORY
+        ↓
+PHASE 8 — EXECUTION CHAIN INTEGRITY
+        ↓
+PHASE 9 — MODULE REGRESSION TESTS
+        ↓
+PHASE 10 — REPOSITORY STATUS
+        ↓
+FULL SYSTEM REGRESSION SUMMARY
+
+
+| Component                     | Responsibility                      |
+| ----------------------------- | ----------------------------------- |
+| `macroregime.py`              | Determine economic regime           |
+| `regimeforecastengine.py`     | Condition forecasts on regime       |
+| `expectedreturnforecaster.py` | Produce raw forecast components     |
+| `blacklitterman.py`           | Blend equilibrium returns and views |
+| `riskbudgetengine.py`         | Determine regime risk budgets       |
+| `volatilitytargeting.py`      | Scale portfolio risk                |
+| `portfoliooptimizer.py`       | Construct final portfolio           |
+| `productioncomposition.py`    | Wire production components together |
+| `regression_suite.py`         | Prove the system works              |

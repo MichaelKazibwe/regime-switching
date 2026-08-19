@@ -39,6 +39,8 @@ from typing import Any, Optional
 
 import numpy as np
 
+from scipy.optimize import minimize
+
 from core_constants import (
     REGIME_RISK_BUDGETS,
 )
@@ -403,6 +405,368 @@ class RiskBudgetEngine:
         }
 
         return budgets
+
+    # ==================================================================
+    # RISK-BUDGET OPTIMIZATION
+    # ==================================================================
+
+    def optimize(
+        self,
+        covariance: Any,
+        target_budget: Any,
+    ) -> np.ndarray:
+        """
+        Solve the long-only risk-budget optimization problem.
+
+        Parameters
+        ----------
+        covariance:
+            Square covariance matrix.
+
+        target_budget:
+            Target percentage contribution to portfolio risk
+            for each asset.
+
+        Returns
+        -------
+        numpy.ndarray
+            Long-only portfolio weights summing to one.
+
+        Notes
+        -----
+        The optimization seeks weights for which:
+
+            RC_i / total_Risk ~= target_budget_i
+
+        where:
+
+            RC_i = w_i * (Sigma @ w)_i
+
+        The RiskBudgetEngine remains responsible for the
+        optimization contract consumed by PortfolioOptimizer.
+        """
+
+        # --------------------------------------------------------------
+        # INPUT NORMALIZATION
+        # --------------------------------------------------------------
+
+        covariance = np.asarray(
+            covariance,
+            dtype=float,
+        )
+
+        target_budget = np.asarray(
+            target_budget,
+            dtype=float,
+        ).reshape(-1)
+
+        # --------------------------------------------------------------
+        # COVARIANCE VALIDATION
+        # --------------------------------------------------------------
+
+        if covariance.ndim != 2:
+            raise RiskBudgetCalculationError(
+                "Covariance must be a 2-dimensional matrix."
+            )
+
+        if (
+            covariance.shape[0]
+            != covariance.shape[1]
+        ):
+            raise RiskBudgetCalculationError(
+                "Covariance matrix must be square."
+            )
+
+        n = covariance.shape[0]
+
+        if n == 0:
+            raise RiskBudgetCalculationError(
+                "Covariance matrix cannot be empty."
+            )
+
+        if target_budget.size != n:
+            raise RiskBudgetCalculationError(
+                "Target budget length "
+                f"{target_budget.size} does not match "
+                f"covariance dimension {n}."
+            )
+
+        if not np.isfinite(
+            covariance
+        ).all():
+            raise RiskBudgetCalculationError(
+                "Covariance contains non-finite values."
+            )
+
+        if not np.isfinite(
+            target_budget
+        ).all():
+            raise RiskBudgetCalculationError(
+                "Target budget contains non-finite values."
+            )
+
+        if np.any(
+            target_budget < 0.0
+        ):
+            raise RiskBudgetCalculationError(
+                "Target budgets cannot be negative."
+            )
+
+        # --------------------------------------------------------------
+        # SYMMETRIZE COVARIANCE
+        # --------------------------------------------------------------
+
+        covariance = (
+            covariance
+            + covariance.T
+        ) / 2.0
+
+        # --------------------------------------------------------------
+        # TARGET-BUDGET VALIDATION
+        # --------------------------------------------------------------
+
+        budget_sum = float(
+            target_budget.sum()
+        )
+
+        if budget_sum <= self.tolerance:
+            raise RiskBudgetCalculationError(
+                "Target budgets must have a positive total."
+            )
+
+        target_budget = (
+            target_budget
+            / budget_sum
+        )
+
+        # --------------------------------------------------------------
+        # POSITIVE SEMIDEFINITE SAFETY
+        # --------------------------------------------------------------
+
+        eigenvalues = np.linalg.eigvalsh(
+            covariance
+        )
+
+        minimum_eigenvalue = float(
+            eigenvalues.min()
+        )
+
+        if minimum_eigenvalue < -1e-10:
+            raise RiskBudgetCalculationError(
+                "Covariance matrix is not "
+                "positive semidefinite. "
+                f"Minimum eigenvalue: "
+                f"{minimum_eigenvalue:.6e}."
+            )
+
+        # Small numerical regularization for near-singular matrices.
+        if minimum_eigenvalue < 1e-12:
+            covariance = (
+                covariance
+                + np.eye(n) * 1e-12
+            )
+
+        # --------------------------------------------------------------
+        # INITIAL WEIGHTS
+        # --------------------------------------------------------------
+
+        x0 = (
+            np.ones(n, dtype=float)
+            / float(n)
+        )
+
+        # --------------------------------------------------------------
+        # RISK-BUDGET OBJECTIVE
+        # --------------------------------------------------------------
+
+        def objective(
+            weights: np.ndarray,
+        ) -> float:
+
+            weights = np.asarray(
+                weights,
+                dtype=float,
+            )
+
+            portfolio_variance = float(
+                weights
+                @ covariance
+                @ weights
+            )
+
+            if (
+                not np.isfinite(
+                    portfolio_variance
+                )
+                or portfolio_variance
+                <= self.tolerance
+            ):
+                return 1e12
+
+            marginal_risk = (
+                covariance
+                @ weights
+            )
+
+            contributions = (
+                weights
+                * marginal_risk
+            )
+
+            total_contribution = float(
+                contributions.sum()
+            )
+
+            if (
+                not np.isfinite(
+                    total_contribution
+                )
+                or total_contribution
+                <= self.tolerance
+            ):
+                return 1e12
+
+            contribution_pct = (
+                contributions
+                / total_contribution
+            )
+
+            error = (
+                contribution_pct
+                - target_budget
+            )
+
+            return float(
+                np.sum(
+                    error ** 2
+                )
+            )
+
+        # --------------------------------------------------------------
+        # CONSTRAINTS
+        # --------------------------------------------------------------
+
+        constraints = [
+            {
+                "type": "eq",
+                "fun": (
+                    lambda weights:
+                    float(
+                        np.sum(weights)
+                        - 1.0
+                    )
+                ),
+            }
+        ]
+
+        bounds = [
+            (0.0, 1.0)
+            for _ in range(n)
+        ]
+
+        # --------------------------------------------------------------
+        # OPTIMIZATION
+        # --------------------------------------------------------------
+
+        try:
+
+            result = minimize(
+                objective,
+                x0,
+                method="SLSQP",
+                bounds=bounds,
+                constraints=constraints,
+                options={
+                    "maxiter": 500,
+                    "ftol": 1e-12,
+                    "disp": False,
+                },
+            )
+
+        except Exception as exc:
+
+            raise RiskBudgetCalculationError(
+                "Risk-budget optimization failed: "
+                f"{exc}"
+            ) from exc
+
+        # --------------------------------------------------------------
+        # OPTIMIZER FAILURE
+        # --------------------------------------------------------------
+
+        if not result.success:
+            raise RiskBudgetCalculationError(
+                "Risk-budget optimization did not converge: "
+                f"{result.message}"
+            )
+
+        weights = np.asarray(
+            result.x,
+            dtype=float,
+        )
+
+        # --------------------------------------------------------------
+        # FINAL NORMALIZATION
+        # --------------------------------------------------------------
+
+        weights = np.clip(
+            weights,
+            0.0,
+            1.0,
+        )
+
+        weight_sum = float(
+            weights.sum()
+        )
+
+        if (
+            not np.isfinite(
+                weight_sum
+            )
+            or weight_sum
+            <= self.tolerance
+        ):
+            raise RiskBudgetCalculationError(
+                "Risk-budget optimizer returned "
+                "invalid weights."
+            )
+
+        weights = (
+            weights
+            / weight_sum
+        )
+
+        # --------------------------------------------------------------
+        # FINAL INVARIANTS
+        # --------------------------------------------------------------
+
+        if not np.isfinite(
+            weights
+        ).all():
+            raise RiskBudgetCalculationError(
+                "Risk-budget optimizer returned "
+                "non-finite weights."
+            )
+
+        if np.any(
+            weights < -1e-10
+        ):
+            raise RiskBudgetCalculationError(
+                "Risk-budget optimizer returned "
+                "negative weights."
+            )
+
+        if not np.isclose(
+            weights.sum(),
+            1.0,
+            atol=1e-8,
+        ):
+            raise RiskBudgetCalculationError(
+                "Risk-budget optimizer returned "
+                f"weights summing to {weights.sum()}."
+            )
+
+        return weights
 
     # ==================================================================
     # RISK CONTRIBUTIONS
