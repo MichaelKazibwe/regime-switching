@@ -1,23 +1,29 @@
 # ======================================================================
-# STEP 8 — HISTORICAL DATA + PRODUCTION DECISION INTEGRATION
+# STEP 8 — 14-ASSET HISTORICAL DATA + PRODUCTION DECISION INTEGRATION
 # ======================================================================
 
 """
 Step 8 validates the production portfolio engine against real
-historical market and macroeconomic data.
+historical market and macroeconomic data using the complete
+14-asset production universe.
 
 Pipeline
 --------
 1. Download historical prices from Yahoo Finance.
-2. Calculate historical returns.
-3. Download macroeconomic data from FRED.
-4. Align macro data to the market calendar.
-5. Construct a historical macro-regime series.
-6. Build current macro state.
-7. Generate expected returns from historical prices.
-8. Send returns, regimes and expected returns into the
-   PortfolioDecisionEngine.
-9. Validate the complete production decision.
+2. Validate the complete 14-asset price matrix.
+3. Calculate historical returns.
+4. Download macroeconomic data from FRED.
+5. Calculate inflation from monthly CPI data.
+6. Calculate the 10Y-2Y Treasury yield spread.
+7. Align macroeconomic data to the market trading calendar.
+8. Construct a historical macro-regime series.
+9. Build the current macro state.
+10. Generate expected returns from historical prices.
+11. Build the 14-asset production portfolio.
+12. Send the aligned production inputs into PortfolioDecisionEngine.
+13. Validate the complete production decision.
+14. Validate production engine health.
+15. Run a deterministic second decision check.
 """
 
 # ======================================================================
@@ -29,47 +35,47 @@ from __future__ import annotations
 import os
 import sys
 
-from productioncomposition import (
-    ProductionComposition,
-)
-
 import numpy as np
 import pandas as pd
-
 from fredapi import Fred
 
-from core_constants import (
-    settings,
-)
+from core_constants import settings
+from expectedreturnforecaster import ExpectedReturnForecaster
+from macroregime import MacroRegimeModel, Regime
+from marketdataloader import MarketDataLoader
+from productioncomposition import ProductionComposition
 
-from macroregime import (
-    MacroRegimeModel,
-    Regime,
-)
-
-from marketdataloader import (
-    MarketDataLoader,
-)
-
-from expectedreturnforecaster import (
-    ExpectedReturnForecaster,
-)
 
 # ======================================================================
-# SECTION 2 — CONFIGURATION
+# SECTION 2 — PRODUCTION CONFIGURATION
 # ======================================================================
 
 TICKERS = [
     "SPY",
-    "EFA",
-    "EEM",
+    "QQQ",
+    "IWM",
+    "VEA",
+    "VWO",
+    "TLT",
+    "IEF",
+    "SHY",
+    "LQD",
+    "HYG",
+    "GLD",
+    "SLV",
+    "DBC",
+    "VNQ",
 ]
 
 HISTORY_PERIOD = "15y"
 
 MIN_OBSERVATIONS = 252
 
+EXPECTED_ASSET_COUNT = 14
+
 REGIME_LOOKBACK = 252
+
+NUMERIC_TOLERANCE = 1e-8
 
 
 # ======================================================================
@@ -77,6 +83,7 @@ REGIME_LOOKBACK = 252
 # ======================================================================
 
 def banner(title: str) -> None:
+    """Print a standard Step 8 section banner."""
 
     print()
     print("=" * 80)
@@ -85,6 +92,7 @@ def banner(title: str) -> None:
 
 
 def fail(message: str) -> None:
+    """Fail the Step 8 integration test with a clear message."""
 
     print()
     print("=" * 80)
@@ -98,59 +106,281 @@ def fail(message: str) -> None:
 
 
 # ======================================================================
-# SECTION 4 — LOAD MARKET DATA
+# SECTION 4 — VALIDATE PRODUCTION UNIVERSE
+# ======================================================================
+
+def validate_production_universe() -> None:
+    """Validate the configured 14-asset production universe."""
+
+    if len(TICKERS) != EXPECTED_ASSET_COUNT:
+        fail(
+            "Production asset universe contains "
+            f"{len(TICKERS)} assets; expected "
+            f"{EXPECTED_ASSET_COUNT}."
+        )
+
+    if len(set(TICKERS)) != len(TICKERS):
+        fail(
+            "Production asset universe contains duplicate tickers."
+        )
+
+    if not all(
+        isinstance(ticker, str) and ticker.strip()
+        for ticker in TICKERS
+    ):
+        fail(
+            "Production asset universe contains invalid ticker values."
+        )
+
+    print()
+    print("PRODUCTION ASSET UNIVERSE:")
+    print(TICKERS)
+    print(
+        f"Asset count: {len(TICKERS)}"
+    )
+
+
+# ======================================================================
+# SECTION 5 — NORMALIZE DATETIME INDEX
+# ======================================================================
+
+def normalize_datetime_index(
+    index: pd.Index,
+) -> pd.DatetimeIndex:
+    """Normalize a pandas index to a unique sorted naive DatetimeIndex."""
+
+    normalized = pd.DatetimeIndex(
+        pd.to_datetime(index)
+    )
+
+    if normalized.tz is not None:
+        normalized = normalized.tz_localize(None)
+
+    normalized = (
+        normalized
+        .sort_values()
+        .drop_duplicates()
+    )
+
+    return normalized
+
+
+# ======================================================================
+# SECTION 6 — LOAD HISTORICAL MARKET DATA
 # ======================================================================
 
 def load_market_data() -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Load historical prices and calculate historical returns.
+
+    Prices are kept intact for the expected-return forecasting layer.
+
+    Returns are calculated from the validated price matrix and therefore
+    contain one fewer observation than prices under normal conditions.
+    """
 
     banner("1. LOADING HISTORICAL MARKET DATA")
+
+    validate_production_universe()
 
     loader = MarketDataLoader(
         assets=TICKERS,
         period=HISTORY_PERIOD,
     )
 
-    prices = loader.load_prices()
+    prices = loader.load_prices(
+        validate=False
+    )
 
     if prices is None or prices.empty:
-
         fail(
-            "Yahoo Finance returned no price data."
+            "Yahoo Finance returned no historical price data."
         )
 
     prices = prices.copy()
 
-    prices = prices[
-        TICKERS
+    # --------------------------------------------------------------
+    # NORMALIZE INDEX
+    # --------------------------------------------------------------
+
+    prices.index = normalize_datetime_index(
+        prices.index
+    )
+
+    # --------------------------------------------------------------
+    # VERIFY REQUIRED COLUMNS
+    # --------------------------------------------------------------
+
+    missing_tickers = [
+        ticker
+        for ticker in TICKERS
+        if ticker not in prices.columns
     ]
+
+    if missing_tickers:
+        fail(
+            "Historical market data is missing required "
+            f"production assets: {missing_tickers}"
+        )
+
+    # --------------------------------------------------------------
+    # SELECT EXACT PRODUCTION ORDER
+    # --------------------------------------------------------------
+
+    prices = prices.loc[
+        :,
+        TICKERS,
+    ].copy()
+
+    # --------------------------------------------------------------
+    # REMOVE ONLY ROWS WHERE ALL ASSETS ARE MISSING
+    # --------------------------------------------------------------
 
     prices = prices.dropna(
         how="all"
     )
 
+    if prices.empty:
+        fail(
+            "Historical price matrix became empty after "
+            "removing completely missing observations."
+        )
+
+    # --------------------------------------------------------------
+    # RAW SOURCE QUALITY REPORT
+    # --------------------------------------------------------------
+
+    print()
+    print("RAW HISTORICAL DATA QUALITY:")
+    print(
+        f"Observations: {len(prices)}"
+    )
+
+    missing_by_ticker = (
+        prices
+        .isna()
+        .sum()
+    )
+
+    print(
+        "Missing observations by ticker:"
+    )
+    print(
+        missing_by_ticker
+    )
+
+    # --------------------------------------------------------------
+    # COMPLETE-CASE MARKET MATRIX
+    #
+    # We do not fabricate missing prices.
+    #
+    # A row containing a missing value for any required production
+    # asset is removed before returns are calculated.
+    # --------------------------------------------------------------
+
     prices = prices.dropna(
         how="any"
     )
 
-    if len(prices) < MIN_OBSERVATIONS:
-
+    if prices.empty:
         fail(
-            "Insufficient historical price data: "
+            "Complete-case historical price matrix is empty."
+        )
+
+    if len(prices) < MIN_OBSERVATIONS:
+        fail(
+            "Insufficient historical price data after "
+            "complete-case alignment: "
             f"required at least {MIN_OBSERVATIONS}, "
             f"received {len(prices)}."
         )
 
+    # --------------------------------------------------------------
+    # NUMERIC VALIDATION
+    # --------------------------------------------------------------
+
+    prices = prices.apply(
+        pd.to_numeric,
+        errors="coerce",
+    )
+
+    if prices.isna().any().any():
+        fail(
+            "Historical prices contain non-numeric or missing "
+            "observations after numeric conversion."
+        )
+
+    if not np.isfinite(
+        prices.to_numpy(dtype=float)
+    ).all():
+        fail(
+            "Historical price matrix contains non-finite values."
+        )
+
+    if not (
+        prices > 0
+    ).all().all():
+        fail(
+            "Historical price matrix contains non-positive prices."
+        )
+
+    # --------------------------------------------------------------
+    # PRICE MONOTONICITY
+    # --------------------------------------------------------------
+
+    if not prices.index.is_monotonic_increasing:
+        fail(
+            "Historical price index is not monotonically increasing."
+        )
+
+    if prices.index.has_duplicates:
+        fail(
+            "Historical price index contains duplicate dates."
+        )
+
+    # --------------------------------------------------------------
+    # CALCULATE RETURNS
+    # --------------------------------------------------------------
+
     returns = (
         prices
         .pct_change()
-        .dropna()
+        .dropna(
+            how="any"
+        )
     )
 
     if returns.empty:
-
         fail(
             "Historical return series is empty."
         )
+
+    if list(returns.columns) != TICKERS:
+        fail(
+            "Historical return columns do not match the "
+            "production asset universe."
+        )
+
+    if not np.isfinite(
+        returns.to_numpy(dtype=float)
+    ).all():
+        fail(
+            "Historical return matrix contains non-finite values."
+        )
+
+    if returns.index.has_duplicates:
+        fail(
+            "Historical return index contains duplicate dates."
+        )
+
+    if not returns.index.is_monotonic_increasing:
+        fail(
+            "Historical return index is not monotonically increasing."
+        )
+
+    # --------------------------------------------------------------
+    # REPORT
+    # --------------------------------------------------------------
 
     print()
     print("PRICE HISTORY:")
@@ -178,46 +408,62 @@ def load_market_data() -> tuple[pd.DataFrame, pd.DataFrame]:
     print(
         f"Shape: {returns.shape}"
     )
+    print(
+        f"Start: {returns.index[0]}"
+    )
+    print(
+        f"End: {returns.index[-1]}"
+    )
+
+    print()
+    print("RETURN DATA QUALITY:")
+    print(
+        "Missing observations by ticker:"
+    )
+    print(
+        returns.isna().sum()
+    )
 
     return prices, returns
 
 
 # ======================================================================
-# SECTION 5 — LOAD FRED DATA
+# SECTION 7 — LOAD FRED DATA
 # ======================================================================
 
 def load_fred_data(
-    price_index,
-):
+    price_index: pd.Index,
+) -> pd.DataFrame:
     """
-    Load and align historical FRED macroeconomic data
-    to the market trading calendar.
+    Load and align historical FRED macroeconomic data.
 
-    Important frequency handling:
+    Series
+    ------
+    UNRATE
+        Monthly unemployment rate.
 
-        UNRATE   -> monthly
-        CPIAUCSL -> monthly
-        DGS10    -> daily
-        DGS2     -> daily
+    CPIAUCSL
+        Monthly CPI index used to calculate year-over-year inflation.
 
-    Inflation is calculated on the original monthly CPI
-    series BEFORE any daily-calendar alignment.
+    DGS10
+        Daily 10-year Treasury yield.
 
-    The resulting macroeconomic observations are then
-    forward-filled onto the market trading calendar.
+    DGS2
+        Daily 2-year Treasury yield.
 
-    This preserves the latest information available at each
-    market date and avoids look-ahead bias.
+    Inflation is calculated from the original monthly CPI series
+    before market-calendar alignment.
+
+    Monthly macroeconomic observations are then forward-filled onto
+    the market trading calendar. This uses the latest information
+    available as of each market date.
     """
 
-    print()
-    print("=" * 80)
-    print("LOADING FRED MACROECONOMIC DATA")
-    print("=" * 80)
+    banner("2. LOADING FRED MACROECONOMIC DATA")
 
-    # ============================================================
-    # 1. VALIDATE FRED CONFIGURATION
-    # ============================================================
+    # ==============================================================
+    # 1. FRED API VALIDATION
+    # ==============================================================
 
     if settings.fred_api_key is None:
         fail(
@@ -232,37 +478,18 @@ def load_fred_data(
             "Add a valid FRED API key to .env."
         )
 
-    # ============================================================
-    # 2. VALIDATE MARKET INDEX
-    # ============================================================
+    # ==============================================================
+    # 2. MARKET CALENDAR
+    # ==============================================================
 
-    if price_index is None:
-        fail(
-            "Price index cannot be None."
-        )
-
-    market_index = pd.DatetimeIndex(
-        pd.to_datetime(
-            price_index
-        )
+    market_index = normalize_datetime_index(
+        price_index
     )
 
     if market_index.empty:
         fail(
-            "Price index contains no observations."
+            "Market price index contains no observations."
         )
-
-    if market_index.tz is not None:
-        market_index = (
-            market_index
-            .tz_localize(None)
-        )
-
-    market_index = (
-        market_index
-        .sort_values()
-        .drop_duplicates()
-    )
 
     print()
     print("MARKET CALENDAR:")
@@ -276,17 +503,13 @@ def load_fred_data(
         f"End: {market_index[-1]}"
     )
 
-    # ============================================================
+    # ==============================================================
     # 3. FRED CLIENT
-    # ============================================================
+    # ==============================================================
 
     fred = Fred(
         api_key=settings.fred_api_key
     )
-
-    # ============================================================
-    # 4. SERIES DEFINITIONS
-    # ============================================================
 
     series_map = {
         "unemployment": "UNRATE",
@@ -295,150 +518,97 @@ def load_fred_data(
         "dgs2": "DGS2",
     }
 
-    raw = {}
+    raw: dict[str, pd.Series] = {}
 
-    # ============================================================
-    # 5. DOWNLOAD EACH SERIES
-    # ============================================================
+    # ==============================================================
+    # 4. DOWNLOAD FRED SERIES
+    # ==============================================================
 
     for name, series_id in series_map.items():
 
         print()
         print(
-            f"Downloading FRED series: "
-            f"{series_id}"
+            f"Downloading FRED series: {series_id}"
         )
 
         try:
-
             series = fred.get_series(
                 series_id,
-                observation_start=(
-                    market_index[0]
-                ),
-                observation_end=(
-                    market_index[-1]
-                ),
+                observation_start=market_index[0],
+                observation_end=market_index[-1],
             )
-
         except Exception as exc:
-
             fail(
                 f"Unable to download FRED series "
                 f"{series_id}: {exc}"
             )
 
         if series is None:
-
             fail(
-                f"FRED returned no data for "
-                f"{series_id}."
+                f"FRED returned no data for {series_id}."
             )
 
         series = pd.Series(
             series
         )
 
-        # --------------------------------------------------------
-        # NORMALIZE INDEX
-        # --------------------------------------------------------
-
-        series.index = pd.to_datetime(
+        series.index = normalize_datetime_index(
             series.index
         )
-
-        if series.index.tz is not None:
-
-            series.index = (
-                series.index
-                .tz_localize(None)
-            )
-
-        # --------------------------------------------------------
-        # NUMERIC CLEANING
-        # --------------------------------------------------------
 
         series = pd.to_numeric(
             series,
             errors="coerce",
         )
 
-        series = series.dropna()
-
         series = (
             series
+            .replace(
+                [np.inf, -np.inf],
+                np.nan,
+            )
+            .dropna()
             .sort_index()
         )
 
-        series = series[
-            ~series.index.duplicated(
-                keep="last"
-            )
-        ]
-
         if series.empty:
-
             fail(
-                f"FRED series {series_id} "
-                f"contains no usable observations."
+                f"FRED series {series_id} contains "
+                "no usable observations."
             )
 
         print(
             f"Observations: {len(series)}"
         )
-
         print(
             f"Start: {series.index[0]}"
         )
-
         print(
             f"End: {series.index[-1]}"
         )
 
         raw[name] = series
 
-    # ============================================================
-    # 6. CALCULATE MACRO VARIABLES
-    #
-    # CRITICAL:
-    #
-    # Calculate inflation BEFORE combining the monthly
-    # CPI series with the daily Treasury series.
-    # ============================================================
+    # ==============================================================
+    # 5. EXTRACT SERIES
+    # ==============================================================
 
-    unemployment = (
-        raw["unemployment"]
-        .copy()
-    )
+    unemployment = raw["unemployment"].copy()
+    cpi = raw["cpi"].copy()
+    dgs10 = raw["dgs10"].copy()
+    dgs2 = raw["dgs2"].copy()
 
-    cpi = (
-        raw["cpi"]
-        .copy()
-    )
-
-    dgs10 = (
-        raw["dgs10"]
-        .copy()
-    )
-
-    dgs2 = (
-        raw["dgs2"]
-        .copy()
-    )
-
-    # ------------------------------------------------------------
-    # INFLATION
+    # ==============================================================
+    # 6. CALCULATE YEAR-OVER-YEAR INFLATION
     #
     # CPI is monthly.
     #
-    # 12 observations = 12 months.
-    # ------------------------------------------------------------
+    # Inflation is calculated BEFORE daily market-calendar alignment.
+    # ==============================================================
 
     inflation = (
         cpi
-        .pct_change(
-            periods=12
-        )
+        .pct_change(periods=12)
         * 100.0
     )
 
@@ -449,16 +619,18 @@ def load_fred_data(
             np.nan,
         )
         .dropna()
+        .sort_index()
     )
 
-    # ------------------------------------------------------------
-    # YIELD SPREAD
-    #
-    # 10-year Treasury minus 2-year Treasury.
-    #
-    # Align the two daily Treasury series before
-    # calculating the spread.
-    # ------------------------------------------------------------
+    if inflation.empty:
+        fail(
+            "Unable to construct a usable CPI-based "
+            "inflation series."
+        )
+
+    # ==============================================================
+    # 7. CALCULATE 10Y-2Y YIELD SPREAD
+    # ==============================================================
 
     treasury = pd.concat(
         {
@@ -488,20 +660,18 @@ def load_fred_data(
             np.nan,
         )
         .dropna()
+        .sort_index()
     )
 
-    # ============================================================
-    # 7. BUILD MACRO DATAFRAME
-    #
-    # At this stage:
-    #
-    # unemployment -> monthly
-    # inflation    -> monthly
-    # yield spread -> daily
-    #
-    # They are intentionally NOT forced onto the same
-    # calendar yet.
-    # ============================================================
+    if yield_spread.empty:
+        fail(
+            "Unable to construct a usable Treasury "
+            "yield-spread series."
+        )
+
+    # ==============================================================
+    # 8. BUILD MACRO DATAFRAME BEFORE MARKET ALIGNMENT
+    # ==============================================================
 
     macro = pd.concat(
         {
@@ -511,7 +681,7 @@ def load_fred_data(
         },
         axis=1,
         join="outer",
-        sort=False,
+        sort=True,
     )
 
     macro = (
@@ -546,114 +716,78 @@ def load_fred_data(
         .to_dict()
     )
 
-    # ============================================================
-    # 8. ALIGN TO MARKET TRADING CALENDAR
-    #
-    # This is where monthly macro variables are carried
-    # forward onto trading days.
-    #
-    # Example:
-    #
-    # UNRATE:
-    #
-    # 2026-07-01 = 4.1
-    #
-    # becomes:
-    #
-    # 2026-07-01 -> 4.1
-    # 2026-07-02 -> 4.1
-    # 2026-07-03 -> 4.1
-    # ...
-    #
-    # until the next unemployment observation.
-    #
-    # This is the correct information set.
-    # ============================================================
+    # ==============================================================
+    # 9. ALIGN TO MARKET TRADING CALENDAR
+    # ==============================================================
 
     macro = (
         macro
-        .reindex(
-            market_index
-        )
+        .reindex(market_index)
         .ffill()
     )
 
-    # ============================================================
-    # 9. DROP ONLY LEADING MISSING VALUES
-    #
-    # These can occur because:
-    #
-    # - inflation requires 12 months of CPI history
-    # - some Treasury observations may begin later
-    #
-    # We do NOT use an exact-date intersection.
-    # ============================================================
-
-    macro = macro.dropna(
-        subset=[
-            "unemployment",
-            "yield_spread",
-            "inflation",
-        ]
-    )
-
-    # ============================================================
-    # 10. FINAL VALIDATION
-    # ============================================================
-
-    if macro.empty:
-
-        fail(
-            "No usable aligned macroeconomic "
-            "observations were produced."
-        )
+    # ==============================================================
+    # 10. REMOVE LEADING OBSERVATIONS WITHOUT A COMPLETE
+    #     INFORMATION SET
+    # ==============================================================
 
     required_columns = [
         "unemployment",
-        "yield_spread",
         "inflation",
+        "yield_spread",
     ]
 
-    missing_columns = [
-        column
-        for column in required_columns
-        if column not in macro.columns
-    ]
+    macro = macro.dropna(
+        subset=required_columns
+    )
 
-    if missing_columns:
-
+    if macro.empty:
         fail(
-            "Aligned macroeconomic data is "
-            f"missing columns: {missing_columns}"
+            "No usable aligned macroeconomic observations "
+            "were produced."
         )
 
-    if macro[
-        required_columns
-    ].isna().any().any():
+    # ==============================================================
+    # 11. FINAL MACRO VALIDATION
+    # ==============================================================
 
+    if list(macro.columns) != required_columns:
         fail(
-            "Aligned macroeconomic data still "
-            "contains missing observations."
+            "Aligned macroeconomic columns are incorrect: "
+            f"{list(macro.columns)}"
         )
 
-    values = macro[
+    if macro.index.has_duplicates:
+        fail(
+            "Aligned macroeconomic data contains duplicate dates."
+        )
+
+    if not macro.index.is_monotonic_increasing:
+        fail(
+            "Aligned macroeconomic data is not chronologically ordered."
+        )
+
+    if macro[required_columns].isna().any().any():
+        fail(
+            "Aligned macroeconomic data still contains missing values."
+        )
+
+    macro_values = macro[
         required_columns
     ].to_numpy(
         dtype=float
     )
 
     if not np.isfinite(
-        values
+        macro_values
     ).all():
-
         fail(
-            "Aligned macroeconomic data contains "
-            "non-finite values."
+            "Aligned macroeconomic data contains non-finite values."
         )
 
-    # ============================================================
-    # 11. FINAL REPORT
-    # ============================================================
+    # ==============================================================
+    # 12. REPORT
+    # ==============================================================
 
     print()
     print("=" * 80)
@@ -700,44 +834,61 @@ def load_fred_data(
 
 
 # ======================================================================
-# SECTION 6 — BUILD HISTORICAL REGIMES
+# SECTION 8 — BUILD HISTORICAL REGIME HISTORY
 # ======================================================================
 
 def build_regime_history(
     macro_df: pd.DataFrame,
 ) -> pd.Series:
+    """
+    Classify every aligned historical macro observation.
+
+    The resulting regime Series uses exactly the same index as the
+    aligned macro dataframe.
+    """
 
     banner("3. BUILDING HISTORICAL REGIME HISTORY")
 
     model = MacroRegimeModel()
 
-    regime_values = []
+    regime_values: list[str] = []
 
-    for _, row in macro_df.iterrows():
+    for timestamp, row in macro_df.iterrows():
 
-        result = model.classify(
-            float(
-                row["unemployment"]
-            ),
-            float(
-                row["yield_spread"]
-            ),
-            float(
-                row["inflation"]
-            ),
-        )
+        try:
+            result = model.classify(
+                float(
+                    row["unemployment"]
+                ),
+                float(
+                    row["yield_spread"]
+                ),
+                float(
+                    row["inflation"]
+                ),
+            )
+        except Exception as exc:
+            fail(
+                "Macro regime classification failed at "
+                f"{timestamp}: {exc}"
+            )
 
         if isinstance(
             result,
             Regime,
         ):
-
             regime_value = result.value
-
         else:
-
             regime_value = str(
                 result
+            )
+
+        regime_value = regime_value.strip()
+
+        if not regime_value:
+            fail(
+                "Macro regime classifier returned an empty "
+                f"regime at {timestamp}."
             )
 
         regime_values.append(
@@ -750,12 +901,17 @@ def build_regime_history(
         name="regime",
     )
 
-    regimes = regimes.dropna()
-
     if regimes.empty:
-
         fail(
             "Historical regime series is empty."
+        )
+
+    if not regimes.index.equals(
+        macro_df.index
+    ):
+        fail(
+            "Historical regime index does not match "
+            "aligned macro data."
         )
 
     print()
@@ -782,42 +938,38 @@ def build_regime_history(
 
 
 # ======================================================================
-# SECTION 7 — BUILD CURRENT MACRO STATE
+# SECTION 9 — BUILD CURRENT MACRO STATE
 # ======================================================================
 
 def build_current_macro_data(
     macro_df: pd.DataFrame,
-) -> dict:
+) -> dict[str, float]:
+    """Build the latest scalar macro state used by the engine."""
 
-    latest = (
-        macro_df
-        .iloc[-1]
-    )
+    latest = macro_df.iloc[-1]
 
     macro_data = {
-
         "unemployment": float(
-            latest[
-                "unemployment"
-            ]
+            latest["unemployment"]
         ),
-
         "yield_spread": float(
-            latest[
-                "yield_spread"
-            ]
+            latest["yield_spread"]
         ),
-
         "inflation": float(
-            latest[
-                "inflation"
-            ]
+            latest["inflation"]
         ),
     }
 
+    if not all(
+        np.isfinite(value)
+        for value in macro_data.values()
+    ):
+        fail(
+            "Current macro state contains non-finite values."
+        )
+
     print()
     print("CURRENT MACRO STATE:")
-
     print(
         macro_data
     )
@@ -826,68 +978,104 @@ def build_current_macro_data(
 
 
 # ======================================================================
-# SECTION 8 — BUILD EXPECTED RETURNS
+# SECTION 10 — BUILD EXPECTED RETURNS
 # ======================================================================
 
 def build_expected_returns(
     prices: pd.DataFrame,
 ) -> dict[str, float]:
+    """
+    Generate expected returns from the complete historical price matrix.
+
+    Every production asset must receive a finite forecast.
+    """
 
     banner("4. BUILDING EXPECTED RETURNS")
 
-    forecaster = (
-        ExpectedReturnForecaster()
-    )
+    forecaster = ExpectedReturnForecaster()
 
-    forecast = (
-        forecaster.forecast(
+    try:
+        forecast = forecaster.forecast(
             prices
         )
-    )
+    except Exception as exc:
+        fail(
+            "ExpectedReturnForecaster failed: "
+            f"{exc}"
+        )
 
     if forecast is None:
-
         fail(
-            "Expected-return forecaster "
-            "returned None."
+            "ExpectedReturnForecaster returned None."
         )
 
     if isinstance(
         forecast,
         pd.Series,
     ):
-
-        expected_returns = {
-            ticker: float(
-                forecast[ticker]
-            )
-            for ticker in TICKERS
-        }
+        forecast_map = forecast.to_dict()
 
     elif isinstance(
         forecast,
         dict,
     ):
-
-        expected_returns = {
-            ticker: float(
-                forecast[ticker]
-            )
-            for ticker in TICKERS
-        }
+        forecast_map = dict(
+            forecast
+        )
 
     else:
-
         fail(
-            "Expected-return forecaster returned "
-            f"unsupported type: "
-            f"{type(forecast).__name__}"
+            "ExpectedReturnForecaster returned unsupported "
+            f"type: {type(forecast).__name__}"
+        )
+
+    missing_forecasts = [
+        ticker
+        for ticker in TICKERS
+        if ticker not in forecast_map
+    ]
+
+    if missing_forecasts:
+        fail(
+            "Expected-return forecast is missing production "
+            f"assets: {missing_forecasts}"
+        )
+
+    expected_returns: dict[str, float] = {}
+
+    for ticker in TICKERS:
+
+        try:
+            value = float(
+                forecast_map[ticker]
+            )
+        except (
+            TypeError,
+            ValueError,
+        ) as exc:
+            fail(
+                f"Expected return for {ticker} cannot be "
+                f"converted to float: {exc}"
+            )
+
+        if not np.isfinite(value):
+            fail(
+                f"Expected return for {ticker} is non-finite: "
+                f"{value}"
+            )
+
+        expected_returns[ticker] = value
+
+    if len(
+        expected_returns
+    ) != EXPECTED_ASSET_COUNT:
+        fail(
+            "Expected-return forecast does not contain exactly "
+            f"{EXPECTED_ASSET_COUNT} assets."
         )
 
     print()
-    print(
-        "EXPECTED RETURNS:"
-    )
+    print("EXPECTED RETURNS:")
 
     print(
         expected_returns
@@ -897,13 +1085,16 @@ def build_expected_returns(
 
 
 # ======================================================================
-# SECTION 9 — BUILD PORTFOLIO
+# SECTION 11 — BUILD 14-ASSET INPUT PORTFOLIO
 # ======================================================================
 
-def build_portfolio() -> dict:
+def build_portfolio() -> dict[str, dict[str, float]]:
+    """Build the equal-weight 14-asset production input portfolio."""
+
+    weight = 1.0 / len(TICKERS)
 
     weights = {
-        ticker: 1.0 / len(TICKERS)
+        ticker: weight
         for ticker in TICKERS
     }
 
@@ -912,48 +1103,58 @@ def build_portfolio() -> dict:
     }
 
     print()
-    print("PORTFOLIO:")
+    print("INPUT PORTFOLIO:")
     print(
         portfolio
     )
+
+    weight_sum = sum(
+        weights.values()
+    )
+
+    if not np.isclose(
+        weight_sum,
+        1.0,
+        atol=NUMERIC_TOLERANCE,
+    ):
+        fail(
+            "Input portfolio weights do not sum to one: "
+            f"{weight_sum}"
+        )
+
+    if set(weights) != set(TICKERS):
+        fail(
+            "Input portfolio ticker set does not match "
+            "the production universe."
+        )
 
     return portfolio
 
 
 # ======================================================================
-# SECTION 10 — RUN PRODUCTION DECISION
+# SECTION 12 — ALIGN PRODUCTION INPUT HISTORY
 # ======================================================================
 
-def run_production_decision(
+def align_production_history(
     prices: pd.DataFrame,
     returns: pd.DataFrame,
     macro_df: pd.DataFrame,
     regimes: pd.Series,
-    macro_data: dict,
-    expected_returns: dict,
-    portfolio: dict,
-):
+) -> tuple[
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.DataFrame,
+    pd.Series,
+]:
+    """
+    Align returns, macro observations and regimes to the same
+    historical decision dates.
 
-    banner(
-        "5. END-TO-END PRODUCTION PORTFOLIO DECISION"
-    )
+    Prices are deliberately retained separately because they are
+    used by the expected-return forecasting layer.
+    """
 
-    composition = (
-    ProductionComposition()
-    )
-
-    engine = (
-    composition.build_engine()
-    )
-
-    print()
-    print("ENGINE:")
-    print(
-        engine
-    )
-
-    print()
-    print("INPUT HISTORY VALIDATION:")
+    banner("INPUT HISTORY VALIDATION")
 
     print(
         f"Prices: {prices.shape}"
@@ -971,15 +1172,19 @@ def run_production_decision(
         f"Regimes: {len(regimes)}"
     )
 
+    print(
+        f"Assets: {len(TICKERS)}"
+    )
+
     # --------------------------------------------------------------
-    # ALIGN EVERYTHING TO THE SAME HISTORICAL WINDOW
+    # RETURNS / MACRO / REGIME ARE THE DECISION HISTORY.
+    #
+    # Prices have one extra observation because pct_change()
+    # removes the first return observation.
     # --------------------------------------------------------------
 
     common_index = (
-        prices.index
-        .intersection(
-            returns.index
-        )
+        returns.index
         .intersection(
             macro_df.index
         )
@@ -989,99 +1194,276 @@ def run_production_decision(
     )
 
     if len(common_index) < MIN_OBSERVATIONS:
-
         fail(
-            "Insufficient aligned historical "
-            "observations after joining market, "
-            "macro and regime data: "
+            "Insufficient aligned production observations after "
+            "joining returns, macro data and regimes: "
             f"{len(common_index)}."
         )
 
-    prices = prices.loc[
-        common_index
-    ]
-
-    returns = returns.loc[
-        common_index
-    ]
-
-    macro_df = macro_df.loc[
-        common_index
-    ]
-
-    regimes = regimes.loc[
-        common_index
-    ]
-
-    # --------------------------------------------------------------
-    # SAFETY CHECKS
-    # --------------------------------------------------------------
-
-    assert len(prices) == len(returns)
-
-    assert len(prices) == len(macro_df)
-
-    assert len(prices) == len(regimes)
-
-    assert list(
-        prices.columns
-    ) == TICKERS
-
-    assert list(
-        returns.columns
-    ) == TICKERS
-
-    assert regimes.index.equals(
-        returns.index
+    common_index = (
+        pd.DatetimeIndex(common_index)
+        .sort_values()
+        .drop_duplicates()
     )
 
-    assert macro_df.index.equals(
-        returns.index
-    )
+    aligned_returns = returns.loc[
+        common_index
+    ].copy()
+
+    aligned_macro = macro_df.loc[
+        common_index
+    ].copy()
+
+    aligned_regimes = regimes.loc[
+        common_index
+    ].copy()
+
+    # --------------------------------------------------------------
+    # VALIDATE ASSET ORDER
+    # --------------------------------------------------------------
+
+    if list(
+        aligned_returns.columns
+    ) != TICKERS:
+        fail(
+            "Aligned returns do not use the exact 14-asset "
+            "production ordering."
+        )
+
+    # --------------------------------------------------------------
+    # VALIDATE INDEX ALIGNMENT
+    # --------------------------------------------------------------
+
+    if not aligned_returns.index.equals(
+        aligned_macro.index
+    ):
+        fail(
+            "Aligned returns and macro indices differ."
+        )
+
+    if not aligned_returns.index.equals(
+        aligned_regimes.index
+    ):
+        fail(
+            "Aligned returns and regime indices differ."
+        )
+
+    # --------------------------------------------------------------
+    # VALIDATE NUMERICS
+    # --------------------------------------------------------------
+
+    if aligned_returns.isna().any().any():
+        fail(
+            "Aligned returns contain missing values."
+        )
+
+    if aligned_macro.isna().any().any():
+        fail(
+            "Aligned macro data contains missing values."
+        )
+
+    if aligned_regimes.isna().any():
+        fail(
+            "Aligned regime history contains missing values."
+        )
+
+    if not np.isfinite(
+        aligned_returns.to_numpy(
+            dtype=float
+        )
+    ).all():
+        fail(
+            "Aligned returns contain non-finite values."
+        )
+
+    # --------------------------------------------------------------
+    # PRICE HISTORY MUST COVER THE DECISION HISTORY
+    # --------------------------------------------------------------
+
+    if not set(
+        aligned_returns.index
+    ).issubset(
+        set(prices.index)
+    ):
+        fail(
+            "Price history does not cover all aligned "
+            "return observations."
+        )
 
     print(
         "Aligned observations:",
-        len(returns),
+        len(aligned_returns),
     )
 
     print(
         "Aligned tickers:",
-        list(returns.columns),
+        list(aligned_returns.columns),
+    )
+
+    print(
+        "Aligned start:",
+        aligned_returns.index[0],
+    )
+
+    print(
+        "Aligned end:",
+        aligned_returns.index[-1],
+    )
+
+    print(
+        "PASSED"
+    )
+
+    return (
+        prices,
+        aligned_returns,
+        aligned_macro,
+        aligned_regimes,
+    )
+
+
+# ======================================================================
+# SECTION 13 — RUN PRODUCTION DECISION
+# ======================================================================
+
+def run_production_decision(
+    prices: pd.DataFrame,
+    returns: pd.DataFrame,
+    macro_df: pd.DataFrame,
+    regimes: pd.Series,
+    macro_data: dict[str, float],
+    expected_returns: dict[str, float],
+    portfolio: dict[str, dict[str, float]],
+):
+    """Run and validate the complete 14-asset production decision."""
+
+    banner(
+        "5. END-TO-END 14-ASSET PRODUCTION PORTFOLIO DECISION"
+    )
+
+    composition = ProductionComposition()
+
+    engine = composition.build_engine()
+
+    if engine is None:
+        fail(
+            "ProductionComposition.build_engine() returned None."
+        )
+
+    print()
+    print("ENGINE:")
+    print(
+        engine
+    )
+
+    print()
+    print("OPTIMIZER:")
+    print(
+        engine.optimizer
+    )
+
+    print()
+    print("RISK BUDGET ENGINE:")
+    print(
+        engine.optimizer.risk_budget_engine
+    )
+
+    print()
+    print("BLACK-LITTERMAN:")
+    print(
+        engine.black_litterman
     )
 
     # --------------------------------------------------------------
-    # RUN ENGINE
-    #
-    # IMPORTANT:
-    # `returns` is passed for covariance/risk estimation.
-    #
-    # `expected_returns` is supplied explicitly because the
-    # ExpectedReturnForecaster operates on PRICE history.
+    # DEPENDENCY VALIDATION
+    # --------------------------------------------------------------
+
+    if engine.optimizer is None:
+        fail(
+            "Production engine has no PortfolioOptimizer."
+        )
+
+    if engine.optimizer.risk_budget_engine is None:
+        fail(
+            "PortfolioOptimizer has no RiskBudgetEngine."
+        )
+
+    if engine.optimizer.constraints is None:
+        fail(
+            "PortfolioOptimizer has no PortfolioConstraints."
+        )
+
+    if engine.black_litterman is None:
+        fail(
+            "Production engine has no Black-Litterman component."
+        )
+
+    # --------------------------------------------------------------
+    # FINAL INPUT VALIDATION
+    # --------------------------------------------------------------
+
+    if len(TICKERS) != EXPECTED_ASSET_COUNT:
+        fail(
+            "Step 8 is not operating on the complete 14-asset "
+            "production universe."
+        )
+
+    if list(
+        returns.columns
+    ) != TICKERS:
+        fail(
+            "Production return history does not match the "
+            "14-asset universe."
+        )
+
+    if set(
+        expected_returns
+    ) != set(TICKERS):
+        fail(
+            "Expected-return assets do not match the "
+            "14-asset universe."
+        )
+
+    if set(
+        portfolio["weights"]
+    ) != set(TICKERS):
+        fail(
+            "Portfolio assets do not match the "
+            "14-asset universe."
+        )
+
+    # --------------------------------------------------------------
+    # PRODUCTION DECISION
     # --------------------------------------------------------------
 
     print()
     print(
-        "RUNNING PRODUCTION DECISION..."
+        "RUNNING 14-ASSET PRODUCTION DECISION..."
     )
 
-    decision = engine.decide(
+    try:
+        decision = engine.decide(
+            portfolio=portfolio,
+            returns=returns,
+            macro_data=macro_data,
+            expected_returns=expected_returns,
+            regimes=regimes,
+            scenarios=None,
+        )
+    except Exception as exc:
+        fail(
+            "PortfolioDecisionEngine.decide() raised an "
+            f"unexpected exception: {type(exc).__name__}: {exc}"
+        )
 
-        portfolio=portfolio,
+    if decision is None:
+        fail(
+            "PortfolioDecisionEngine returned None."
+        )
 
-        returns=returns,
-
-        macro_data=macro_data,
-
-        expected_returns=expected_returns,
-
-        regimes=regimes,
-
-        scenarios=None,
-    )
-
-    # ==================================================================
-    # RESULT
-    # ==================================================================
+    # --------------------------------------------------------------
+    # DISPLAY DECISION
+    # --------------------------------------------------------------
 
     print()
     print("STATUS:")
@@ -1168,6 +1550,12 @@ def run_production_decision(
     )
 
     print()
+    print("SCENARIO RESULTS:")
+    print(
+        decision.scenario_results
+    )
+
+    print()
     print("WARNINGS:")
     print(
         decision.warnings
@@ -1185,64 +1573,285 @@ def run_production_decision(
         decision.diagnostics
     )
 
-    # ==================================================================
-    # VALIDATION
-    # ==================================================================
+    # --------------------------------------------------------------
+    # DECISION VALIDATION
+    # --------------------------------------------------------------
 
-    assert decision.status != "FAILED", (
-        "Production decision failed: "
-        f"{decision.errors}"
-    )
-
-    assert decision.approved is True, (
-        "Production decision was not approved: "
-        f"{decision.errors}"
-    )
-
-    assert decision.regime is not None
-
-    assert len(
-        decision.tickers
-    ) == len(TICKERS)
-
-    assert len(
-        decision.weights
-    ) == len(TICKERS)
-
-    assert len(
-        decision.expected_returns
-    ) == len(TICKERS)
-
-    assert (
-        decision.portfolio_variance
-        >= 0.0
-    )
-
-    assert (
-        decision.portfolio_volatility
-        >= 0.0
-    )
-
-    assert abs(
-        sum(
-            decision.weights.values()
+    if decision.status == "FAILED":
+        fail(
+            "Production decision failed: "
+            f"{decision.errors}"
         )
-        - 1.0
-    ) < 1e-8
 
-    assert (
+    if decision.approved is not True:
+        fail(
+            "Production decision was not approved: "
+            f"{decision.errors}"
+        )
+
+    if decision.regime is None:
+        fail(
+            "Production decision did not return a regime."
+        )
+
+    decision_tickers = list(
+        decision.tickers
+    )
+
+    if decision_tickers != TICKERS:
+        fail(
+            "Decision ticker ordering does not match the "
+            "14-asset production universe.\n"
+            f"Expected: {TICKERS}\n"
+            f"Received: {decision_tickers}"
+        )
+
+    if len(
+        decision.weights
+    ) != EXPECTED_ASSET_COUNT:
+        fail(
+            "Production decision returned "
+            f"{len(decision.weights)} weights; expected "
+            f"{EXPECTED_ASSET_COUNT}."
+        )
+
+    if set(
+        decision.weights
+    ) != set(TICKERS):
+        fail(
+            "Production decision weight assets do not match "
+            "the production universe."
+        )
+
+    if len(
+        decision.expected_returns
+    ) != EXPECTED_ASSET_COUNT:
+        fail(
+            "Production decision returned "
+            f"{len(decision.expected_returns)} expected returns; "
+            f"expected {EXPECTED_ASSET_COUNT}."
+        )
+
+    if set(
+        decision.expected_returns
+    ) != set(TICKERS):
+        fail(
+            "Production decision expected-return assets do not "
+            "match the production universe."
+        )
+
+    # --------------------------------------------------------------
+    # WEIGHT VALIDATION
+    # --------------------------------------------------------------
+
+    weight_values = np.asarray(
+        list(
+            decision.weights.values()
+        ),
+        dtype=float,
+    )
+
+    if not np.isfinite(
+        weight_values
+    ).all():
+        fail(
+            "Production decision contains non-finite weights."
+        )
+
+    weight_sum = float(
+        weight_values.sum()
+    )
+
+    if not np.isclose(
+        weight_sum,
+        1.0,
+        atol=NUMERIC_TOLERANCE,
+    ):
+        fail(
+            "Production decision weights do not sum to one: "
+            f"{weight_sum}"
+        )
+
+    if (
+        weight_values < -NUMERIC_TOLERANCE
+    ).any():
+        fail(
+            "Production decision contains negative weights."
+        )
+
+    # --------------------------------------------------------------
+    # EXPECTED RETURN VALIDATION
+    # --------------------------------------------------------------
+
+    expected_return_values = np.asarray(
+        list(
+            decision.expected_returns.values()
+        ),
+        dtype=float,
+    )
+
+    if not np.isfinite(
+        expected_return_values
+    ).all():
+        fail(
+            "Production decision contains non-finite expected returns."
+        )
+
+    # --------------------------------------------------------------
+    # PORTFOLIO METRIC VALIDATION
+    # --------------------------------------------------------------
+
+    portfolio_return = float(
+        decision.portfolio_return
+    )
+
+    portfolio_variance = float(
+        decision.portfolio_variance
+    )
+
+    portfolio_volatility = float(
+        decision.portfolio_volatility
+    )
+
+    gross_exposure = float(
         decision.gross_exposure
-        >= 0.0
     )
 
-    assert (
-        decision.number_of_positions
-        == len(TICKERS)
+    net_exposure = float(
+        decision.net_exposure
     )
 
-    health = (
-        engine.health_check()
+    if not np.isfinite(
+        portfolio_return
+    ):
+        fail(
+            "Portfolio return is non-finite."
+        )
+
+    if not np.isfinite(
+        portfolio_variance
+    ):
+        fail(
+            "Portfolio variance is non-finite."
+        )
+
+    if not np.isfinite(
+        portfolio_volatility
+    ):
+        fail(
+            "Portfolio volatility is non-finite."
+        )
+
+    if not np.isfinite(
+        gross_exposure
+    ):
+        fail(
+            "Gross exposure is non-finite."
+        )
+
+    if not np.isfinite(
+        net_exposure
+    ):
+        fail(
+            "Net exposure is non-finite."
+        )
+
+    if portfolio_variance < -NUMERIC_TOLERANCE:
+        fail(
+            "Portfolio variance is negative: "
+            f"{portfolio_variance}"
+        )
+
+    if portfolio_volatility < -NUMERIC_TOLERANCE:
+        fail(
+            "Portfolio volatility is negative: "
+            f"{portfolio_volatility}"
+        )
+
+    if gross_exposure < -NUMERIC_TOLERANCE:
+        fail(
+            "Gross exposure is negative: "
+            f"{gross_exposure}"
+        )
+
+    # --------------------------------------------------------------
+    # POSITION COUNT
+    # --------------------------------------------------------------
+
+    positive_positions = sum(
+        abs(
+            float(weight)
+        ) > NUMERIC_TOLERANCE
+        for weight in decision.weights.values()
     )
+
+    if decision.number_of_positions != positive_positions:
+        fail(
+            "Decision number_of_positions does not match "
+            "the number of non-zero portfolio weights.\n"
+            f"Reported: {decision.number_of_positions}\n"
+            f"Calculated: {positive_positions}"
+        )
+
+    if decision.number_of_positions <= 0:
+        fail(
+            "Production decision contains no active positions."
+        )
+
+    # --------------------------------------------------------------
+    # RISK CONTRIBUTION VALIDATION
+    # --------------------------------------------------------------
+
+    if set(
+        decision.risk_contributions
+    ) != set(TICKERS):
+        fail(
+            "Risk-contribution assets do not match the "
+            "production universe."
+        )
+
+    if set(
+        decision.risk_contribution_pct
+    ) != set(TICKERS):
+        fail(
+            "Risk-contribution percentage assets do not match "
+            "the production universe."
+        )
+
+    risk_contributions = np.asarray(
+        list(
+            decision.risk_contributions.values()
+        ),
+        dtype=float,
+    )
+
+    risk_contribution_pct = np.asarray(
+        list(
+            decision.risk_contribution_pct.values()
+        ),
+        dtype=float,
+    )
+
+    if not np.isfinite(
+        risk_contributions
+    ).all():
+        fail(
+            "Risk contributions contain non-finite values."
+        )
+
+    if not np.isfinite(
+        risk_contribution_pct
+    ).all():
+        fail(
+            "Risk contribution percentages contain "
+            "non-finite values."
+        )
+
+    # --------------------------------------------------------------
+    # ENGINE HEALTH
+    # --------------------------------------------------------------
+
+    health = engine.health_check()
 
     print()
     print("ENGINE HEALTH:")
@@ -1250,12 +1859,111 @@ def run_production_decision(
         health
     )
 
-    assert health["healthy"] is True
+    if health.get(
+        "healthy"
+    ) is not True:
+        fail(
+            "Production engine health check failed: "
+            f"{health}"
+        )
+
+    # --------------------------------------------------------------
+    # DETERMINISM CHECK
+    #
+    # Re-run the exact same decision using the same inputs.
+    # The resulting production weights and key metrics must be
+    # numerically stable.
+    # --------------------------------------------------------------
+
+    print()
+    print("DETERMINISM CHECK:")
+
+    second_decision = engine.decide(
+        portfolio=portfolio,
+        returns=returns,
+        macro_data=macro_data,
+        expected_returns=expected_returns,
+        regimes=regimes,
+        scenarios=None,
+    )
+
+    if second_decision.status != decision.status:
+        fail(
+            "Production decision status is not deterministic."
+        )
+
+    if second_decision.approved != decision.approved:
+        fail(
+            "Production approval state is not deterministic."
+        )
+
+    if second_decision.regime != decision.regime:
+        fail(
+            "Production regime is not deterministic."
+        )
+
+    for ticker in TICKERS:
+
+        first_weight = float(
+            decision.weights[ticker]
+        )
+
+        second_weight = float(
+            second_decision.weights[ticker]
+        )
+
+        if not np.isclose(
+            first_weight,
+            second_weight,
+            atol=1e-10,
+            rtol=1e-10,
+        ):
+            fail(
+                "Production weight is not deterministic for "
+                f"{ticker}: "
+                f"{first_weight} vs {second_weight}"
+            )
+
+    if not np.isclose(
+        float(
+            decision.portfolio_variance
+        ),
+        float(
+            second_decision.portfolio_variance
+        ),
+        atol=1e-10,
+        rtol=1e-10,
+    ):
+        fail(
+            "Portfolio variance is not deterministic."
+        )
+
+    if not np.isclose(
+        float(
+            decision.portfolio_volatility
+        ),
+        float(
+            second_decision.portfolio_volatility
+        ),
+        atol=1e-10,
+        rtol=1e-10,
+    ):
+        fail(
+            "Portfolio volatility is not deterministic."
+        )
+
+    print(
+        "PASSED"
+    )
+
+    # --------------------------------------------------------------
+    # FINAL STATUS
+    # --------------------------------------------------------------
 
     print()
     print("=" * 80)
     print(
-        "STEP 8 PASSED — HISTORICAL DATA "
+        "STEP 8 PASSED — 14-ASSET HISTORICAL DATA "
         "PRODUCTION INTEGRATION SUCCESSFUL"
     )
     print("=" * 80)
@@ -1264,13 +1972,14 @@ def run_production_decision(
 
 
 # ======================================================================
-# SECTION 11 — MAIN
+# SECTION 14 — MAIN
 # ======================================================================
 
 def main() -> None:
+    """Execute the complete Step 8 integration test."""
 
     banner(
-        "STEP 8 — HISTORICAL DATA PRODUCTION TEST"
+        "STEP 8 — 14-ASSET HISTORICAL DATA PRODUCTION TEST"
     )
 
     print()
@@ -1297,80 +2006,89 @@ def main() -> None:
         HISTORY_PERIOD,
     )
 
-    # --------------------------------------------------------------
-    # MARKET
-    # --------------------------------------------------------------
+    print()
+    print(
+        "Minimum observations:",
+        MIN_OBSERVATIONS,
+    )
 
-    prices, returns = (
-        load_market_data()
+    print()
+    print(
+        "Regime lookback:",
+        REGIME_LOOKBACK,
     )
 
     # --------------------------------------------------------------
-    # FRED
+    # 1. HISTORICAL MARKET DATA
     # --------------------------------------------------------------
 
-    macro_df = (
-        load_fred_data(
-            prices.index
-        )
+    prices, returns = load_market_data()
+
+    # --------------------------------------------------------------
+    # 2. FRED MACRO DATA
+    # --------------------------------------------------------------
+
+    macro_df = load_fred_data(
+        prices.index
     )
 
     # --------------------------------------------------------------
-    # REGIMES
+    # 3. HISTORICAL REGIMES
     # --------------------------------------------------------------
 
-    regimes = (
-        build_regime_history(
-            macro_df
-        )
+    regimes = build_regime_history(
+        macro_df
     )
 
     # --------------------------------------------------------------
-    # CURRENT MACRO STATE
+    # 4. CURRENT MACRO STATE
     # --------------------------------------------------------------
 
-    macro_data = (
-        build_current_macro_data(
-            macro_df
-        )
+    macro_data = build_current_macro_data(
+        macro_df
     )
 
     # --------------------------------------------------------------
-    # EXPECTED RETURNS
+    # 5. EXPECTED RETURNS
     # --------------------------------------------------------------
 
-    expected_returns = (
-        build_expected_returns(
-            prices
-        )
+    expected_returns = build_expected_returns(
+        prices
     )
 
     # --------------------------------------------------------------
-    # PORTFOLIO
+    # 6. INPUT PORTFOLIO
     # --------------------------------------------------------------
 
-    portfolio = (
-        build_portfolio()
+    portfolio = build_portfolio()
+
+    # --------------------------------------------------------------
+    # 7. ALIGN DECISION HISTORY
+    # --------------------------------------------------------------
+
+    (
+        prices,
+        aligned_returns,
+        aligned_macro,
+        aligned_regimes,
+    ) = align_production_history(
+        prices=prices,
+        returns=returns,
+        macro_df=macro_df,
+        regimes=regimes,
     )
 
     # --------------------------------------------------------------
-    # PRODUCTION DECISION
+    # 8. RUN PRODUCTION DECISION
     # --------------------------------------------------------------
 
     run_production_decision(
-
         prices=prices,
-
-        returns=returns,
-
-        macro_df=macro_df,
-
-        regimes=regimes,
-
+        returns=aligned_returns,
+        macro_df=aligned_macro,
+        regimes=aligned_regimes,
         macro_data=macro_data,
-
         expected_returns=expected_returns,
-
         portfolio=portfolio,
     )
 
@@ -1380,5 +2098,4 @@ def main() -> None:
 # ======================================================================
 
 if __name__ == "__main__":
-
     main()

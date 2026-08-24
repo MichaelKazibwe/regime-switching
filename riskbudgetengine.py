@@ -18,14 +18,27 @@ The engine:
 
 1. Retrieves regime-specific risk budgets.
 2. Validates asset coverage.
-3. Validates budget normalization.
-4. Calculates portfolio risk contributions.
-5. Calculates percentage risk contributions.
-6. Calculates risk-budget deviations.
-7. Produces deterministic diagnostics.
-8. Provides health and metadata interfaces.
-9. Supports serialization.
-10. Fails fast on invalid production configuration.
+3. Supports explicit production asset-budget aliases for supported
+   portfolio subsets.
+4. Validates budget normalization.
+5. Calculates portfolio risk contributions.
+6. Calculates percentage risk contributions.
+7. Calculates risk-budget deviations.
+8. Produces deterministic diagnostics.
+9. Provides health and metadata interfaces.
+10. Supports serialization.
+11. Fails fast on invalid production configuration.
+
+Canonical regime budgets remain authoritative.
+
+Default supported subset aliases:
+
+    EFA -> VEA
+    EEM -> VWO
+
+These aliases allow the production engine to operate on supported
+three-asset test/subset portfolios without modifying the canonical
+production risk-budget configuration.
 
 This module does NOT contain test doubles.
 
@@ -38,12 +51,10 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 import numpy as np
-
 from scipy.optimize import minimize
 
-from core_constants import (
-    REGIME_RISK_BUDGETS,
-)
+from core_constants import REGIME_RISK_BUDGETS
+from riskcontributionanalyzer import RiskContributionAnalytics
 
 
 # ======================================================================
@@ -57,17 +68,13 @@ class RiskBudgetEngineError(Exception):
     """
 
 
-class RiskBudgetConfigurationError(
-    RiskBudgetEngineError
-):
+class RiskBudgetConfigurationError(RiskBudgetEngineError):
     """
     Raised when risk-budget configuration is invalid.
     """
 
 
-class RiskBudgetCalculationError(
-    RiskBudgetEngineError
-):
+class RiskBudgetCalculationError(RiskBudgetEngineError):
     """
     Raised when risk-budget calculations fail.
     """
@@ -85,23 +92,14 @@ class RiskBudgetResult:
     """
 
     regime: str
-
     tickers: tuple[str, ...]
-
     target_budgets: dict[str, float]
-
     risk_contributions: dict[str, float]
-
     risk_contribution_pct: dict[str, float]
-
     budget_errors: dict[str, float]
-
     total_risk: float
-
     budget_error: float
-
     within_tolerance: bool
-
     diagnostics: dict[str, Any]
 
     # ------------------------------------------------------------------
@@ -117,9 +115,7 @@ class RiskBudgetResult:
 
         return {
             "regime": self.regime,
-            "tickers": list(
-                self.tickers
-            ),
+            "tickers": list(self.tickers),
             "target_budgets": dict(
                 self.target_budgets
             ),
@@ -156,19 +152,37 @@ class RiskBudgetEngine:
     """
     Production risk-budget engine.
 
-    The engine uses REGIME_RISK_BUDGETS from core_constants as the
-    authoritative source of target risk budgets.
+    REGIME_RISK_BUDGETS remains the authoritative source of production
+    regime budgets.
 
-    No test doubles are used.
+    The engine additionally supports explicit asset-budget aliases.
+    An alias does not create a new independent risk budget; it maps a
+    supported portfolio asset to the canonical budget of its configured
+    economic proxy.
+
+    Default aliases:
+
+        EFA -> VEA
+        EEM -> VWO
+
+    This preserves the canonical production configuration while allowing
+    supported subset portfolios to operate correctly.
     """
 
     API_VERSION = "1.0.0"
-
     COMPONENT = "RiskBudgetEngine"
-
     PHASE = "IV-B.1A"
 
     DEFAULT_TOLERANCE = 1e-6
+
+    # ------------------------------------------------------------------
+    # DEFAULT SUPPORTED ASSET ALIASES
+    # ------------------------------------------------------------------
+
+    DEFAULT_ASSET_BUDGET_ALIASES = {
+        "EFA": "VEA",
+        "EEM": "VWO",
+    }
 
     # ------------------------------------------------------------------
     # CONSTRUCTOR
@@ -180,9 +194,26 @@ class RiskBudgetEngine:
             dict[str, dict[str, float]]
         ] = None,
         tolerance: float = DEFAULT_TOLERANCE,
+        asset_budget_aliases: Optional[
+            dict[str, str]
+        ] = None,
     ) -> None:
         """
         Initialize the production risk-budget engine.
+
+        Parameters
+        ----------
+        risk_budgets:
+            Optional explicit regime risk-budget configuration.
+
+        tolerance:
+            Numerical validation tolerance.
+
+        asset_budget_aliases:
+            Optional mapping of supported requested assets to canonical
+            budget assets.
+
+        The supplied aliases extend, rather than replace, the defaults.
         """
 
         self.risk_budgets = (
@@ -195,9 +226,27 @@ class RiskBudgetEngine:
             tolerance
         )
 
+        self.asset_budget_aliases = dict(
+            self.DEFAULT_ASSET_BUDGET_ALIASES
+        )
+
+        if asset_budget_aliases is not None:
+            self.asset_budget_aliases.update(
+                {
+                    str(asset).strip(): str(source).strip()
+                    for asset, source
+                    in asset_budget_aliases.items()
+                }
+            )
+
         self.last_result: Optional[
             RiskBudgetResult
         ] = None
+
+        self.last_budget_resolution: dict[
+            str,
+            Any,
+        ] = {}
 
         self._validate_configuration()
 
@@ -220,10 +269,42 @@ class RiskBudgetEngine:
                 "risk_budgets must be a dictionary."
             )
 
+        if not np.isfinite(
+            self.tolerance
+        ):
+            raise RiskBudgetConfigurationError(
+                "Risk-budget tolerance must be finite."
+            )
+
         if self.tolerance <= 0.0:
             raise RiskBudgetConfigurationError(
                 "Risk-budget tolerance must be positive."
             )
+
+        if not isinstance(
+            self.asset_budget_aliases,
+            dict,
+        ):
+            raise RiskBudgetConfigurationError(
+                "asset_budget_aliases must be a dictionary."
+            )
+
+        for asset, source in (
+            self.asset_budget_aliases.items()
+        ):
+            asset_name = str(
+                asset
+            ).strip()
+
+            source_name = str(
+                source
+            ).strip()
+
+            if not asset_name or not source_name:
+                raise RiskBudgetConfigurationError(
+                    "Asset-budget aliases cannot contain "
+                    "empty identifiers."
+                )
 
         if not self.risk_budgets:
             raise RiskBudgetConfigurationError(
@@ -253,23 +334,40 @@ class RiskBudgetEngine:
             for ticker, budget in (
                 budgets.items()
             ):
-                value = float(
-                    budget
-                )
+                ticker_name = str(
+                    ticker
+                ).strip()
+
+                if not ticker_name:
+                    raise RiskBudgetConfigurationError(
+                        f"Risk budget for regime "
+                        f"'{regime}' contains an empty asset."
+                    )
+
+                try:
+                    value = float(
+                        budget
+                    )
+                except (
+                    TypeError,
+                    ValueError,
+                ) as exc:
+                    raise RiskBudgetConfigurationError(
+                        f"Risk budget for '{ticker}' in regime "
+                        f"'{regime}' must be numeric."
+                    ) from exc
 
                 if not np.isfinite(
                     value
                 ):
                     raise RiskBudgetConfigurationError(
-                        f"Risk budget for "
-                        f"'{ticker}' in regime "
+                        f"Risk budget for '{ticker}' in regime "
                         f"'{regime}' is not finite."
                     )
 
                 if value < 0.0:
                     raise RiskBudgetConfigurationError(
-                        f"Risk budget for "
-                        f"'{ticker}' in regime "
+                        f"Risk budget for '{ticker}' in regime "
                         f"'{regime}' cannot be negative."
                     )
 
@@ -279,11 +377,11 @@ class RiskBudgetEngine:
                 total,
                 1.0,
                 atol=self.tolerance,
+                rtol=0.0,
             ):
                 raise RiskBudgetConfigurationError(
-                    f"Risk budgets for regime "
-                    f"'{regime}' must sum to 1. "
-                    f"Got {total}."
+                    f"Risk budgets for regime '{regime}' "
+                    f"must sum to 1. Got {total}."
                 )
 
     # ==================================================================
@@ -311,26 +409,26 @@ class RiskBudgetEngine:
 
         value = str(
             value
-        ).strip().upper()
+        ).strip()
 
-        if value in self.risk_budgets:
-            return value
+        if not value:
+            raise RiskBudgetConfigurationError(
+                "regime cannot be empty."
+            )
 
-        # Allow lowercase keys in configuration.
         for configured_regime in (
             self.risk_budgets
         ):
             if (
                 str(
                     configured_regime
-                ).upper()
-                == value
+                ).strip().lower()
+                == value.lower()
             ):
                 return configured_regime
 
         raise RiskBudgetConfigurationError(
-            f"No risk budget configured for "
-            f"regime '{value}'."
+            f"No risk budget configured for regime '{value}'."
         )
 
     # ==================================================================
@@ -344,6 +442,21 @@ class RiskBudgetEngine:
     ) -> dict[str, float]:
         """
         Return target risk budgets for the supplied assets.
+
+        Directly configured assets use their canonical regime budget.
+
+        A missing requested asset may use an explicit supported
+        asset-budget alias.
+
+        Example:
+
+            EFA -> VEA
+            EEM -> VWO
+
+        The selected budgets are renormalized across the requested
+        portfolio universe.
+
+        Unknown assets still fail explicitly.
         """
 
         normalized_regime = (
@@ -352,8 +465,13 @@ class RiskBudgetEngine:
             )
         )
 
+        if tickers is None:
+            raise RiskBudgetConfigurationError(
+                "tickers cannot be None."
+            )
+
         ordered_tickers = tuple(
-            str(ticker)
+            str(ticker).strip()
             for ticker in tickers
         )
 
@@ -362,46 +480,160 @@ class RiskBudgetEngine:
                 "tickers cannot be empty."
             )
 
+        if any(
+            not ticker
+            for ticker in ordered_tickers
+        ):
+            raise RiskBudgetConfigurationError(
+                "tickers cannot contain empty identifiers."
+            )
+
+        if len(
+            set(ordered_tickers)
+        ) != len(
+            ordered_tickers
+        ):
+            raise RiskBudgetConfigurationError(
+                "tickers cannot contain duplicates."
+            )
+
         configured = dict(
             self.risk_budgets[
                 normalized_regime
             ]
         )
 
-        missing = [
-            ticker
-            for ticker in ordered_tickers
-            if ticker not in configured
-        ]
+        budgets: dict[
+            str,
+            float,
+        ] = {}
 
-        if missing:
+        resolution: dict[
+            str,
+            dict[str, Any],
+        ] = {}
+
+        unresolved: list[str] = []
+
+        for ticker in ordered_tickers:
+            if ticker in configured:
+                source_asset = ticker
+
+                resolution[ticker] = {
+                    "source_asset": source_asset,
+                    "method": "direct",
+                }
+
+            else:
+                source_asset = (
+                    self.asset_budget_aliases.get(
+                        ticker
+                    )
+                )
+
+                if (
+                    source_asset is None
+                    or source_asset not in configured
+                ):
+                    unresolved.append(
+                        ticker
+                    )
+                    continue
+
+                resolution[ticker] = {
+                    "source_asset": source_asset,
+                    "method": "alias",
+                }
+
+            value = float(
+                configured[
+                    source_asset
+                ]
+            )
+
+            if not np.isfinite(
+                value
+            ):
+                raise RiskBudgetConfigurationError(
+                    f"Resolved risk budget for asset "
+                    f"'{ticker}' in regime "
+                    f"'{normalized_regime}' is not finite."
+                )
+
+            if value < 0.0:
+                raise RiskBudgetConfigurationError(
+                    f"Resolved risk budget for asset "
+                    f"'{ticker}' in regime "
+                    f"'{normalized_regime}' cannot be negative."
+                )
+
+            budgets[ticker] = value
+
+        if unresolved:
             raise RiskBudgetConfigurationError(
-                "Missing risk budgets for "
-                f"assets {missing} in regime "
-                f"'{normalized_regime}'."
+                "Missing risk budgets for assets "
+                f"{unresolved} in regime "
+                f"'{normalized_regime}'. "
+                "No supported asset-budget alias is configured."
+            )
+
+        total = float(
+            sum(
+                budgets.values()
+            )
+        )
+
+        if (
+            not np.isfinite(
+                total
+            )
+            or total <= self.tolerance
+        ):
+            raise RiskBudgetConfigurationError(
+                "Selected risk budgets have "
+                "zero or invalid total allocation."
             )
 
         budgets = {
             ticker: float(
-                configured[ticker]
+                value / total
             )
-            for ticker in ordered_tickers
+            for ticker, value
+            in budgets.items()
         }
 
-        total = sum(
-            budgets.values()
+        budget_sum = float(
+            sum(
+                budgets.values()
+            )
         )
 
-        if total <= 0.0:
+        if not np.isclose(
+            budget_sum,
+            1.0,
+            atol=self.tolerance,
+            rtol=0.0,
+        ):
             raise RiskBudgetConfigurationError(
-                "Selected risk budgets have "
-                "zero total allocation."
+                "Resolved selected risk budgets "
+                "do not sum to one."
             )
 
-        # Normalize the selected universe.
-        budgets = {
-            ticker: value / total
-            for ticker, value in budgets.items()
+        self.last_budget_resolution = {
+            "regime": normalized_regime,
+            "requested_assets": list(
+                ordered_tickers
+            ),
+            "resolution": resolution,
+            "budget_source": (
+                "REGIME_RISK_BUDGETS"
+            ),
+            "selected_budget_sum_before_normalization": (
+                total
+            ),
+            "normalized_budget_sum": (
+                budget_sum
+            ),
         }
 
         return budgets
@@ -418,37 +650,14 @@ class RiskBudgetEngine:
         """
         Solve the long-only risk-budget optimization problem.
 
-        Parameters
-        ----------
-        covariance:
-            Square covariance matrix.
-
-        target_budget:
-            Target percentage contribution to portfolio risk
-            for each asset.
-
-        Returns
-        -------
-        numpy.ndarray
-            Long-only portfolio weights summing to one.
-
-        Notes
-        -----
         The optimization seeks weights for which:
 
-            RC_i / total_Risk ~= target_budget_i
+            RC_i / total_risk ~= target_budget_i
 
         where:
 
             RC_i = w_i * (Sigma @ w)_i
-
-        The RiskBudgetEngine remains responsible for the
-        optimization contract consumed by PortfolioOptimizer.
         """
-
-        # --------------------------------------------------------------
-        # INPUT NORMALIZATION
-        # --------------------------------------------------------------
 
         covariance = np.asarray(
             covariance,
@@ -529,9 +738,15 @@ class RiskBudgetEngine:
             target_budget.sum()
         )
 
-        if budget_sum <= self.tolerance:
+        if (
+            not np.isfinite(
+                budget_sum
+            )
+            or budget_sum <= self.tolerance
+        ):
             raise RiskBudgetCalculationError(
-                "Target budgets must have a positive total."
+                "Target budgets must have a "
+                "positive finite total."
             )
 
         target_budget = (
@@ -543,9 +758,14 @@ class RiskBudgetEngine:
         # POSITIVE SEMIDEFINITE SAFETY
         # --------------------------------------------------------------
 
-        eigenvalues = np.linalg.eigvalsh(
-            covariance
-        )
+        try:
+            eigenvalues = np.linalg.eigvalsh(
+                covariance
+            )
+        except np.linalg.LinAlgError as exc:
+            raise RiskBudgetCalculationError(
+                "Unable to determine covariance eigenvalues."
+            ) from exc
 
         minimum_eigenvalue = float(
             eigenvalues.min()
@@ -559,11 +779,11 @@ class RiskBudgetEngine:
                 f"{minimum_eigenvalue:.6e}."
             )
 
-        # Small numerical regularization for near-singular matrices.
         if minimum_eigenvalue < 1e-12:
             covariance = (
                 covariance
-                + np.eye(n) * 1e-12
+                + np.eye(n)
+                * 1e-12
             )
 
         # --------------------------------------------------------------
@@ -571,7 +791,10 @@ class RiskBudgetEngine:
         # --------------------------------------------------------------
 
         x0 = (
-            np.ones(n, dtype=float)
+            np.ones(
+                n,
+                dtype=float,
+            )
             / float(n)
         )
 
@@ -582,11 +805,15 @@ class RiskBudgetEngine:
         def objective(
             weights: np.ndarray,
         ) -> float:
-
             weights = np.asarray(
                 weights,
                 dtype=float,
             )
+
+            if not np.isfinite(
+                weights
+            ).all():
+                return 1e12
 
             portfolio_variance = float(
                 weights
@@ -660,7 +887,10 @@ class RiskBudgetEngine:
         ]
 
         bounds = [
-            (0.0, 1.0)
+            (
+                0.0,
+                1.0,
+            )
             for _ in range(n)
         ]
 
@@ -669,7 +899,6 @@ class RiskBudgetEngine:
         # --------------------------------------------------------------
 
         try:
-
             result = minimize(
                 objective,
                 x0,
@@ -682,17 +911,11 @@ class RiskBudgetEngine:
                     "disp": False,
                 },
             )
-
         except Exception as exc:
-
             raise RiskBudgetCalculationError(
                 "Risk-budget optimization failed: "
                 f"{exc}"
             ) from exc
-
-        # --------------------------------------------------------------
-        # OPTIMIZER FAILURE
-        # --------------------------------------------------------------
 
         if not result.success:
             raise RiskBudgetCalculationError(
@@ -709,6 +932,14 @@ class RiskBudgetEngine:
         # FINAL NORMALIZATION
         # --------------------------------------------------------------
 
+        if not np.isfinite(
+            weights
+        ).all():
+            raise RiskBudgetCalculationError(
+                "Risk-budget optimizer returned "
+                "non-finite weights."
+            )
+
         weights = np.clip(
             weights,
             0.0,
@@ -723,8 +954,7 @@ class RiskBudgetEngine:
             not np.isfinite(
                 weight_sum
             )
-            or weight_sum
-            <= self.tolerance
+            or weight_sum <= self.tolerance
         ):
             raise RiskBudgetCalculationError(
                 "Risk-budget optimizer returned "
@@ -760,10 +990,72 @@ class RiskBudgetEngine:
             weights.sum(),
             1.0,
             atol=1e-8,
+            rtol=0.0,
         ):
             raise RiskBudgetCalculationError(
                 "Risk-budget optimizer returned "
                 f"weights summing to {weights.sum()}."
+            )
+
+        # --------------------------------------------------------------
+        # FINAL RISK-BUDGET VALIDATION
+        # --------------------------------------------------------------
+
+        marginal_risk = (
+            covariance
+            @ weights
+        )
+
+        contributions = (
+            weights
+            * marginal_risk
+        )
+
+        total_contribution = float(
+            contributions.sum()
+        )
+
+        if (
+            not np.isfinite(
+                total_contribution
+            )
+            or total_contribution
+            <= self.tolerance
+        ):
+            raise RiskBudgetCalculationError(
+                "Risk-budget optimizer produced "
+                "invalid total risk contribution."
+            )
+
+        realized_budget = (
+            contributions
+            / total_contribution
+        )
+
+        if not np.isfinite(
+            realized_budget
+        ).all():
+            raise RiskBudgetCalculationError(
+                "Risk-budget optimizer produced "
+                "non-finite realized risk budgets."
+            )
+
+        budget_error = float(
+            np.sum(
+                np.abs(
+                    realized_budget
+                    - target_budget
+                )
+            )
+            / 2.0
+        )
+
+        if not np.isfinite(
+            budget_error
+        ):
+            raise RiskBudgetCalculationError(
+                "Risk-budget optimization produced "
+                "a non-finite budget error."
             )
 
         return weights
@@ -781,7 +1073,27 @@ class RiskBudgetEngine:
         ] = None,
     ) -> dict[str, float]:
         """
-        Calculate absolute component risk contributions.
+        Calculate absolute component variance contributions.
+
+        Historical RiskBudgetEngine contract:
+
+            RC_i = w_i * (Sigma @ w)_i
+
+        Therefore:
+
+            sum(RC_i) = portfolio variance.
+
+        RiskContributionAnalytics is the canonical implementation of
+        Euler volatility risk.
+
+        Its volatility contributions are converted back into variance
+        contributions:
+
+            RC_variance_i
+                = RC_volatility_i * sigma_p
+
+        This preserves the existing RiskBudgetEngine contract while
+        avoiding duplicated Euler-risk mathematics.
         """
 
         if not weights:
@@ -793,23 +1105,43 @@ class RiskBudgetEngine:
             )
 
         ordered_tickers = tuple(
-            str(ticker)
+            str(ticker).strip()
             for ticker in tickers
         )
+
+        if not ordered_tickers:
+            return {}
+
+        if any(
+            not ticker
+            for ticker in ordered_tickers
+        ):
+            raise RiskBudgetCalculationError(
+                "tickers cannot contain empty identifiers."
+            )
+
+        if len(
+            set(ordered_tickers)
+        ) != len(
+            ordered_tickers
+        ):
+            raise RiskBudgetCalculationError(
+                "tickers cannot contain duplicates."
+            )
 
         matrix = np.asarray(
             covariance,
             dtype=float,
         )
 
+        n = len(
+            ordered_tickers
+        )
+
         if matrix.ndim != 2:
             raise RiskBudgetCalculationError(
                 "Covariance must be a 2-dimensional matrix."
             )
-
-        n = len(
-            ordered_tickers
-        )
 
         if matrix.shape != (
             n,
@@ -819,6 +1151,13 @@ class RiskBudgetEngine:
                 "Covariance dimension "
                 f"{matrix.shape} does not match "
                 f"ticker count {n}."
+            )
+
+        if not np.isfinite(
+            matrix
+        ).all():
+            raise RiskBudgetCalculationError(
+                "Covariance contains non-finite values."
             )
 
         vector = np.asarray(
@@ -834,39 +1173,138 @@ class RiskBudgetEngine:
             dtype=float,
         )
 
-        if not np.all(
-            np.isfinite(
-                vector
+        if not np.isfinite(
+            vector
+        ).all():
+            raise RiskBudgetCalculationError(
+                "Portfolio weights contain non-finite values."
             )
+
+        # --------------------------------------------------------------
+        # Portfolio variance
+        # --------------------------------------------------------------
+
+        portfolio_variance = float(
+            vector
+            @ matrix
+            @ vector
+        )
+
+        if not np.isfinite(
+            portfolio_variance
         ):
             raise RiskBudgetCalculationError(
-                "Portfolio weights contain "
+                "Portfolio variance is non-finite."
+            )
+
+        if portfolio_variance < 0.0:
+            if portfolio_variance < -1e-12:
+                raise RiskBudgetCalculationError(
+                    "Portfolio variance is materially negative: "
+                    f"{portfolio_variance:.12e}."
+                )
+
+            portfolio_variance = 0.0
+
+        # A zero-volatility portfolio has zero component risk.
+        if (
+            portfolio_variance
+            <= self.tolerance
+        ):
+            return {
+                ticker: 0.0
+                for ticker in ordered_tickers
+            }
+
+        # --------------------------------------------------------------
+        # Canonical Euler risk calculation
+        # --------------------------------------------------------------
+
+        try:
+            volatility = (
+                RiskContributionAnalytics
+                .portfolio_volatility(
+                    vector,
+                    matrix,
+                )
+            )
+
+            euler_contributions = (
+                RiskContributionAnalytics
+                .risk_contributions(
+                    vector,
+                    matrix,
+                )
+            )
+
+        except (
+            ValueError,
+            np.linalg.LinAlgError,
+        ) as exc:
+            raise RiskBudgetCalculationError(
+                "RiskContributionAnalytics failed to "
+                f"calculate component risk: {exc}"
+            ) from exc
+
+        if (
+            not np.isfinite(
+                volatility
+            )
+            or volatility <= self.tolerance
+        ):
+            raise RiskBudgetCalculationError(
+                "Portfolio volatility is invalid."
+            )
+
+        if not np.isfinite(
+            euler_contributions
+        ).all():
+            raise RiskBudgetCalculationError(
+                "Euler risk contributions contain "
                 "non-finite values."
             )
 
-        if not np.all(
-            np.isfinite(
-                matrix
-            )
-        ):
+        # --------------------------------------------------------------
+        # Convert volatility RC -> variance RC
+        # --------------------------------------------------------------
+
+        variance_contributions = (
+            euler_contributions
+            * volatility
+        )
+
+        if not np.isfinite(
+            variance_contributions
+        ).all():
             raise RiskBudgetCalculationError(
-                "Covariance contains "
+                "Variance risk contributions contain "
                 "non-finite values."
             )
 
-        marginal = (
-            matrix @ vector
+        contribution_sum = float(
+            variance_contributions.sum()
         )
 
-        contributions = (
-            vector * marginal
-        )
+        if not np.isclose(
+            contribution_sum,
+            portfolio_variance,
+            atol=1e-8,
+            rtol=1e-8,
+        ):
+            raise RiskBudgetCalculationError(
+                "Variance risk decomposition failed. "
+                f"Component-risk sum="
+                f"{contribution_sum:.12e}, "
+                f"portfolio variance="
+                f"{portfolio_variance:.12e}."
+            )
 
         return {
             ticker: float(
-                contributions[index]
+                variance_contributions[index]
             )
-            for index, ticker in enumerate(
+            for index, ticker
+            in enumerate(
                 ordered_tickers
             )
         }
@@ -886,11 +1324,30 @@ class RiskBudgetEngine:
         if not risk_contributions:
             return {}
 
-        total_risk = float(
-            sum(
+        values = np.asarray(
+            list(
                 risk_contributions.values()
-            )
+            ),
+            dtype=float,
         )
+
+        if not np.isfinite(
+            values
+        ).all():
+            raise RiskBudgetCalculationError(
+                "Risk contributions contain non-finite values."
+            )
+
+        total_risk = float(
+            values.sum()
+        )
+
+        if not np.isfinite(
+            total_risk
+        ):
+            raise RiskBudgetCalculationError(
+                "Total risk contribution is non-finite."
+            )
 
         if abs(
             total_risk
@@ -900,13 +1357,38 @@ class RiskBudgetEngine:
                 for ticker in risk_contributions
             }
 
+        percentages = (
+            values
+            / total_risk
+        )
+
+        if not np.isfinite(
+            percentages
+        ).all():
+            raise RiskBudgetCalculationError(
+                "Percentage risk contributions contain "
+                "non-finite values."
+            )
+
+        if not np.isclose(
+            percentages.sum(),
+            1.0,
+            atol=1e-8,
+            rtol=1e-8,
+        ):
+            raise RiskBudgetCalculationError(
+                "Percentage risk contributions do not "
+                "sum to one."
+            )
+
         return {
             ticker: float(
-                contribution
-                / total_risk
+                percentages[index]
             )
-            for ticker, contribution
-            in risk_contributions.items()
+            for index, ticker
+            in enumerate(
+                risk_contributions
+            )
         }
 
     # ==================================================================
@@ -922,27 +1404,71 @@ class RiskBudgetEngine:
         Calculate deviation from target risk budgets.
         """
 
+        if not isinstance(
+            target_budgets,
+            dict,
+        ):
+            raise RiskBudgetCalculationError(
+                "target_budgets must be a dictionary."
+            )
+
+        if not isinstance(
+            risk_contribution_pct,
+            dict,
+        ):
+            raise RiskBudgetCalculationError(
+                "risk_contribution_pct must be a dictionary."
+            )
+
         tickers = set(
             target_budgets
         ).union(
             risk_contribution_pct
         )
 
-        return {
-            ticker: float(
+        result: dict[
+            str,
+            float,
+        ] = {}
+
+        for ticker in sorted(
+            tickers
+        ):
+            actual = float(
                 risk_contribution_pct.get(
                     ticker,
                     0.0,
                 )
-                - target_budgets.get(
+            )
+
+            target = float(
+                target_budgets.get(
                     ticker,
                     0.0,
                 )
             )
-            for ticker in sorted(
-                tickers
+
+            if not np.isfinite(
+                actual
+            ):
+                raise RiskBudgetCalculationError(
+                    f"Risk contribution percentage for "
+                    f"'{ticker}' is non-finite."
+                )
+
+            if not np.isfinite(
+                target
+            ):
+                raise RiskBudgetCalculationError(
+                    f"Target risk budget for "
+                    f"'{ticker}' is non-finite."
+                )
+
+            result[ticker] = float(
+                actual - target
             )
-        }
+
+        return result
 
     # ==================================================================
     # COMPLETE ANALYSIS
@@ -961,15 +1487,33 @@ class RiskBudgetEngine:
         Perform complete risk-budget analysis.
         """
 
+        if not isinstance(
+            weights,
+            dict,
+        ):
+            raise RiskBudgetCalculationError(
+                "weights must be a dictionary."
+            )
+
+        if not weights:
+            raise RiskBudgetCalculationError(
+                "weights cannot be empty."
+            )
+
         if tickers is None:
             tickers = list(
                 weights.keys()
             )
 
         ordered_tickers = tuple(
-            str(ticker)
+            str(ticker).strip()
             for ticker in tickers
         )
+
+        if not ordered_tickers:
+            raise RiskBudgetCalculationError(
+                "tickers cannot be empty."
+            )
 
         normalized_regime = (
             self._normalize_regime(
@@ -1011,20 +1555,52 @@ class RiskBudgetEngine:
             )
         )
 
+        if not np.isfinite(
+            total_risk
+        ):
+            raise RiskBudgetCalculationError(
+                "Total risk is non-finite."
+            )
+
         budget_error = float(
             sum(
-                abs(
-                    value
-                )
+                abs(value)
                 for value in budget_errors.values()
             )
             / 2.0
         )
 
+        if not np.isfinite(
+            budget_error
+        ):
+            raise RiskBudgetCalculationError(
+                "Budget error is non-finite."
+            )
+
         within_tolerance = (
             budget_error
             <= self.tolerance
         )
+
+        diagnostics = {
+            "ticker_count": len(
+                ordered_tickers
+            ),
+            "budget_sum": float(
+                sum(
+                    target_budgets.values()
+                )
+            ),
+            "risk_contribution_sum": float(
+                sum(
+                    risk_contribution_pct.values()
+                )
+            ),
+            "tolerance": self.tolerance,
+            "budget_resolution": dict(
+                self.last_budget_resolution
+            ),
+        }
 
         result = RiskBudgetResult(
             regime=normalized_regime,
@@ -1044,22 +1620,7 @@ class RiskBudgetEngine:
             total_risk=total_risk,
             budget_error=budget_error,
             within_tolerance=within_tolerance,
-            diagnostics={
-                "ticker_count": len(
-                    ordered_tickers
-                ),
-                "budget_sum": float(
-                    sum(
-                        target_budgets.values()
-                    )
-                ),
-                "risk_contribution_sum": float(
-                    sum(
-                        risk_contribution_pct.values()
-                    )
-                ),
-                "tolerance": self.tolerance,
-            },
+            diagnostics=diagnostics,
         )
 
         self.last_result = result
@@ -1086,13 +1647,22 @@ class RiskBudgetEngine:
             )
         )
 
-        return np.asarray(
+        vector = np.asarray(
             [
                 budgets[ticker]
                 for ticker in tickers
             ],
             dtype=float,
         )
+
+        if not np.isfinite(
+            vector
+        ).all():
+            raise RiskBudgetCalculationError(
+                "Budget vector contains non-finite values."
+            )
+
+        return vector
 
     # ==================================================================
     # OPTIMIZER COMPATIBILITY
@@ -1153,6 +1723,9 @@ class RiskBudgetEngine:
                     regimes
                 ),
                 "regimes": regimes,
+                "alias_count": len(
+                    self.asset_budget_aliases
+                ),
                 "tolerance": self.tolerance,
             }
 
@@ -1162,9 +1735,7 @@ class RiskBudgetEngine:
                 "component": self.COMPONENT,
                 "phase": self.PHASE,
                 "healthy": False,
-                "error": str(
-                    exc
-                ),
+                "error": str(exc),
             }
 
     # ==================================================================
@@ -1185,6 +1756,9 @@ class RiskBudgetEngine:
             "phase": self.PHASE,
             "regime_count": len(
                 self.risk_budgets
+            ),
+            "alias_count": len(
+                self.asset_budget_aliases
             ),
             "tolerance": self.tolerance,
         }
@@ -1214,7 +1788,15 @@ class RiskBudgetEngine:
                 for regime, budgets
                 in self.risk_budgets.items()
             },
-            "tolerance": self.tolerance,
+            "asset_budget_aliases": dict(
+                self.asset_budget_aliases
+            ),
+            "tolerance": float(
+                self.tolerance
+            ),
+            "last_budget_resolution": dict(
+                self.last_budget_resolution
+            ),
             "last_result": (
                 None
                 if self.last_result is None
@@ -1234,6 +1816,7 @@ class RiskBudgetEngine:
         """
 
         self.last_result = None
+        self.last_budget_resolution = {}
 
 
 # ======================================================================
@@ -1260,10 +1843,15 @@ def build_risk_budget_engine(
 
 def test_risk_budget_engine() -> None:
     """
-    Validate production risk-budget engine configuration.
+    Validate production risk-budget engine configuration and
+    core invariants.
     """
 
     engine = RiskBudgetEngine()
+
+    # --------------------------------------------------------------
+    # Health
+    # --------------------------------------------------------------
 
     health = engine.health_check()
 
@@ -1278,22 +1866,177 @@ def test_risk_budget_engine() -> None:
         > 0
     )
 
-    for regime in (
-        engine.risk_budgets
-    ):
-        budgets = engine.get_target_budgets(
-            regime,
-            list(
-                engine.risk_budgets[
-                    regime
-                ].keys()
-            ),
+    # --------------------------------------------------------------
+    # Canonical budget normalization
+    # --------------------------------------------------------------
+
+    for regime in engine.risk_budgets:
+        configured_tickers = list(
+            engine.risk_budgets[
+                regime
+            ].keys()
+        )
+
+        budgets = (
+            engine.get_target_budgets(
+                regime,
+                configured_tickers,
+            )
         )
 
         assert np.isclose(
             sum(
                 budgets.values()
             ),
+            1.0,
+            atol=1e-6,
+        )
+
+    # --------------------------------------------------------------
+    # Alias resolution
+    # --------------------------------------------------------------
+
+    for regime in engine.risk_budgets:
+        configured = engine.risk_budgets[
+            regime
+        ]
+
+        if (
+            "SPY" in configured
+            and "VEA" in configured
+            and "VWO" in configured
+        ):
+            subset = (
+                engine.get_target_budgets(
+                    regime,
+                    [
+                        "SPY",
+                        "EFA",
+                        "EEM",
+                    ],
+                )
+            )
+
+            assert set(
+                subset
+            ) == {
+                "SPY",
+                "EFA",
+                "EEM",
+            }
+
+            assert np.isclose(
+                sum(
+                    subset.values()
+                ),
+                1.0,
+                atol=1e-6,
+            )
+
+            assert (
+                engine.last_budget_resolution[
+                    "resolution"
+                ]["EFA"]["source_asset"]
+                == "VEA"
+            )
+
+            assert (
+                engine.last_budget_resolution[
+                    "resolution"
+                ]["EEM"]["source_asset"]
+                == "VWO"
+            )
+
+    # --------------------------------------------------------------
+    # Risk-contribution mathematical invariant
+    # --------------------------------------------------------------
+
+    covariance = np.array(
+        [
+            [0.04, 0.01],
+            [0.01, 0.09],
+        ],
+        dtype=float,
+    )
+
+    weights = {
+        "A": 0.60,
+        "B": 0.40,
+    }
+
+    contributions = (
+        engine.calculate_risk_contributions(
+            weights,
+            covariance,
+            [
+                "A",
+                "B",
+            ],
+        )
+    )
+
+    vector = np.array(
+        [
+            0.60,
+            0.40,
+        ],
+        dtype=float,
+    )
+
+    portfolio_variance = float(
+        vector
+        @ covariance
+        @ vector
+    )
+
+    assert np.isclose(
+        sum(
+            contributions.values()
+        ),
+        portfolio_variance,
+        atol=1e-10,
+    )
+
+    contribution_pct = (
+        engine.calculate_risk_contribution_pct(
+            contributions
+        )
+    )
+
+    assert np.isclose(
+        sum(
+            contribution_pct.values()
+        ),
+        1.0,
+        atol=1e-10,
+    )
+
+    # --------------------------------------------------------------
+    # Budget vector
+    # --------------------------------------------------------------
+
+    for regime in engine.risk_budgets:
+        tickers = list(
+            engine.risk_budgets[
+                regime
+            ].keys()
+        )
+
+        vector = engine.budget_vector(
+            regime,
+            tickers,
+        )
+
+        assert vector.shape == (
+            len(tickers),
+        )
+
+        assert np.isfinite(
+            vector
+        ).all()
+
+        assert np.isclose(
+            vector.sum(),
             1.0,
             atol=1e-6,
         )

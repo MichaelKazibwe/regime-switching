@@ -1337,3 +1337,709 @@ FULL SYSTEM REGRESSION SUMMARY
 | `portfoliooptimizer.py`       | Construct final portfolio           |
 | `productioncomposition.py`    | Wire production components together |
 | `regression_suite.py`         | Prove the system works              |
+
+
+                    FINAL REGRESSION
+                           │
+             ┌─────────────┴─────────────┐
+             │                           │
+        64-FILE INVENTORY          REPOSITORY HYGIENE
+             │                           │
+             ▼                           ▼
+       PYTHON COMPILE              stale references
+             │                     backup artifacts
+             ▼                     duplicate modules
+        AST AUDIT                  git state
+             │
+             ▼
+       IMPORT AUDIT
+             │
+             ▼
+       DEPENDENCY GRAPH
+             │
+             ▼
+       CYCLE DETECTION
+             │
+             ▼
+      INDIVIDUAL FILE TESTS
+             │
+             ▼
+       CORE ENGINES
+             │
+       ┌─────┼─────────┐
+       ▼     ▼         ▼
+    Risk   Forecast   Covariance
+       │     │         │
+       └─────┼─────────┘
+             ▼
+      PORTFOLIO OPTIMIZER
+             │
+             ▼
+    PORTFOLIO DECISION ENGINE
+             │
+             ▼
+    PRODUCTION INTEGRATION
+             │
+             ▼
+      RISK VALIDATION
+             │
+             ▼
+      EXECUTION GATE
+             │
+             ▼
+      EXECUTION CHAIN
+             │
+             ▼
+       HISTORICAL TESTS
+             │
+             ▼
+       FINAL CERTIFICATION
+
+
+# ULTIMATE GOAL (fully operational live-trading system)
+
+SYSTEM
+────────────────────
+System Health
+Data Health
+Broker Health
+Database Health
+Clock Health
+
+PORTFOLIO
+────────────────────
+NAV
+Daily P&L
+Cumulative P&L
+Drawdown
+Volatility
+Sharpe
+Exposure
+
+REGIME
+────────────────────
+Current Regime
+Probability
+Confidence
+Forecast
+
+RISK
+────────────────────
+VaR
+CVaR
+Stress Loss
+Risk Budget
+Factor Exposure
+
+EXECUTION
+────────────────────
+Orders
+Open Orders
+Fills
+Rejects
+Slippage
+Turnover
+
+RECONCILIATION
+────────────────────
+Broker vs Internal
+
+
+                ┌─────────────────────┐
+                │ Control Plane       │
+                │ Dashboard/API       │
+                └──────────┬──────────┘
+                           │
+        ┌──────────────────▼─────────────────┐
+        │ Trading Orchestrator               │
+        └───────┬───────────┬───────────────┘
+                │           │
+       ┌────────▼───┐ ┌─────▼────────┐
+       │ Strategy   │ │ Risk Engine  │
+       └────────┬───┘ └─────┬────────┘
+                │           │
+                └─────┬─────┘
+                      ▼
+               Execution Gateway
+                      │
+             ┌────────┴────────┐
+             │                 │
+        Paper Broker       Live Broker
+                              │
+                           Exchange
+
+# current modules
+
+assetuniverse.py
+macroregime.py
+regimeforecastengine.py
+regimecovariance.py
+expectedreturnforecaster.py
+forecastmodels.py
+covarianceengine.py
+ensemblecovariance.py
+factorcovariance.py
+factorexposuremodel.py
+blacklitterman.py
+portfoliooptimizer.py
+constraints.py
+riskbudgetengine.py
+riskmodel.py
+riskcontributionanalyzer.py
+volatilitytargeting.py
+scenarioengine.py
+regimesimulation.py
+forwardriskmetrics.py
+forwardriskanalyzer.py
+
+# NEEDED
+# data infrastructure
+marketdata/
+    marketdatagateway.py
+    realtimefeed.py
+    historicaldata.py
+    datacache.py
+    dataquality.py
+    datafreshness.py
+    corporateactions.py
+    tradingcalendar.py
+# portfolio infrastructure
+portfolio/
+    portfolioledger.py
+    positionservice.py
+    cashservice.py
+    navengine.py
+    portfolioaccounting.py
+# risk infrastructure
+risk/
+    pretrade_risk.py
+    intraday_risk.py
+    liquidityrisk.py
+    marketimpact.py
+    varengine.py
+    cvarengine.py
+    stressengine.py
+    factorrisk.py
+    drawdowncontroller.py
+    circuitbreaker.py
+    killswitch.py
+#  execution infrastructure
+execution/
+    executionrouter.py
+    executionoptimizer.py
+    executionalgorithms.py
+    vwap.py
+    twap.py
+    pov.py
+    adaptiveexecution.py
+    orderstate.py
+    idempotency.py
+    executionrecovery.py
+# broker infrastructure
+brokers/
+    brokerinterface.py
+    brokerfactory.py
+    brokerhealth.py
+    brokerfailover.py
+    alpaca_transport.py
+    ibkr_transport.py
+# persistence
+persistence/
+    database.py
+    models.py
+    repositories.py
+    orderrepository.py
+    executionrepository.py
+    positionrepository.py
+    auditrepository.py
+    decisionrepository.py
+# recovery
+recovery/
+    staterecovery.py
+    restartrecovery.py
+    reconciliationrecovery.py
+    brokerrecovery.py
+# monitoring
+monitoring/
+    metrics.py
+    health.py
+    alerts.py
+    alertmanager.py
+    systemmonitor.py
+    datamonitor.py
+    broker_monitor.py
+    riskmonitor.py
+# governance/
+    modelregistry.py
+    strategyregistry.py
+    configregistry.py
+    deploymentregistry.py
+    auditlog.py
+    changelog.py
+# deployment
+deployment/
+    Dockerfile
+    docker-compose.yml
+    healthcheck.py
+    startup.py
+    shutdown.py
+    .github/
+    workflows/
+        tests.yml
+        regression.yml
+        deployment.yml
+# production API
+api/
+    app.py
+    auth.py
+    portfolio_routes.py
+    risk_routes.py
+    execution_routes.py
+    health_routes.py
+    admin_routes.py
+# operational dashboard
+dashboard/
+    app.py
+    pages/
+        overview.py
+        portfolio.py
+        risk.py
+        regime.py
+        execution.py
+        reconciliation.py
+        system.py
+        audit.py
+# test architecture
+tests/
+    unit/
+    integration/
+    regression/
+    property/
+    risk/
+    execution/
+    broker/
+    recovery/
+    chaos/
+    data/
+    live_safety/
+# final
+                 LIVE-SAFETY
+                    ▲
+                    │
+               CHAOS TESTS
+                    │
+             BROKER INTEGRATION
+                    │
+              PAPER TRADING
+                    │
+             HISTORICAL TESTS
+                    │
+            SYSTEM INTEGRATION
+                    │
+                UNIT TESTS
+
+# "over-the-edge" system
+multi-strategy
+multi-portfolio
+multi-broker
+multi-currency
+cross-asset
+intraday regime updates
+adaptive execution
+dynamic risk budgets
+real-time factor risk
+portfolio-level hedging
+tail-risk overlays
+stress-triggered de-risking
+automatic recovery
+automatic broker failover
+model ensemble governance
+
+
+Macro regime
+     ↓
+Regime-conditioned expected returns
+     +
+Regime-conditioned covariance
+     +
+Black-Litterman views
+     +
+Risk model
+     +
+Constraints
+     ↓
+Portfolio optimizer
+     ↓
+Target weights
+     ↓
+Position sizing
+     ↓
+Turnover / transaction-cost control
+     ↓
+Portfolio
+
+# portfoliooptimizer
+
+Expected Return
++
+Black-Litterman
++
+Covariance
++
+Regime Risk Budget
++
+Portfolio Constraints
++
+Volatility Target
++
+Leverage Limit
+
+
+What regime?
+     ↓
+What risk budget?
+     ↓
+What baseline allocation?
+     ↓
+What did BL do?
+     ↓
+What did constraints do?
+     ↓
+What did volatility targeting do?
+     ↓
+What was the final leverage?
+     ↓
+How much cash?
+
+# system goal: 1
+
+14 assets
+   ↓
+Market data
+   ↓
+Macro data
+   ↓
+Regime classification
+   ↓
+Regime-conditioned covariance
+   ↓
+Expected returns
+   ↓
+Black-Litterman
+   ↓
+Risk budgets
+   ↓
+Portfolio constraints
+   ↓
+Volatility targeting
+   ↓
+PortfolioOptimizer
+   ↓
+PortfolioDecisionEngine
+   ↓
+14-asset production portfolio
+   ↓
+Historical walk-forward backtest
+   ↓
+Transaction costs
+   ↓
+Execution stack
+   ↓
+Final regression
+
+┌─────────────────────────────────────────────────────────────┐
+│                     OPERATIONS / UI                         │
+│ API + Dashboard + Alerts + Admin                            │
+└──────────────────────────────┬──────────────────────────────┘
+                               │
+┌──────────────────────────────▼──────────────────────────────┐
+│                    GOVERNANCE LAYER                          │
+│ Model Registry | Strategy Registry | Config | Audit         │
+└──────────────────────────────┬──────────────────────────────┘
+                               │
+┌──────────────────────────────▼──────────────────────────────┐
+│                    DECISION ENGINE                           │
+│ Regime → Forecast → BL → Optimizer → Risk Budget            │
+└──────────────────────────────┬──────────────────────────────┘
+                               │
+┌──────────────────────────────▼──────────────────────────────┐
+│                     RISK ENGINE                              │
+│ Pre-trade | Intraday | VaR | CVaR | Stress | Liquidity      │
+│ Factor Risk | Drawdown | Circuit Breaker | Kill Switch      │
+└──────────────────────────────┬──────────────────────────────┘
+                               │
+┌──────────────────────────────▼──────────────────────────────┐
+│                  PORTFOLIO / OMS LAYER                       │
+│ Portfolio Ledger | Positions | Cash | NAV | Orders           │
+└──────────────────────────────┬──────────────────────────────┘
+                               │
+┌──────────────────────────────▼──────────────────────────────┐
+│                  EXECUTION ENGINE                            │
+│ Router | Optimizer | VWAP | TWAP | POV | Adaptive            │
+│ Order State | Idempotency | Recovery                         │
+└──────────────────────────────┬──────────────────────────────┘
+                               │
+┌──────────────────────────────▼──────────────────────────────┐
+│                    BROKER LAYER                              │
+│ Broker Interface | Factory | Health | Failover              │
+│ IBKR | Alpaca | Future Brokers                              │
+└──────────────────────────────┬──────────────────────────────┘
+                               │
+                         EXTERNAL MARKET
+
+
+                         ┌─────────────────────────────────────────────────────────────┐
+│                 DATA INFRASTRUCTURE                          │
+│ Gateway | Realtime | Historical | Cache | Quality            │
+│ Freshness | Corporate Actions | Trading Calendar             │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│                 PERSISTENCE                                  │
+│ DB | Orders | Executions | Positions | Decisions | Audit     │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│                 RECOVERY                                     │
+│ State | Restart | Reconciliation | Broker Recovery            │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│                 MONITORING                                   │
+│ Metrics | Health | Alerts | Data | Broker | Risk | System    │
+└─────────────────────────────────────────────────────────────┘
+
+# orchestration
+
+orchestration/
+
+    tradingengine.py
+
+    decisionengine.py
+
+    rebalanceengine.py
+
+    ordergeneration.py
+
+    riskgate.py
+
+    executionengine.py
+
+    reconciliationengine.py
+
+    lifecyclemanager.py
+
+# TradingEngine
+
+TradingEngine
+      │
+      ├── MarketDataGateway
+      │
+      ├── RegimeEngine
+      │
+      ├── ForecastEngine
+      │
+      ├── PortfolioOptimizer
+      │
+      ├── RiskEngine
+      │
+      ├── PortfolioService
+      │
+      ├── OrderGenerator
+      │
+      ├── ExecutionEngine
+      │
+      ├── Broker
+      │
+      ├── ReconciliationEngine
+      │
+      └── Monitoring
+
+
+# configuration
+configuration/
+
+    settings.py
+    environments.py
+    tradingconfig.py
+    riskconfig.py
+    brokerconfig.py
+    modelconfig.py
+
+# Trading system
+
+trading_system/
+│
+├── core/
+│   ├── types.py
+│   ├── enums.py
+│   ├── exceptions.py
+│   ├── events.py
+│   └── interfaces.py
+│
+├── configuration/
+│   ├── settings.py
+│   ├── environments.py
+│   ├── tradingconfig.py
+│   ├── riskconfig.py
+│   ├── brokerconfig.py
+│   └── modelconfig.py
+│
+├── data/
+│   └── marketdata/
+│
+├── research/
+│   ├── assetuniverse.py
+│   ├── macroregime.py
+│   ├── regimeforecastengine.py
+│   ├── expectedreturnforecaster.py
+│   ├── forecastmodels.py
+│   └── ...
+│
+├── portfolio/
+│
+├── risk/
+│
+├── execution/
+│
+├── brokers/
+│
+├── persistence/
+│
+├── reconciliation/
+│
+├── recovery/
+│
+├── monitoring/
+│
+├── governance/
+│
+├── orchestration/
+│
+├── api/
+│
+├── dashboard/
+│
+├── deployment/
+│
+└── tests/
+
+
+DATA
+│
+├── marketdataloader.py
+├── validators.py
+└── assetuniverse.py
+
+REGIME / FORECAST
+│
+├── macroregime.py
+├── regimeforecastengine.py
+├── expectedreturnforecaster.py
+├── forecastmodels.py
+└── regimesimulation.py
+
+RISK / COVARIANCE
+│
+├── covarianceengine.py
+├── basecovariancemodel.py
+├── regimecovariance.py
+├── ensemblecovariance.py
+├── factorcovariance.py
+├── riskmodel.py
+├── riskcontributionanalyzer.py
+├── riskbudgetengine.py
+├── volatilitytargeting.py
+├── drawdownforecast.py
+├── forwardriskmetrics.py
+├── forwardriskanalyzer.py
+└── scenarioengine.py
+
+PORTFOLIO CONSTRUCTION
+│
+├── blacklitterman.py
+├── constraints.py
+├── portfoliooptimizer.py
+├── portfoliodecisionengine.py
+├── productioncomposition.py
+└── regimeallocationpolicy.py
+
+EXECUTION
+│
+├── order.py
+├── orderstatus.py
+├── orderbook.py
+├── trade.py
+├── tradegenerator.py
+├── transactioncostmodel.py
+├── executionengine.py
+├── rebalanceengine.py
+├── pretraderiskgate.py
+├── oms.py
+├── brokerrouter.py
+├── paperbroker.py
+├── brokerexecutionengine.py
+├── livebroker.py
+├── reconciliationengine.py
+├── posttradeexecutionmonitor.py
+└── executionanalytics.py
+
+PRODUCTION ORCHESTRATION
+│
+├── productionintegration.py
+├── productiondecisionexecution.py
+├── productionexecutiongate.py
+├── productionpipelineintegration.py
+└── productionriskvalidation.py
+
+ANALYTICS / REGRESSION
+│
+├── analytics.py
+├── performanceattribution.py
+├── tradeanalytics.py
+├── quantitative_regression.py
+├── regression_suite.py
+├── step7_production_test.py
+├── step8_historical_data_test.py
+├── step9_historical_backtest.py
+└── testsupport.py
+
+LEGACY / MONOLITHIC IMPLEMENTATION
+│
+└── rewrite.py
+
+# RiskContributionAnalytics
+
+σ²p = w'Σw
+
+σp = √(w'Σw)
+
+MRC = Σw / σp
+
+RCi = wi × MRCi
+
+RC_pct_i = RCi / σp
+
+# RiskBudgetEngine
+
+RiskBudgetEngine
+├── __init__
+├── _validate_configuration
+├── _normalize_regime
+├── get_target_budgets
+├── optimize
+├── calculate_risk_contributions
+├── calculate_risk_contribution_pct
+├── calculate_budget_errors
+├── analyze
+├── budget_vector
+├── get_risk_budget
+├── risk_budget
+├── health_check
+├── metadata
+├── to_dict
+└── reset
+
+build_risk_budget_engine()
+
+test_risk_budget_engine()

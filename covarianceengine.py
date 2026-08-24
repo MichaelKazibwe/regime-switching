@@ -81,6 +81,8 @@ class CovarianceEngine(
             None
         )
 
+        self.last_dimension = None
+
     # ==================================================================
     # SECTION 3
     # METADATA
@@ -102,6 +104,10 @@ class CovarianceEngine(
                 ),
                 "last_method": (
                     self.last_method
+                ),
+
+                "dimension": (
+                    self.last_dimension
                 ),
             }
         )
@@ -582,6 +588,8 @@ class CovarianceEngine(
         self.last_covariance = (
             covariance
         )
+
+        self.last_dimension = int(covariance.shape[0])
 
         self.last_method = (
             method

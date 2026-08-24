@@ -1,238 +1,588 @@
+"""
+======================================================================
+PORTFOLIO OPTIMIZER
+======================================================================
+
+Production portfolio orchestration engine.
+
+Phase
+-----
+IV-B.1B
+
+Purpose
+-------
+Production portfolio construction pipeline.
+
+Pipeline
+--------
+    Macro Regime
+        ->
+    Risk Budget
+        ->
+    Baseline Risk-Budget Portfolio
+        ->
+    Expected Returns
+        ->
+    Black-Litterman
+        ->
+    Controlled BL Tilt
+        ->
+    Portfolio Constraints
+        ->
+    Volatility Targeting
+        ->
+    Regime Leverage Backstop
+        ->
+    Cash / Financing Accounting
+        ->
+    Risk Diagnostics
+        ->
+    Production Portfolio
+
+Design Principles
+-----------------
+1. RiskBudgetEngine is authoritative for asset-level regime risk budgets.
+2. PortfolioOptimizer does not duplicate risk-budget configuration.
+3. RiskBudgetEngine is authoritative for risk-budget optimization.
+4. Black-Litterman is a controlled overlay and cannot arbitrarily replace
+   the regime portfolio.
+5. PortfolioConstraints remains authoritative for position constraints.
+6. VolatilityTargeting remains authoritative for volatility scaling.
+7. Regime maximum leverage is independently enforced as a final hard
+   production invariant.
+8. Leveraged portfolios explicitly distinguish:
+       - gross exposure
+       - net exposure
+       - cash
+       - financing
+9. Production invariants use explicit exceptions rather than Python
+   assertions.
+10. Public return keys from the previous production contract are retained.
+11. Numerical inputs are validated before entering downstream engines.
+12. Diagnostics are deterministic and suitable for regression testing.
+
+Backward Compatibility
+----------------------
+The following public result keys are intentionally preserved:
+
+    weights
+    cash
+    regime
+    expected_returns
+    expected_return_map
+    forecasts
+    risk_report
+    volatility_diagnostics
+    asset_order
+    risk_budget
+    baseline_weights
+    baseline_weight_map
+    bl_multipliers
+    bl_multiplier_map
+    bl_tilted_weights
+    bl_tilted_weight_map
+    constrained_weights
+    constrained_weight_map
+    constraint_cash
+    gross_exposure
+    target_volatility
+    maximum_leverage
+    weight_map
+
+Additional production diagnostics:
+
+    financing
+    financing_weight
+    net_exposure
+
+======================================================================
+"""
+
 from __future__ import annotations
+
+from typing import Any, Optional
 
 import numpy as np
 
-from macroregime import (
-    Regime,
-    PortfolioRegimeMapper,
-)
-
-from expectedreturnforecaster import (
-    ExpectedReturnForecaster,
-)
-
-from blacklitterman import (
-    BlackLittermanModel,
-)
-
-from riskcontributionanalyzer import (
-    RiskBudgetReport,
-)
-
+from blacklitterman import BlackLittermanModel
 from core_constants import (
+    REGIME_MAX_LEVERAGE,
     REGIME_RISK_BUDGETS,
     REGIME_VOL_TARGETS,
-    REGIME_MAX_LEVERAGE,
 )
+from expectedreturnforecaster import ExpectedReturnForecaster
+from macroregime import PortfolioRegimeMapper, Regime
+from riskcontributionanalyzer import RiskBudgetReport
 
 
-# ============================================================
+# ======================================================================
+# EXCEPTIONS
+# ======================================================================
+
+
+class PortfolioOptimizerError(Exception):
+    """
+    Base exception for production portfolio optimization errors.
+    """
+
+
+class PortfolioOptimizerConfigurationError(
+    PortfolioOptimizerError
+):
+    """
+    Raised when optimizer configuration is invalid.
+    """
+
+
+class PortfolioOptimizerCalculationError(
+    PortfolioOptimizerError
+):
+    """
+    Raised when portfolio optimization or validation fails.
+    """
+
+
+# ======================================================================
 # PORTFOLIO OPTIMIZER
-# ============================================================
+# ======================================================================
 
 
 class PortfolioOptimizer:
+    """
+    Production portfolio orchestration engine.
+
+    The optimizer deliberately separates policy from mechanics.
+
+    Risk-budget policy
+    ------------------
+    RiskBudgetEngine
+
+    Position constraints
+    --------------------
+    PortfolioConstraints
+
+    Volatility targeting
+    --------------------
+    VolatilityTargeting
+
+    Expected returns
+    ----------------
+    ExpectedReturnForecaster
+
+    Bayesian overlay
+    -----------------
+    BlackLittermanModel
+
+    Final portfolio construction
+    ----------------------------
+    PortfolioOptimizer
+
+    The optimizer does not independently own the canonical asset-level
+    risk-budget configuration.
+    """
+
+    API_VERSION = "2.1.0"
+    COMPONENT = "PortfolioOptimizer"
+    PHASE = "IV-B.1B"
+
+    DEFAULT_BL_TILT_STRENGTH = 0.25
+    DEFAULT_BL_TILT_FLOOR = 0.50
+    DEFAULT_BL_TILT_CAP = 1.50
+
+    DEFAULT_TOLERANCE = 1e-8
+
+    COVARIANCE_NEGATIVE_EIGENVALUE_TOLERANCE = 1e-10
+    COVARIANCE_REGULARIZATION = 1e-12
+    VARIANCE_NEGATIVE_TOLERANCE = 1e-12
+
+    LEVERAGE_TOLERANCE = 1e-8
+    EXPOSURE_TOLERANCE = 1e-10
+
+    # ==================================================================
+    # CONSTRUCTOR
+    # ==================================================================
 
     def __init__(
         self,
         risk_budget_engine,
         constraints,
-        vol_target_engine=None,
+        vol_target_engine,
         forecast_engine=None,
         black_litterman=None,
-    ):
+        bl_tilt_strength: float = DEFAULT_BL_TILT_STRENGTH,
+        bl_tilt_floor: float = DEFAULT_BL_TILT_FLOOR,
+        bl_tilt_cap: float = DEFAULT_BL_TILT_CAP,
+        tolerance: float = DEFAULT_TOLERANCE,
+    ) -> None:
         """
-        Production portfolio optimizer.
-
-        Execution order
-        ---------------
-        1. Normalize regime.
-        2. Validate covariance and asset universe.
-        3. Retrieve regime-specific risk budgets.
-        4. Retrieve regime-specific volatility target.
-        5. Retrieve regime-specific leverage limit.
-        6. Generate expected-return forecasts.
-        7. Apply Black-Litterman posterior returns.
-        8. Optimize risk-budget weights.
-        9. Apply portfolio constraints.
-        10. Apply volatility targeting.
-        11. Apply regime leverage safety backstop.
-        12. Calculate cash sleeve.
-        13. Calculate final volatility diagnostics.
-        14. Generate final risk report.
-        15. Return production portfolio.
+        Initialize the production optimizer.
         """
 
-        # ============================================
-        # CORE ENGINES
-        # ============================================
+        if risk_budget_engine is None:
+            raise PortfolioOptimizerConfigurationError(
+                "risk_budget_engine cannot be None."
+            )
 
-        self.risk_budget_engine = (
-            risk_budget_engine
-        )
+        if constraints is None:
+            raise PortfolioOptimizerConfigurationError(
+                "constraints cannot be None."
+            )
 
-        self.constraints = (
-            constraints
-        )
+        if vol_target_engine is None:
+            raise PortfolioOptimizerConfigurationError(
+                "vol_target_engine cannot be None. "
+                "Production PortfolioOptimizer requires an "
+                "authoritative VolatilityTargeting engine."
+            )
 
-        self.vol_target_engine = (
-            vol_target_engine
-        )
+        required_dependencies = {
+            "risk_budget_engine.get_target_budgets": (
+                hasattr(
+                    risk_budget_engine,
+                    "get_target_budgets",
+                )
+            ),
+            "risk_budget_engine.optimize": (
+                hasattr(
+                    risk_budget_engine,
+                    "optimize",
+                )
+            ),
+            "constraints.enforce": (
+                hasattr(
+                    constraints,
+                    "enforce",
+                )
+            ),
+            "vol_target_engine.scale_weights": (
+                hasattr(
+                    vol_target_engine,
+                    "scale_weights",
+                )
+            ),
+        }
 
-        # ============================================
-        # FORECASTING
-        # ============================================
+        missing = [
+            name
+            for name, available
+            in required_dependencies.items()
+            if not available
+        ]
+
+        if missing:
+            raise PortfolioOptimizerConfigurationError(
+                "PortfolioOptimizer dependencies are missing "
+                f"required interfaces: {missing}"
+            )
+
+        self.risk_budget_engine = risk_budget_engine
+        self.constraints = constraints
+        self.vol_target_engine = vol_target_engine
 
         self.forecast_engine = (
-
             forecast_engine
-
             if forecast_engine is not None
-
             else ExpectedReturnForecaster()
-
         )
-
-        # ============================================
-        # BLACK-LITTERMAN
-        # ============================================
 
         self.black_litterman = (
-
             black_litterman
-
             if black_litterman is not None
-
             else BlackLittermanModel()
-
         )
 
-        # ============================================
-        # DIAGNOSTICS
-        # ============================================
+        self.bl_tilt_strength = float(
+            bl_tilt_strength
+        )
+
+        self.bl_tilt_floor = float(
+            bl_tilt_floor
+        )
+
+        self.bl_tilt_cap = float(
+            bl_tilt_cap
+        )
+
+        self.tolerance = float(
+            tolerance
+        )
+
+        self._validate_configuration()
+
+        self._reset_state()
+
+    # ==================================================================
+    # STATE
+    # ==================================================================
+
+    def _reset_state(
+        self,
+    ) -> None:
+        """
+        Reset calculation state.
+        """
 
         self.last_forecasts = None
-
         self.last_posterior_returns = None
-
         self.last_regime = None
-
         self.last_volatility_diagnostics = None
-
         self.last_weights = None
-
         self.last_cash = None
+        self.last_financing = None
+        self.last_net_exposure = None
+        self.last_gross_exposure = None
+        self.last_risk_budget = None
+        self.last_baseline_weights = None
+        self.last_bl_multipliers = None
+        self.last_bl_tilted_weights = None
+        self.last_constraint_result = None
 
-    # ========================================================
+    # ==================================================================
+    # CONFIGURATION VALIDATION
+    # ==================================================================
+
+    def _validate_configuration(
+        self,
+    ) -> None:
+        """
+        Validate optimizer configuration.
+        """
+
+        if (
+            not np.isfinite(
+                self.bl_tilt_strength
+            )
+            or not 0.0
+            <= self.bl_tilt_strength
+            <= 1.0
+        ):
+            raise PortfolioOptimizerConfigurationError(
+                "bl_tilt_strength must be finite and between 0 and 1."
+            )
+
+        if (
+            not np.isfinite(
+                self.bl_tilt_floor
+            )
+            or self.bl_tilt_floor <= 0.0
+        ):
+            raise PortfolioOptimizerConfigurationError(
+                "bl_tilt_floor must be positive and finite."
+            )
+
+        if (
+            not np.isfinite(
+                self.bl_tilt_cap
+            )
+            or self.bl_tilt_cap <= 0.0
+        ):
+            raise PortfolioOptimizerConfigurationError(
+                "bl_tilt_cap must be positive and finite."
+            )
+
+        if (
+            self.bl_tilt_floor
+            > self.bl_tilt_cap
+        ):
+            raise PortfolioOptimizerConfigurationError(
+                "bl_tilt_floor cannot exceed bl_tilt_cap."
+            )
+
+        if (
+            not np.isfinite(
+                self.tolerance
+            )
+            or self.tolerance <= 0.0
+        ):
+            raise PortfolioOptimizerConfigurationError(
+                "tolerance must be positive and finite."
+            )
+
+    # ==================================================================
     # REGIME NORMALIZATION
-    # ========================================================
+    # ==================================================================
 
     @staticmethod
     def _normalize_regime(
         regime,
-    ):
+    ) -> str:
         """
-        Normalize all supported regime representations
-        into the production portfolio regime key.
+        Normalize a supported regime to the canonical configuration key.
+
+        The optimizer accepts:
+
+            - canonical string keys
+            - macro Regime enum values
+            - strings representing supported macro regimes
+
+        The final value must correspond to a configured portfolio regime.
         """
 
-        # --------------------------------------------
-        # STRING REGIME
-        # --------------------------------------------
-
-        if isinstance(
-            regime,
-            str,
-        ):
-
-            normalized = (
-                regime
-                .lower()
-                .strip()
+        if regime is None:
+            raise PortfolioOptimizerConfigurationError(
+                "regime cannot be None."
             )
-
-            # Already a production portfolio regime.
-            if normalized in (
-                REGIME_RISK_BUDGETS
-            ):
-
-                return normalized
-
-            # Macro-regime aliases.
-            if normalized in (
-                "expansion",
-                "recovery",
-                "slowdown",
-                "recession",
-            ):
-
-                return (
-                    PortfolioRegimeMapper.map_regime(
-                        Regime(normalized)
-                    )
-                )
-
-            raise ValueError(
-                f"Unknown regime '{regime}'. "
-                "Expected one of: "
-                f"{list(REGIME_RISK_BUDGETS.keys())} "
-                "or a supported macro regime."
-            )
-
-        # --------------------------------------------
-        # ENUM REGIME
-        # --------------------------------------------
 
         if isinstance(
             regime,
             Regime,
         ):
-
-            return (
-                PortfolioRegimeMapper.map_regime(
-                    regime
+            try:
+                mapped = (
+                    PortfolioRegimeMapper.map_regime(
+                        regime
+                    )
                 )
+            except Exception as exc:
+                raise PortfolioOptimizerConfigurationError(
+                    f"Unable to map macro regime '{regime}'."
+                ) from exc
+
+            normalized = str(
+                mapped
+            ).strip().lower()
+
+        elif isinstance(
+            regime,
+            str,
+        ):
+            normalized = (
+                regime.strip().lower()
             )
 
-        # --------------------------------------------
-        # INVALID TYPE
-        # --------------------------------------------
+            if normalized in {
+                "expansion",
+                "recovery",
+                "slowdown",
+                "recession",
+            }:
+                try:
+                    normalized = str(
+                        PortfolioRegimeMapper.map_regime(
+                            Regime(normalized)
+                        )
+                    ).strip().lower()
+                except Exception:
+                    # If the string itself is already a canonical
+                    # portfolio regime, the configuration check below
+                    # will determine whether it is valid.
+                    pass
 
-        raise TypeError(
-            "Unsupported regime type: "
-            f"{type(regime)}"
+        else:
+            value = getattr(
+                regime,
+                "value",
+                None,
+            )
+
+            if value is None:
+                raise PortfolioOptimizerConfigurationError(
+                    "Unsupported regime type: "
+                    f"{type(regime)}"
+                )
+
+            normalized = str(
+                value
+            ).strip().lower()
+
+        configured_keys = {
+            str(key).strip().lower(): str(key)
+            for key in REGIME_RISK_BUDGETS
+        }
+
+        if normalized in configured_keys:
+            return configured_keys[normalized]
+
+        # Also permit the RiskBudgetEngine to own the canonical regime
+        # namespace when it exposes a custom configuration.
+        raise PortfolioOptimizerConfigurationError(
+            f"Unknown regime '{normalized}'. Expected one of "
+            f"{list(REGIME_RISK_BUDGETS.keys())} or a supported "
+            "macro regime."
         )
 
-    # ========================================================
-    # COVARIANCE VALIDATION
-    # ========================================================
+    # ==================================================================
+    # ASSET VALIDATION
+    # ==================================================================
 
     @staticmethod
-    def _validate_covariance(
-        covariance,
+    def _validate_asset_order(
         asset_order,
-    ):
+    ) -> tuple[str, ...]:
         """
-        Validate and symmetrize the covariance matrix.
+        Validate and normalize asset order.
         """
 
-        covariance = np.asarray(
-            covariance,
-            dtype=float,
+        if asset_order is None:
+            raise ValueError(
+                "asset_order cannot be None."
+            )
+
+        try:
+            if len(asset_order) == 0:
+                raise ValueError(
+                    "asset_order cannot be empty."
+                )
+        except TypeError as exc:
+            raise ValueError(
+                "asset_order must be a sized iterable of asset identifiers."
+            ) from exc
+
+        normalized = tuple(
+            str(asset).strip()
+            for asset in asset_order
         )
 
-        if covariance.ndim != 2:
-
+        if any(
+            not asset
+            for asset in normalized
+        ):
             raise ValueError(
-                "Covariance must be a "
-                "2-dimensional matrix."
+                "asset_order contains an empty asset identifier."
+            )
+
+        if len(
+            set(normalized)
+        ) != len(normalized):
+            raise ValueError(
+                "asset_order contains duplicate assets."
+            )
+
+        return normalized
+
+    # ==================================================================
+    # COVARIANCE VALIDATION
+    # ==================================================================
+
+    @classmethod
+    def _validate_covariance(
+        cls,
+        covariance,
+        asset_order,
+    ) -> np.ndarray:
+        """
+        Validate, symmetrize and safely regularize covariance.
+        """
+
+        try:
+            covariance = np.asarray(
+                covariance,
+                dtype=float,
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "Covariance could not be converted to a numeric array."
+            ) from exc
+
+        if covariance.ndim != 2:
+            raise ValueError(
+                "Covariance must be a 2-dimensional matrix."
             )
 
         if (
             covariance.shape[0]
             != covariance.shape[1]
         ):
-
             raise ValueError(
                 "Covariance matrix must be square."
             )
@@ -241,299 +591,225 @@ class PortfolioOptimizer:
             covariance.shape[0]
             != len(asset_order)
         ):
-
             raise ValueError(
                 "Asset order length "
-                f"{len(asset_order)} does not "
-                "match covariance dimension "
-                f"{covariance.shape[0]}."
+                f"{len(asset_order)} does not match covariance "
+                f"dimension {covariance.shape[0]}."
             )
 
         if not np.isfinite(
             covariance
         ).all():
-
             raise ValueError(
-                "Covariance contains "
-                "non-finite values."
+                "Covariance contains non-finite values."
             )
-
-        # --------------------------------------------
-        # SYMMETRIZE
-        # --------------------------------------------
 
         covariance = (
             covariance
-            +
-            covariance.T
+            + covariance.T
         ) / 2.0
 
-        # --------------------------------------------
-        # POSITIVE SEMIDEFINITE CHECK
-        # --------------------------------------------
+        try:
+            eigenvalues = np.linalg.eigvalsh(
+                covariance
+            )
+        except np.linalg.LinAlgError as exc:
+            raise ValueError(
+                "Unable to determine covariance eigenvalues."
+            ) from exc
 
-        eigenvalues = np.linalg.eigvalsh(
-            covariance
-        )
+        if eigenvalues.size == 0:
+            raise ValueError(
+                "Covariance matrix cannot be empty."
+            )
 
         minimum_eigenvalue = float(
             eigenvalues.min()
         )
 
-        if minimum_eigenvalue < -1e-10:
-
+        if (
+            minimum_eigenvalue
+            < -cls.COVARIANCE_NEGATIVE_EIGENVALUE_TOLERANCE
+        ):
             raise ValueError(
-                "Covariance matrix is not "
-                "positive semidefinite. "
-                f"Minimum eigenvalue="
-                f"{minimum_eigenvalue:.6e}."
+                "Covariance matrix is not positive semidefinite. "
+                f"Minimum eigenvalue={minimum_eigenvalue:.6e}."
             )
 
-        # --------------------------------------------
-        # NUMERICAL REGULARIZATION
-        # --------------------------------------------
-
-        if minimum_eigenvalue < 1e-12:
-
+        if minimum_eigenvalue < 0.0:
             covariance = (
                 covariance
-                +
-                np.eye(
+                + np.eye(
                     covariance.shape[0]
                 )
-                * 1e-12
+                * cls.COVARIANCE_REGULARIZATION
+            )
+
+        elif minimum_eigenvalue < 1e-12:
+            covariance = (
+                covariance
+                + np.eye(
+                    covariance.shape[0]
+                )
+                * cls.COVARIANCE_REGULARIZATION
             )
 
         return covariance
 
-    # ========================================================
-    # RISK BUDGET VALIDATION
-    # ========================================================
+    # ==================================================================
+    # VECTOR VALIDATION
+    # ==================================================================
 
     @staticmethod
     def _validate_risk_budgets(
         risk_budget,
         asset_order,
-    ):
+    ) -> np.ndarray:
         """
-        Validate regime-specific risk budgets.
+        Validate and normalize target risk budgets.
         """
 
-        risk_budget = np.asarray(
-            risk_budget,
-            dtype=float,
-        ).reshape(-1)
+        try:
+            risk_budget = np.asarray(
+                risk_budget,
+                dtype=float,
+            ).reshape(-1)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "Risk budgets could not be converted to a numeric vector."
+            ) from exc
 
         if risk_budget.shape != (
             len(asset_order),
         ):
-
             raise ValueError(
                 "Risk budget shape "
-                f"{risk_budget.shape} does not "
-                "match asset universe size "
-                f"{len(asset_order)}."
+                f"{risk_budget.shape} does not match asset universe "
+                f"size {len(asset_order)}."
             )
 
         if not np.isfinite(
             risk_budget
         ).all():
-
             raise ValueError(
-                "Risk budgets contain "
-                "non-finite values."
+                "Risk budgets contain non-finite values."
             )
 
         if np.any(
-            risk_budget < 0.0
+            risk_budget < -1e-12
         ):
-
             raise ValueError(
-                "Risk budgets cannot "
-                "be negative."
+                "Risk budgets cannot be negative."
             )
 
-        budget_sum = float(
+        risk_budget = np.maximum(
+            risk_budget,
+            0.0,
+        )
+
+        total = float(
             risk_budget.sum()
         )
 
-        if not np.isclose(
-            budget_sum,
-            1.0,
-            atol=1e-6,
+        if (
+            not np.isfinite(total)
+            or total <= 0.0
         ):
-
             raise ValueError(
-                "Selected risk budgets must "
-                "sum to 1. "
-                f"Got {budget_sum}."
+                "Risk budgets must have a positive total."
+            )
+
+        risk_budget /= total
+
+        if not np.isclose(
+            risk_budget.sum(),
+            1.0,
+            atol=1e-8,
+        ):
+            raise ValueError(
+                "Normalized risk budgets do not sum to one."
             )
 
         return risk_budget
 
-    # ========================================================
-    # OPTIMIZATION
-    # ========================================================
-
-    def optimize(
-        self,
-        covariance,
-        regime,
+    @staticmethod
+    def _validate_return_vector(
+        values,
         asset_order,
-        prices=None,
-    ):
+        name: str,
+    ) -> np.ndarray:
         """
-        Construct the production portfolio.
-
-        Returns
-        -------
-        dict
-            {
-                "weights": np.ndarray,
-                "cash": float,
-                "regime": str,
-                "expected_returns": ...,
-                "forecasts": ...,
-                "risk_report": ...,
-                "volatility_diagnostics": ...,
-            }
+        Validate an asset-aligned return vector.
         """
 
-        # ============================================
-        # RESET PER-RUN DIAGNOSTICS
-        # ============================================
-
-        self.last_forecasts = None
-
-        self.last_posterior_returns = None
-
-        self.last_volatility_diagnostics = None
-
-        self.last_weights = None
-
-        self.last_cash = None
-
-        # ============================================
-        # NORMALIZE REGIME
-        # ============================================
-
-        regime = (
-            self._normalize_regime(
-                regime
-            )
-        )
-
-        self.last_regime = regime
-
-        # ============================================
-        # ASSET UNIVERSE VALIDATION
-        # ============================================
-
-        if not asset_order:
-
+        try:
+            values = np.asarray(
+                values,
+                dtype=float,
+            ).reshape(-1)
+        except (TypeError, ValueError) as exc:
             raise ValueError(
-                "asset_order cannot be empty."
-            )
+                f"{name} could not be converted to a numeric vector."
+            ) from exc
 
-        # Prevent duplicate assets from creating
-        # ambiguous weight/risk mappings.
-
-        if len(
-            set(asset_order)
-        ) != len(asset_order):
-
-            raise ValueError(
-                "asset_order contains "
-                "duplicate assets."
-            )
-
-        # ============================================
-        # COVARIANCE VALIDATION
-        # ============================================
-
-        covariance = (
-            self._validate_covariance(
-                covariance,
-                asset_order,
-            )
-        )
-
-        # ============================================
-        # REGIME CONFIGURATION
-        # ============================================
-
-        if regime not in (
-            REGIME_VOL_TARGETS
+        if values.size != len(
+            asset_order
         ):
-
             raise ValueError(
-                "No volatility target configured "
-                f"for regime '{regime}'."
+                f"{name} vector length {values.size} "
+                "does not match asset universe "
+                f"size {len(asset_order)}."
             )
 
-        if regime not in (
-            REGIME_MAX_LEVERAGE
+        if not np.isfinite(
+            values
+        ).all():
+            raise ValueError(
+                f"{name} contains non-finite values."
+            )
+
+        return values
+
+    # ==================================================================
+    # RISK-BUDGET RESOLUTION
+    # ==================================================================
+
+    def _resolve_target_budgets(
+        self,
+        regime: str,
+        asset_order: tuple[str, ...],
+    ) -> dict[str, float]:
+        """
+        Resolve target budgets through RiskBudgetEngine.
+
+        RiskBudgetEngine owns asset-level risk-budget policy.
+
+        PortfolioOptimizer deliberately does not inspect individual
+        assets in the canonical production risk-budget configuration.
+        """
+
+        try:
+            target_budgets = (
+                self.risk_budget_engine.get_target_budgets(
+                    regime,
+                    list(asset_order),
+                )
+            )
+        except Exception as exc:
+            raise PortfolioOptimizerCalculationError(
+                "Risk-budget resolution failed for "
+                f"regime '{regime}' and assets "
+                f"{list(asset_order)}: {exc}"
+            ) from exc
+
+        if not isinstance(
+            target_budgets,
+            dict,
         ):
-
-            raise ValueError(
-                "No maximum leverage configured "
-                f"for regime '{regime}'."
+            raise PortfolioOptimizerCalculationError(
+                "RiskBudgetEngine.get_target_budgets() "
+                "must return a dictionary."
             )
-
-        target_vol = float(
-            REGIME_VOL_TARGETS[
-                regime
-            ]
-        )
-
-        max_leverage = float(
-            REGIME_MAX_LEVERAGE[
-                regime
-            ]
-        )
-
-        if (
-            not np.isfinite(
-                target_vol
-            )
-            or target_vol <= 0.0
-        ):
-
-            raise ValueError(
-                "Regime target volatility must "
-                "be positive and finite. "
-                f"Got {target_vol}."
-            )
-
-        if (
-            not np.isfinite(
-                max_leverage
-            )
-            or max_leverage <= 0.0
-        ):
-
-            raise ValueError(
-                "Regime maximum leverage must "
-                "be positive and finite. "
-                f"Got {max_leverage}."
-            )
-
-        # ============================================
-        # RISK BUDGET CONFIGURATION
-        # ============================================
-
-        # RiskBudgetEngine remains the authoritative
-        # source of regime-specific risk budgets.
-
-        target_budgets = (
-            self.risk_budget_engine
-            .get_target_budgets(
-                regime,
-                asset_order,
-            )
-        )
-
-        # Ensure every requested asset has a budget.
 
         missing_assets = [
             asset
@@ -542,405 +818,722 @@ class PortfolioOptimizer:
         ]
 
         if missing_assets:
-
-            raise ValueError(
-                "Risk budget engine did not "
-                "provide budgets for assets: "
-                f"{missing_assets}"
+            raise PortfolioOptimizerCalculationError(
+                "Risk budget engine did not provide budgets "
+                f"for assets: {missing_assets}"
             )
 
-        risk_budget = (
-            self._validate_risk_budgets(
+        try:
+            values = np.asarray(
                 [
-                    target_budgets[
-                        asset
-                    ]
+                    target_budgets[asset]
                     for asset in asset_order
                 ],
-                asset_order,
+                dtype=float,
+            )
+        except (TypeError, ValueError) as exc:
+            raise PortfolioOptimizerCalculationError(
+                "RiskBudgetEngine returned non-numeric "
+                "target budgets."
+            ) from exc
+
+        if not np.isfinite(
+            values
+        ).all():
+            raise PortfolioOptimizerCalculationError(
+                "Risk-budget engine returned "
+                "non-finite target budgets."
+            )
+
+        if np.any(
+            values < -self.tolerance
+        ):
+            raise PortfolioOptimizerCalculationError(
+                "Risk-budget engine returned "
+                "negative target budgets."
+            )
+
+        total = float(
+            values.sum()
+        )
+
+        if (
+            not np.isfinite(total)
+            or total <= self.tolerance
+        ):
+            raise PortfolioOptimizerCalculationError(
+                "Risk-budget engine returned "
+                "zero or invalid total target budget."
+            )
+
+        values /= total
+
+        return {
+            asset: float(
+                values[index]
+            )
+            for index, asset
+            in enumerate(asset_order)
+        }
+
+    # ==================================================================
+    # BASELINE RISK-BUDGET PORTFOLIO
+    # ==================================================================
+
+    def _build_baseline_weights(
+        self,
+        covariance: np.ndarray,
+        risk_budget: np.ndarray,
+    ) -> np.ndarray:
+        """
+        Build the baseline portfolio from the authoritative
+        RiskBudgetEngine.
+        """
+
+        try:
+            weights = (
+                self.risk_budget_engine.optimize(
+                    covariance,
+                    risk_budget,
+                )
+            )
+        except Exception as exc:
+            raise PortfolioOptimizerCalculationError(
+                "Risk-budget optimization failed: "
+                f"{exc}"
+            ) from exc
+
+        if weights is None:
+            raise PortfolioOptimizerCalculationError(
+                "Risk-budget optimizer returned None."
+            )
+
+        try:
+            weights = np.asarray(
+                weights,
+                dtype=float,
+            ).reshape(-1)
+        except (TypeError, ValueError) as exc:
+            raise PortfolioOptimizerCalculationError(
+                "Risk-budget optimizer returned "
+                "non-numeric weights."
+            ) from exc
+
+        if weights.size != (
+            risk_budget.size
+        ):
+            raise PortfolioOptimizerCalculationError(
+                "Risk-budget optimizer returned "
+                f"{weights.size} weights; expected "
+                f"{risk_budget.size}."
+            )
+
+        if not np.isfinite(
+            weights
+        ).all():
+            raise PortfolioOptimizerCalculationError(
+                "Risk-budget optimizer returned "
+                "non-finite weights."
+            )
+
+        if np.any(
+            weights < -self.tolerance
+        ):
+            raise PortfolioOptimizerCalculationError(
+                "Risk-budget optimizer returned "
+                "negative weights."
+            )
+
+        weights = np.maximum(
+            weights,
+            0.0,
+        )
+
+        total = float(
+            weights.sum()
+        )
+
+        if (
+            not np.isfinite(total)
+            or total <= self.tolerance
+        ):
+            raise PortfolioOptimizerCalculationError(
+                "Risk-budget optimizer returned "
+                "zero total allocation."
+            )
+
+        weights /= total
+
+        if not np.isclose(
+            weights.sum(),
+            1.0,
+            atol=1e-8,
+        ):
+            raise PortfolioOptimizerCalculationError(
+                "Baseline risk-budget weights do not sum to one."
+            )
+
+        return weights
+
+    # ==================================================================
+    # BLACK-LITTERMAN
+    # ==================================================================
+
+    @staticmethod
+    def _normalize_signal(
+        posterior_returns: np.ndarray,
+    ) -> np.ndarray:
+        """
+        Normalize posterior returns to [-1, 1].
+        """
+
+        posterior_returns = np.asarray(
+            posterior_returns,
+            dtype=float,
+        ).reshape(-1)
+
+        if posterior_returns.size == 0:
+            return np.zeros_like(
+                posterior_returns
+            )
+
+        if not np.isfinite(
+            posterior_returns
+        ).all():
+            raise PortfolioOptimizerCalculationError(
+                "Posterior returns contain non-finite values."
+            )
+
+        center = float(
+            np.mean(
+                posterior_returns
             )
         )
 
-        # ============================================
-        # EXPECTED RETURN FORECASTS
-        # ============================================
+        centered = (
+            posterior_returns
+            - center
+        )
 
-        posterior_returns = None
+        scale = float(
+            np.max(
+                np.abs(
+                    centered
+                )
+            )
+        )
 
         if (
-            prices is not None
-            and
-            self.forecast_engine is not None
-            and
-            self.black_litterman is not None
+            not np.isfinite(scale)
+            or scale <= 1e-14
         ):
+            return np.zeros_like(
+                posterior_returns
+            )
 
+        return np.clip(
+            centered / scale,
+            -1.0,
+            1.0,
+        )
+
+    def _apply_black_litterman_tilt(
+        self,
+        baseline_weights: np.ndarray,
+        posterior_returns: Optional[
+            np.ndarray
+        ],
+    ) -> tuple[
+        np.ndarray,
+        np.ndarray,
+    ]:
+        """
+        Apply a controlled BL tilt around baseline weights.
+        """
+
+        baseline_weights = np.asarray(
+            baseline_weights,
+            dtype=float,
+        ).reshape(-1)
+
+        if not np.isfinite(
+            baseline_weights
+        ).all():
+            raise PortfolioOptimizerCalculationError(
+                "Baseline weights contain non-finite values."
+            )
+
+        if np.any(
+            baseline_weights < -self.tolerance
+        ):
+            raise PortfolioOptimizerCalculationError(
+                "Baseline weights contain negative values."
+            )
+
+        if posterior_returns is None:
+            return (
+                baseline_weights.copy(),
+                np.ones_like(
+                    baseline_weights
+                ),
+            )
+
+        posterior_returns = np.asarray(
+            posterior_returns,
+            dtype=float,
+        ).reshape(-1)
+
+        if (
+            posterior_returns.size
+            != baseline_weights.size
+        ):
+            raise PortfolioOptimizerCalculationError(
+                "Posterior-return vector and baseline portfolio "
+                "have different dimensions."
+            )
+
+        if not np.isfinite(
+            posterior_returns
+        ).all():
+            raise PortfolioOptimizerCalculationError(
+                "Cannot apply BL tilt to "
+                "non-finite posterior returns."
+            )
+
+        signal = self._normalize_signal(
+            posterior_returns
+        )
+
+        multipliers = np.clip(
+            1.0
+            + self.bl_tilt_strength * signal,
+            self.bl_tilt_floor,
+            self.bl_tilt_cap,
+        )
+
+        tilted_weights = (
+            baseline_weights
+            * multipliers
+        )
+
+        total = float(
+            tilted_weights.sum()
+        )
+
+        if (
+            not np.isfinite(total)
+            or total <= self.tolerance
+        ):
+            raise PortfolioOptimizerCalculationError(
+                "Black-Litterman tilt produced "
+                "an invalid total allocation."
+            )
+
+        tilted_weights /= total
+
+        if not np.isfinite(
+            tilted_weights
+        ).all():
+            raise PortfolioOptimizerCalculationError(
+                "Black-Litterman tilted weights contain "
+                "non-finite values."
+            )
+
+        if np.any(
+            tilted_weights < -self.tolerance
+        ):
+            raise PortfolioOptimizerCalculationError(
+                "Black-Litterman tilted weights contain "
+                "negative values."
+            )
+
+        return (
+            tilted_weights,
+            multipliers,
+        )
+
+    # ==================================================================
+    # FORECAST + BLACK-LITTERMAN
+    # ==================================================================
+
+    def _generate_return_overlay(
+        self,
+        covariance: np.ndarray,
+        asset_order: tuple[str, ...],
+        prices: Any,
+    ) -> Optional[np.ndarray]:
+        """
+        Generate posterior returns when price data is available.
+        """
+
+        self.last_forecasts = None
+        self.last_posterior_returns = None
+
+        if prices is None:
+            return None
+
+        if self.forecast_engine is None:
+            return None
+
+        if self.black_litterman is None:
+            return None
+
+        try:
             forecasts = (
-                self.forecast_engine
-                .forecast(
+                self.forecast_engine.forecast(
                     prices
                 )
             )
+        except Exception as exc:
+            raise PortfolioOptimizerCalculationError(
+                "Expected-return forecasting failed: "
+                f"{exc}"
+            ) from exc
 
-            # ----------------------------------------
-            # FORECAST VALIDATION
-            # ----------------------------------------
+        if forecasts is None:
+            raise PortfolioOptimizerCalculationError(
+                "Expected-return forecaster returned None."
+            )
 
-            if forecasts is None:
+        if not hasattr(
+            forecasts,
+            "values",
+        ):
+            raise TypeError(
+                "Expected-return forecasts must expose "
+                "a 'values' attribute."
+            )
 
-                raise ValueError(
-                    "Expected-return forecaster "
-                    "returned None."
-                )
-
-            if not hasattr(
-                forecasts,
-                "values",
-            ):
-
-                raise TypeError(
-                    "Expected-return forecasts "
-                    "must expose a 'values' attribute."
-                )
-
-            forecast_values = np.asarray(
+        forecast_values = (
+            self._validate_return_vector(
                 forecasts.values,
-                dtype=float,
-            ).reshape(-1)
+                asset_order,
+                "Expected-return forecast",
+            )
+        )
 
-            if forecast_values.size != (
-                len(asset_order)
-            ):
-
-                raise ValueError(
-                    "Forecast vector length "
-                    f"{forecast_values.size} does not "
-                    "match asset universe size "
-                    f"{len(asset_order)}."
-                )
-
-            if not np.isfinite(
-                forecast_values
-            ).all():
-
-                raise ValueError(
-                    "Expected-return forecasts "
-                    "contain non-finite values."
-                )
-
-            # ----------------------------------------
-            # STORE FORECASTS
-            # ----------------------------------------
-
+        self.last_forecasts = (
+            forecasts.copy()
             if hasattr(
                 forecasts,
                 "copy",
-            ):
-
-                self.last_forecasts = (
-                    forecasts.copy()
-                )
-
-            else:
-
-                self.last_forecasts = (
-                    forecasts
-                )
-
-            # ----------------------------------------
-            # MARKET WEIGHTS
-            # ----------------------------------------
-
-            market_weights = (
-                np.ones(
-                    len(asset_order),
-                    dtype=float,
-                )
-                /
-                float(
-                    len(asset_order)
-                )
             )
+            else forecasts
+        )
 
-            # ----------------------------------------
-            # BLACK-LITTERMAN POSTERIOR
-            # ----------------------------------------
+        # Preserve the existing BL market-prior contract for backward
+        # compatibility. The regime risk-budget portfolio remains the
+        # portfolio-construction baseline; this vector is the BL prior.
+        market_weights = (
+            np.ones(
+                len(asset_order),
+                dtype=float,
+            )
+            / float(
+                len(asset_order)
+            )
+        )
 
+        try:
             posterior_returns = (
-                self.black_litterman
-                .posterior_returns(
+                self.black_litterman.posterior_returns(
                     covariance,
                     market_weights,
                     forecast_values,
                 )
             )
+        except Exception as exc:
+            raise PortfolioOptimizerCalculationError(
+                "Black-Litterman posterior-return calculation failed: "
+                f"{exc}"
+            ) from exc
 
-            posterior_returns = np.asarray(
+        posterior_returns = (
+            self._validate_return_vector(
                 posterior_returns,
-                dtype=float,
-            ).reshape(-1)
+                asset_order,
+                "Black-Litterman posterior return",
+            )
+        )
 
-            if posterior_returns.size != (
-                len(asset_order)
-            ):
+        self.last_posterior_returns = (
+            posterior_returns.copy()
+        )
 
-                raise ValueError(
-                    "Black-Litterman posterior "
-                    "return vector length "
-                    f"{posterior_returns.size} does not "
-                    "match asset universe size "
-                    f"{len(asset_order)}."
+        return posterior_returns
+
+    # ==================================================================
+    # CONSTRAINTS
+    # ==================================================================
+
+    def _apply_constraints(
+        self,
+        weights: np.ndarray,
+        asset_order: tuple[str, ...],
+    ) -> tuple[
+        np.ndarray,
+        float,
+        dict[str, Any],
+    ]:
+        """
+        Apply PortfolioConstraints.
+        """
+
+        try:
+            result = (
+                self.constraints.enforce(
+                    weights
                 )
-
-            if not np.isfinite(
-                posterior_returns
-            ).all():
-
-                raise ValueError(
-                    "Black-Litterman posterior "
-                    "returns contain non-finite values."
-                )
-
-            self.last_posterior_returns = (
-                posterior_returns.copy()
             )
-
-        # ============================================
-        # RISK-BUDGET OPTIMIZATION
-        # ============================================
-
-        weights = (
-            self.risk_budget_engine
-            .optimize(
-                covariance,
-                risk_budget,
-            )
-        )
-
-        weights = np.asarray(
-            weights,
-            dtype=float,
-        ).reshape(-1)
-
-        # ============================================
-        # RISK-BUDGET OUTPUT VALIDATION
-        # ============================================
-
-        if weights.size != (
-            len(asset_order)
-        ):
-
-            raise ValueError(
-                "Risk-budget optimizer returned "
-                f"{weights.size} weights; "
-                "expected "
-                f"{len(asset_order)}."
-            )
-
-        if not np.isfinite(
-            weights
-        ).all():
-
-            raise ValueError(
-                "Risk-budget optimizer returned "
-                "non-finite weights."
-            )
-
-        if np.any(
-            weights < -1e-10
-        ):
-
-            raise ValueError(
-                "Risk-budget optimizer returned "
-                "negative weights."
-            )
-
-        weights = np.maximum(
-            weights,
-            0.0,
-        )
-
-        weight_sum = float(
-            weights.sum()
-        )
-
-        if not np.isclose(
-            weight_sum,
-            1.0,
-            atol=1e-6,
-        ):
-
-            raise ValueError(
-                "Risk-budget optimizer returned "
-                f"weights summing to {weight_sum}."
-            )
-
-        # ============================================
-        # PORTFOLIO CONSTRAINTS
-        # ============================================
-
-        constraint_result = (
-            self.constraints
-            .enforce(
-                weights
-            )
-        )
+        except Exception as exc:
+            raise PortfolioOptimizerCalculationError(
+                "Portfolio constraint enforcement failed: "
+                f"{exc}"
+            ) from exc
 
         if not isinstance(
-            constraint_result,
+            result,
             dict,
         ):
-
             raise TypeError(
-                "Portfolio constraints must "
-                "return a dictionary."
+                "Portfolio constraints must return a dictionary."
             )
 
-        if "weights" not in (
-            constraint_result
-        ):
-
+        if "weights" not in result:
             raise ValueError(
-                "Portfolio constraints result "
-                "does not contain 'weights'."
+                "Portfolio constraints result does not contain "
+                "'weights'."
             )
 
-        if "cash" not in (
-            constraint_result
-        ):
-
+        if "cash" not in result:
             raise ValueError(
-                "Portfolio constraints result "
-                "does not contain 'cash'."
+                "Portfolio constraints result does not contain "
+                "'cash'."
             )
 
-        weights = np.asarray(
-            constraint_result[
-                "weights"
-            ],
+        constrained_weights = np.asarray(
+            result["weights"],
             dtype=float,
         ).reshape(-1)
 
-        constraint_cash = float(
-            constraint_result[
-                "cash"
-            ]
-        )
+        try:
+            constraint_cash = float(
+                result["cash"]
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "Portfolio constraints returned invalid cash."
+            ) from exc
 
-        # ============================================
-        # POST-CONSTRAINT VALIDATION
-        # ============================================
-
-        if weights.size != (
-            len(asset_order)
+        if (
+            constrained_weights.size
+            != len(asset_order)
         ):
-
             raise ValueError(
                 "Constraint engine returned "
-                f"{weights.size} weights; "
-                "expected "
+                f"{constrained_weights.size} weights; expected "
                 f"{len(asset_order)}."
             )
 
         if not np.isfinite(
-            weights
+            constrained_weights
         ).all():
-
             raise ValueError(
                 "Constraint engine returned "
                 "non-finite weights."
             )
 
         if np.any(
-            weights < -1e-10
+            constrained_weights
+            < -self.tolerance
         ):
-
             raise ValueError(
                 "Constraint engine returned "
                 "negative weights."
+            )
+
+        if not np.isfinite(
+            constraint_cash
+        ):
+            raise ValueError(
+                "Constraint engine returned "
+                "invalid cash."
             )
 
         if (
-            not np.isfinite(
-                constraint_cash
-            )
+            constraint_cash
+            < -self.tolerance
         ):
-
             raise ValueError(
                 "Constraint engine returned "
-                "invalid cash weight."
+                "negative cash."
             )
 
-        if constraint_cash < -1e-10:
-
-            raise ValueError(
-                "Constraint engine returned "
-                "negative cash weight."
-            )
-
-        weights = np.maximum(
-            weights,
+        constrained_weights = np.maximum(
+            constrained_weights,
             0.0,
         )
 
-        # ============================================
-        # VOLATILITY TARGETING
-        # ============================================
-
-        volatility_engine_used = (
-            self.vol_target_engine
-            is not None
+        self.last_constraint_result = dict(
+            result
         )
 
-        if volatility_engine_used:
+        return (
+            constrained_weights,
+            max(
+                0.0,
+                constraint_cash,
+            ),
+            dict(result),
+        )
 
-            weights = (
-                self.vol_target_engine
-                .scale_weights(
+    # ==================================================================
+    # VOLATILITY TARGETING
+    # ==================================================================
+
+    def _apply_volatility_targeting(
+        self,
+        weights: np.ndarray,
+        covariance: np.ndarray,
+        target_vol: float,
+        max_leverage: float,
+    ) -> tuple[
+        np.ndarray,
+        Any,
+    ]:
+        """
+        Apply authoritative volatility targeting.
+        """
+
+        try:
+            scaled_weights = (
+                self.vol_target_engine.scale_weights(
                     weights,
                     covariance,
                     target_vol,
                     max_leverage=max_leverage,
                 )
             )
+        except Exception as exc:
+            raise PortfolioOptimizerCalculationError(
+                "Volatility-targeting engine failed: "
+                f"{exc}"
+            ) from exc
 
-            weights = np.asarray(
-                weights,
-                dtype=float,
-            ).reshape(-1)
-
-        # ============================================
-        # POST-VOLATILITY WEIGHT VALIDATION
-        # ============================================
-
-        if weights.size != (
-            len(asset_order)
-        ):
-
-            raise ValueError(
-                "Volatility-targeting engine "
-                "returned an invalid number "
-                "of weights. "
-                f"Expected {len(asset_order)}, "
-                f"got {weights.size}."
+        if scaled_weights is None:
+            raise PortfolioOptimizerCalculationError(
+                "Volatility-targeting engine returned None."
             )
+
+        scaled_weights = np.asarray(
+            scaled_weights,
+            dtype=float,
+        ).reshape(-1)
+
+        if (
+            scaled_weights.size
+            != weights.size
+        ):
+            raise PortfolioOptimizerCalculationError(
+                "Volatility-targeting engine returned "
+                f"{scaled_weights.size} weights; expected "
+                f"{weights.size}."
+            )
+
+        if not np.isfinite(
+            scaled_weights
+        ).all():
+            raise PortfolioOptimizerCalculationError(
+                "Volatility-targeting engine returned "
+                "non-finite weights."
+            )
+
+        if np.any(
+            scaled_weights
+            < -self.tolerance
+        ):
+            raise PortfolioOptimizerCalculationError(
+                "Volatility-targeting engine returned "
+                "negative weights."
+            )
+
+        scaled_weights = np.maximum(
+            scaled_weights,
+            0.0,
+        )
+
+        engine_result = None
+
+        if hasattr(
+            self.vol_target_engine,
+            "get_last_result",
+        ):
+            try:
+                engine_result = (
+                    self.vol_target_engine.get_last_result()
+                )
+            except Exception:
+                engine_result = None
+
+        elif hasattr(
+            self.vol_target_engine,
+            "last_result",
+        ):
+            engine_result = (
+                self.vol_target_engine.last_result
+            )
+
+        return (
+            scaled_weights,
+            engine_result,
+        )
+
+    # ==================================================================
+    # LEVERAGE BACKSTOP
+    # ==================================================================
+
+    def _enforce_leverage_backstop(
+        self,
+        weights: np.ndarray,
+        max_leverage: float,
+    ) -> tuple[
+        np.ndarray,
+        bool,
+    ]:
+        """
+        Enforce the final hard gross-exposure ceiling.
+
+        This method never introduces short positions and therefore only
+        scales an already-valid long-only portfolio downward when required.
+        """
+
+        weights = np.asarray(
+            weights,
+            dtype=float,
+        ).reshape(-1)
 
         if not np.isfinite(
             weights
         ).all():
-
-            raise ValueError(
-                "Volatility-targeting engine "
-                "returned non-finite weights."
+            raise PortfolioOptimizerCalculationError(
+                "Weights contain non-finite values before "
+                "leverage enforcement."
             )
 
         if np.any(
-            weights < -1e-10
+            weights < -self.tolerance
         ):
+            raise PortfolioOptimizerCalculationError(
+                "Weights contain negative values before "
+                "leverage enforcement."
+            )
 
-            raise ValueError(
-                "Volatility-targeting engine "
-                "returned negative weights."
+        if (
+            not np.isfinite(max_leverage)
+            or max_leverage <= 0.0
+        ):
+            raise PortfolioOptimizerCalculationError(
+                "Maximum leverage must be positive and finite."
             )
 
         weights = np.maximum(
@@ -948,610 +1541,1354 @@ class PortfolioOptimizer:
             0.0,
         )
 
-        # ============================================
-        # LEVERAGE CONTROL
-        # ============================================
-
-        gross_exposure = float(
+        gross = float(
             np.sum(
-                np.abs(
-                    weights
-                )
+                np.abs(weights)
             )
         )
 
         if not np.isfinite(
-            gross_exposure
+            gross
         ):
-
-            raise ValueError(
-                "Gross exposure became "
-                "non-finite."
+            raise PortfolioOptimizerCalculationError(
+                "Gross exposure became non-finite."
             )
 
-        leverage_binding = False
-
-        # --------------------------------------------
-        # REGIME LEVERAGE SAFETY BACKSTOP
-        # --------------------------------------------
-        #
-        # The volatility engine has already received
-        # max_leverage. This is an independent final
-        # safety invariant.
-        #
+        binding = False
 
         if (
-            gross_exposure
-            >
-            max_leverage + 1e-10
+            gross
+            > max_leverage
+            + self.LEVERAGE_TOLERANCE
         ):
-
-            if gross_exposure <= 0.0:
-
-                raise ValueError(
-                    "Invalid gross exposure "
-                    "during leverage enforcement."
+            if gross <= self.EXPOSURE_TOLERANCE:
+                raise PortfolioOptimizerCalculationError(
+                    "Invalid gross exposure during leverage enforcement."
                 )
 
-            scale = (
-                max_leverage
-                /
-                gross_exposure
-            )
-
-            weights *= scale
-
-            leverage_binding = True
-
-            gross_exposure = float(
-                np.sum(
-                    np.abs(
-                        weights
-                    )
+            weights = (
+                weights
+                * (
+                    max_leverage
+                    / gross
                 )
             )
 
-        # --------------------------------------------
-        # FINAL LEVERAGE INVARIANT
-        # --------------------------------------------
+            binding = True
+
+        final_gross = float(
+            np.sum(
+                np.abs(weights)
+            )
+        )
 
         if (
-            gross_exposure
-            >
-            max_leverage + 1e-8
+            not np.isfinite(final_gross)
         ):
+            raise PortfolioOptimizerCalculationError(
+                "Final gross exposure became non-finite."
+            )
 
-            raise ValueError(
-                "Portfolio remains above "
-                "maximum regime leverage "
+        if (
+            final_gross
+            > max_leverage
+            + self.LEVERAGE_TOLERANCE
+        ):
+            raise PortfolioOptimizerCalculationError(
+                "Portfolio remains above maximum regime leverage "
                 "after enforcement. "
-                f"Gross exposure="
-                f"{gross_exposure:.12f}; "
-                f"maximum leverage="
-                f"{max_leverage:.12f}."
+                f"Gross exposure={final_gross:.12f}; "
+                f"maximum leverage={max_leverage:.12f}."
             )
 
-        # ============================================
-        # CASH SLEEVE
-        # ============================================
+        return (
+            weights,
+            binding,
+        )
 
-        # IMPORTANT:
-        #
-        # We deliberately calculate cash from final
-        # gross exposure. We do NOT renormalize the
-        # weights back to 100%.
-        #
-        # Therefore:
-        #
-        # Bull    -> max leverage 1.00 -> cash ~ 0
-        # Neutral -> max leverage 0.75 -> cash ~ 0.25
-        # Crisis  -> max leverage 0.40 -> cash ~ 0.60
-        #
+    # ==================================================================
+    # EXPOSURE / CASH / FINANCING ACCOUNTING
+    # ==================================================================
+
+    @staticmethod
+    def _calculate_exposure_metrics(
+        weights: np.ndarray,
+    ) -> dict[str, float]:
+        """
+        Calculate production exposure accounting.
+
+        For a long-only portfolio:
+
+            gross exposure = sum(abs(weights))
+            net exposure   = sum(weights)
+
+        Cash represents uninvested capital when gross exposure is below 1.
+
+        Financing represents borrowed capital when gross exposure exceeds 1.
+
+        Thus:
+
+            gross + cash - financing = 1
+
+        and:
+
+            financing = max(gross - 1, 0)
+            cash      = max(1 - gross, 0)
+        """
+
+        weights = np.asarray(
+            weights,
+            dtype=float,
+        ).reshape(-1)
+
+        if not np.isfinite(
+            weights
+        ).all():
+            raise PortfolioOptimizerCalculationError(
+                "Cannot calculate exposure metrics from "
+                "non-finite weights."
+            )
+
+        gross_exposure = float(
+            np.sum(
+                np.abs(weights)
+            )
+        )
+
+        net_exposure = float(
+            np.sum(weights)
+        )
+
+        if (
+            not np.isfinite(gross_exposure)
+            or not np.isfinite(net_exposure)
+        ):
+            raise PortfolioOptimizerCalculationError(
+                "Portfolio exposure became non-finite."
+            )
 
         cash_weight = max(
             0.0,
             1.0 - gross_exposure,
         )
 
-        if abs(
-            cash_weight
-        ) < 1e-12:
-
-            cash_weight = 0.0
-
-        if not np.isfinite(
-            cash_weight
-        ):
-
-            raise ValueError(
-                "Cash weight became "
-                "non-finite."
-            )
-
-        if cash_weight < 0.0:
-
-            cash_weight = 0.0
-
-        # ============================================
-        # FINAL EXPOSURE
-        # ============================================
-
-        final_gross_exposure = float(
-            np.sum(
-                np.abs(
-                    weights
-                )
-            )
+        financing_weight = max(
+            0.0,
+            gross_exposure - 1.0,
         )
 
-        if not np.isfinite(
-            final_gross_exposure
-        ):
-
-            raise ValueError(
-                "Final gross exposure "
-                "is non-finite."
-            )
-
-        if (
-            final_gross_exposure
-            >
-            max_leverage + 1e-8
-        ):
-
-            raise ValueError(
-                "Final portfolio exceeds "
-                "regime maximum leverage. "
-                f"Gross exposure="
-                f"{final_gross_exposure:.12f}; "
-                f"maximum="
-                f"{max_leverage:.12f}."
-            )
-
-        # ============================================
-        # PORTFOLIO + CASH INVARIANT
-        # ============================================
-
-        total_exposure = (
-            final_gross_exposure
-            +
-            cash_weight
+        accounting_total = (
+            gross_exposure
+            + cash_weight
+            - financing_weight
         )
-
-        if not np.isfinite(
-            total_exposure
-        ):
-
-            raise ValueError(
-                "Total portfolio exposure "
-                "is non-finite."
-            )
 
         if not np.isclose(
-            total_exposure,
+            accounting_total,
             1.0,
-            atol=1e-6,
+            atol=1e-8,
         ):
-
-            raise ValueError(
-                "Weights + cash must equal 1. "
-                f"Got {total_exposure:.12f}."
+            raise PortfolioOptimizerCalculationError(
+                "Portfolio exposure accounting failed. "
+                f"Gross={gross_exposure:.12f}, "
+                f"Cash={cash_weight:.12f}, "
+                f"Financing={financing_weight:.12f}, "
+                f"Accounting total={accounting_total:.12f}."
             )
 
-        # ============================================
-        # FINAL PORTFOLIO VOLATILITY
-        # ============================================
+        return {
+            "gross_exposure": gross_exposure,
+            "net_exposure": net_exposure,
+            "cash_weight": cash_weight,
+            "financing_weight": financing_weight,
+            "financing": financing_weight,
+        }
 
-        final_variance = float(
+    # ==================================================================
+    # PORTFOLIO VOLATILITY
+    # ==================================================================
+
+    @staticmethod
+    def _calculate_portfolio_volatility(
+        weights: np.ndarray,
+        covariance: np.ndarray,
+    ) -> float:
+        """
+        Calculate portfolio volatility.
+        """
+
+        variance = float(
             weights
             @ covariance
             @ weights
         )
 
         if not np.isfinite(
-            final_variance
+            variance
         ):
-
-            raise ValueError(
-                "Final portfolio variance "
-                "is non-finite."
+            raise PortfolioOptimizerCalculationError(
+                "Portfolio variance is non-finite."
             )
 
-        if final_variance < 0.0:
-
-            if final_variance > -1e-12:
-
-                final_variance = 0.0
-
+        if variance < 0.0:
+            if (
+                variance
+                > -PortfolioOptimizer.VARIANCE_NEGATIVE_TOLERANCE
+            ):
+                variance = 0.0
             else:
-
-                raise ValueError(
-                    "Final portfolio variance "
-                    "is materially negative: "
-                    f"{final_variance}."
+                raise PortfolioOptimizerCalculationError(
+                    "Portfolio variance is materially negative: "
+                    f"{variance}."
                 )
 
-        final_volatility = float(
-            np.sqrt(
-                final_variance
-            )
+        volatility = float(
+            np.sqrt(variance)
         )
 
         if not np.isfinite(
-            final_volatility
+            volatility
         ):
-
-            raise ValueError(
-                "Final portfolio volatility "
-                "is non-finite."
+            raise PortfolioOptimizerCalculationError(
+                "Portfolio volatility is non-finite."
             )
 
-        # ============================================
-        # VOLATILITY DIAGNOSTICS
-        # ============================================
+        return volatility
+
+    # ==================================================================
+    # VOLATILITY DIAGNOSTICS
+    # ==================================================================
+
+    def _build_volatility_diagnostics(
+        self,
+        engine_result,
+        target_vol: float,
+        max_leverage: float,
+        final_weights: np.ndarray,
+        final_volatility: float,
+        backstop_binding: bool,
+    ) -> dict[str, Any]:
+        """
+        Build deterministic volatility and exposure diagnostics.
+        """
+
+        exposure = self._calculate_exposure_metrics(
+            final_weights
+        )
+
+        final_gross = exposure[
+            "gross_exposure"
+        ]
+
+        cash_weight = exposure[
+            "cash_weight"
+        ]
+
+        financing_weight = exposure[
+            "financing_weight"
+        ]
+
+        net_exposure = exposure[
+            "net_exposure"
+        ]
+
+        volatility_error = (
+            final_volatility
+            - target_vol
+        )
 
         volatility_shortfall = max(
             0.0,
             target_vol
-            -
-            final_volatility,
+            - final_volatility,
         )
 
-        volatility_error = (
-            final_volatility
-            -
-            target_vol
-        )
-
-        volatility_target_achieved = bool(
-            np.isclose(
-                final_volatility,
-                target_vol,
-                rtol=1e-6,
-                atol=1e-8,
-            )
-        )
-
-        # --------------------------------------------
-        # TRY TO RETRIEVE ENGINE RESULT
-        # --------------------------------------------
-
-        volatility_engine_result = None
-
-        if volatility_engine_used:
-
-            if hasattr(
-                self.vol_target_engine,
-                "get_last_result",
-            ):
-
-                volatility_engine_result = (
-                    self.vol_target_engine
-                    .get_last_result()
-                )
-
-            elif hasattr(
-                self.vol_target_engine,
-                "last_result",
-            ):
-
-                volatility_engine_result = (
-                    self.vol_target_engine
-                    .last_result
-                )
-
-                # ============================================
-        # BUILD VOLATILITY DIAGNOSTICS
-        # ============================================
-
-        volatility_diagnostics = {
+        diagnostics: dict[str, Any] = {
             "status": (
                 "ENGINE"
-                if volatility_engine_used
+                if engine_result is not None
                 else "CALCULATED"
             ),
-
-            "engine_result": (
-                volatility_engine_result
-            ),
-
+            "engine_result": engine_result,
             "original_volatility": None,
-
             "target_volatility": float(
                 target_vol
             ),
-
-            "final_volatility": (
+            "final_volatility": float(
                 final_volatility
             ),
-
-            "volatility_error": (
+            "volatility_error": float(
                 volatility_error
             ),
-
-            "volatility_shortfall": (
+            "volatility_shortfall": float(
                 volatility_shortfall
             ),
-
-            "target_achieved": (
-                volatility_target_achieved
+            "target_achieved": bool(
+                np.isclose(
+                    final_volatility,
+                    target_vol,
+                    rtol=1e-6,
+                    atol=1e-8,
+                )
             ),
-
-            "maximum_leverage": (
-                float(max_leverage)
+            "maximum_leverage": float(
+                max_leverage
             ),
-
-            "gross_exposure": (
-                final_gross_exposure
+            "gross_exposure": float(
+                final_gross
             ),
-
-            "cash_weight": (
+            "net_exposure": float(
+                net_exposure
+            ),
+            "cash_weight": float(
                 cash_weight
             ),
-
-            # This is deliberately populated below
-            # from the authoritative volatility-engine result.
-            "leverage_binding": (
-                bool(leverage_binding)
+            "financing_weight": float(
+                financing_weight
             ),
-
+            "financing": float(
+                financing_weight
+            ),
+            "leverage_backstop_binding": bool(
+                backstop_binding
+            ),
+            "leverage_binding": bool(
+                backstop_binding
+            ),
             "required_leverage": None,
+            "exposure_accounting": {
+                "gross_plus_cash_minus_financing": float(
+                    final_gross
+                    + cash_weight
+                    - financing_weight
+                ),
+                "accounting_valid": True,
+            },
         }
 
-        # ============================================
-        # INCORPORATE ENGINE DIAGNOSTICS
-        # ============================================
-
-        if (
-            volatility_engine_result
-            is not None
-        ):
-
-            # ----------------------------------------
-            # ORIGINAL VOLATILITY
-            # ----------------------------------------
-
+        if engine_result is not None:
             if hasattr(
-                volatility_engine_result,
+                engine_result,
                 "original_volatility",
             ):
-
-                volatility_diagnostics[
+                diagnostics[
                     "original_volatility"
                 ] = float(
-                    volatility_engine_result
-                    .original_volatility
+                    engine_result.original_volatility
                 )
 
-            # ----------------------------------------
-            # SCALE FACTOR
-            # ----------------------------------------
-
             if hasattr(
-                volatility_engine_result,
+                engine_result,
                 "scale_factor",
             ):
-
-                volatility_diagnostics[
+                diagnostics[
                     "scale_factor"
                 ] = float(
-                    volatility_engine_result
-                    .scale_factor
+                    engine_result.scale_factor
                 )
 
-            # ----------------------------------------
-            # REQUIRED LEVERAGE
-            # ----------------------------------------
-
             if hasattr(
-                volatility_engine_result,
+                engine_result,
                 "required_leverage",
             ):
-
-                volatility_diagnostics[
+                diagnostics[
                     "required_leverage"
                 ] = float(
-                    volatility_engine_result
-                    .required_leverage
+                    engine_result.required_leverage
                 )
 
-            # ----------------------------------------
-            # TARGET ACHIEVEMENT
-            # ----------------------------------------
-
             if hasattr(
-                volatility_engine_result,
+                engine_result,
                 "target_achieved",
             ):
-
-                volatility_diagnostics[
+                diagnostics[
                     "target_achieved"
                 ] = bool(
-                    volatility_engine_result
-                    .target_achieved
+                    engine_result.target_achieved
                 )
 
-            # ----------------------------------------
-            # LEVERAGE BINDING
-            # ----------------------------------------
-            #
-            # IMPORTANT:
-            #
-            # The volatility-targeting engine is the
-            # authoritative source for this state.
-            #
-            # Do NOT reconstruct leverage_binding from
-            # final_gross_exposure == max_leverage.
-            #
-            # The engine determines whether the requested
-            # volatility target required more leverage than
-            # the configured maximum.
-            #
-
             if hasattr(
-                volatility_engine_result,
+                engine_result,
                 "leverage_binding",
             ):
-
-                volatility_diagnostics[
+                diagnostics[
                     "leverage_binding"
                 ] = bool(
-                    volatility_engine_result
-                    .leverage_binding
+                    engine_result.leverage_binding
                 )
 
-            # ----------------------------------------
-            # ENGINE DIAGNOSTICS PAYLOAD
-            # ----------------------------------------
-
             if hasattr(
-                volatility_engine_result,
+                engine_result,
                 "diagnostics",
             ):
-
                 engine_diagnostics = (
-                    volatility_engine_result
-                    .diagnostics
+                    engine_result.diagnostics
                 )
 
                 if isinstance(
                     engine_diagnostics,
                     dict,
                 ):
-
-                    volatility_diagnostics[
+                    diagnostics[
                         "engine_diagnostics"
                     ] = dict(
                         engine_diagnostics
                     )
 
-        # ============================================
-        # RISK REPORT
-        # ============================================
+        return diagnostics
 
-        risk_report = (
-            RiskBudgetReport.create(
+    # ==================================================================
+    # REGIME CONFIGURATION
+    # ==================================================================
+
+    def _resolve_regime_parameters(
+        self,
+        normalized_regime: str,
+    ) -> tuple[float, float]:
+        """
+        Resolve volatility target and maximum leverage.
+
+        Risk-budget policy is deliberately NOT resolved here.
+        """
+
+        configured_vol_keys = {
+            str(key).strip().lower(): key
+            for key in REGIME_VOL_TARGETS
+        }
+
+        configured_leverage_keys = {
+            str(key).strip().lower(): key
+            for key in REGIME_MAX_LEVERAGE
+        }
+
+        regime_key = normalized_regime.strip().lower()
+
+        if regime_key not in configured_vol_keys:
+            raise PortfolioOptimizerConfigurationError(
+                "No volatility target configured for regime "
+                f"'{normalized_regime}'."
+            )
+
+        if regime_key not in configured_leverage_keys:
+            raise PortfolioOptimizerConfigurationError(
+                "No maximum leverage configured for regime "
+                f"'{normalized_regime}'."
+            )
+
+        target_vol = float(
+            REGIME_VOL_TARGETS[
+                configured_vol_keys[regime_key]
+            ]
+        )
+
+        max_leverage = float(
+            REGIME_MAX_LEVERAGE[
+                configured_leverage_keys[regime_key]
+            ]
+        )
+
+        if (
+            not np.isfinite(target_vol)
+            or target_vol <= 0.0
+        ):
+            raise PortfolioOptimizerConfigurationError(
+                "Regime target volatility must be "
+                "positive and finite."
+            )
+
+        if (
+            not np.isfinite(max_leverage)
+            or max_leverage <= 0.0
+        ):
+            raise PortfolioOptimizerConfigurationError(
+                "Regime maximum leverage must be "
+                "positive and finite."
+            )
+
+        return (
+            target_vol,
+            max_leverage,
+        )
+
+    # ==================================================================
+    # FINAL INVARIANTS
+    # ==================================================================
+
+    def _validate_final_portfolio(
+        self,
+        weights: np.ndarray,
+        max_leverage: float,
+        cash_weight: float,
+        financing_weight: float,
+        final_gross_exposure: float,
+        final_volatility: float,
+    ) -> None:
+        """
+        Enforce final production invariants explicitly.
+
+        No Python ``assert`` statements are used here so these checks
+        remain active even under ``python3 -O``.
+        """
+
+        if not np.isfinite(
+            weights
+        ).all():
+            raise PortfolioOptimizerCalculationError(
+                "Final weights contain non-finite values."
+            )
+
+        if np.any(
+            weights < -self.tolerance
+        ):
+            raise PortfolioOptimizerCalculationError(
+                "Final weights contain negative values."
+            )
+
+        if not np.isfinite(
+            cash_weight
+        ):
+            raise PortfolioOptimizerCalculationError(
+                "Final cash weight is non-finite."
+            )
+
+        if (
+            not np.isfinite(
+                financing_weight
+            )
+            or financing_weight < -self.tolerance
+        ):
+            raise PortfolioOptimizerCalculationError(
+                "Final financing weight is invalid."
+            )
+
+        if not np.isfinite(
+            final_gross_exposure
+        ):
+            raise PortfolioOptimizerCalculationError(
+                "Final gross exposure is non-finite."
+            )
+
+        if (
+            final_gross_exposure
+            > max_leverage
+            + self.LEVERAGE_TOLERANCE
+        ):
+            raise PortfolioOptimizerCalculationError(
+                "Final portfolio exceeds regime maximum leverage. "
+                f"Gross exposure={final_gross_exposure:.12f}; "
+                f"maximum={max_leverage:.12f}."
+            )
+
+        accounting_total = (
+            final_gross_exposure
+            + cash_weight
+            - financing_weight
+        )
+
+        if not np.isclose(
+            accounting_total,
+            1.0,
+            atol=1e-8,
+        ):
+            raise PortfolioOptimizerCalculationError(
+                "Final exposure accounting failed. "
+                f"Gross={final_gross_exposure:.12f}; "
+                f"Cash={cash_weight:.12f}; "
+                f"Financing={financing_weight:.12f}; "
+                f"Total={accounting_total:.12f}."
+            )
+
+        if not np.isfinite(
+            final_volatility
+        ):
+            raise PortfolioOptimizerCalculationError(
+                "Final portfolio volatility is non-finite."
+            )
+
+    # ==================================================================
+    # MAIN OPTIMIZATION
+    # ==================================================================
+
+    def optimize(
+        self,
+        covariance,
+        regime,
+        asset_order,
+        prices=None,
+    ) -> dict[str, Any]:
+        """
+        Execute the complete production portfolio optimization pipeline.
+        """
+
+        # --------------------------------------------------------------
+        # RESET STATE
+        # --------------------------------------------------------------
+
+        self._reset_state()
+
+        # --------------------------------------------------------------
+        # REGIME
+        # --------------------------------------------------------------
+
+        normalized_regime = (
+            self._normalize_regime(
+                regime
+            )
+        )
+
+        self.last_regime = (
+            normalized_regime
+        )
+
+        # --------------------------------------------------------------
+        # ASSETS
+        # --------------------------------------------------------------
+
+        try:
+            asset_order = (
+                self._validate_asset_order(
+                    asset_order
+                )
+            )
+        except Exception as exc:
+            raise PortfolioOptimizerCalculationError(
+                f"Asset validation failed: {exc}"
+            ) from exc
+
+        # --------------------------------------------------------------
+        # COVARIANCE
+        # --------------------------------------------------------------
+
+        try:
+            covariance = (
+                self._validate_covariance(
+                    covariance,
+                    asset_order,
+                )
+            )
+        except Exception as exc:
+            raise PortfolioOptimizerCalculationError(
+                f"Covariance validation failed: {exc}"
+            ) from exc
+
+        # --------------------------------------------------------------
+        # REGIME PARAMETERS
+        # --------------------------------------------------------------
+
+        target_vol, max_leverage = (
+            self._resolve_regime_parameters(
+                normalized_regime
+            )
+        )
+
+        # --------------------------------------------------------------
+        # RISK BUDGETS
+        # --------------------------------------------------------------
+
+        target_budgets = (
+            self._resolve_target_budgets(
+                normalized_regime,
                 asset_order,
-                weights,
+            )
+        )
+
+        risk_budget = (
+            self._validate_risk_budgets(
+                [
+                    target_budgets[asset]
+                    for asset in asset_order
+                ],
+                asset_order,
+            )
+        )
+
+        self.last_risk_budget = {
+            asset: float(
+                risk_budget[index]
+            )
+            for index, asset
+            in enumerate(
+                asset_order
+            )
+        }
+
+        # --------------------------------------------------------------
+        # BASELINE
+        # --------------------------------------------------------------
+
+        baseline_weights = (
+            self._build_baseline_weights(
                 covariance,
                 risk_budget,
             )
         )
 
-        # ============================================
-        # FINAL PRODUCTION INVARIANTS
-        # ============================================
-
-        assert np.isfinite(
-            weights
-        ).all(), (
-            "Non-finite final weights detected."
+        self.last_baseline_weights = (
+            baseline_weights.copy()
         )
 
-        assert (
-            weights >= -1e-10
-        ).all(), (
-            "Negative final weights detected."
+        # --------------------------------------------------------------
+        # FORECAST + BL
+        # --------------------------------------------------------------
+
+        posterior_returns = (
+            self._generate_return_overlay(
+                covariance,
+                asset_order,
+                prices,
+            )
         )
 
-        assert np.isfinite(
-            cash_weight
-        ), (
-            "Invalid final cash weight."
+        # --------------------------------------------------------------
+        # CONTROLLED BL TILT
+        # --------------------------------------------------------------
+
+        (
+            tilted_weights,
+            bl_multipliers,
+        ) = self._apply_black_litterman_tilt(
+            baseline_weights,
+            posterior_returns,
         )
 
-        assert (
-            cash_weight >= -1e-10
-        ), (
-            "Negative final cash allocation."
+        self.last_bl_multipliers = (
+            bl_multipliers.copy()
         )
 
-        assert np.isfinite(
-            final_gross_exposure
-        ), (
-            "Invalid final gross exposure."
+        self.last_bl_tilted_weights = (
+            tilted_weights.copy()
         )
 
-        assert (
-            final_gross_exposure
-            <=
-            max_leverage
-            +
-            1e-8
-        ), (
-            "Final leverage limit exceeded. "
-            f"Gross exposure="
-            f"{final_gross_exposure:.8f}; "
-            f"maximum="
-            f"{max_leverage:.8f}."
+        # --------------------------------------------------------------
+        # CONSTRAINTS
+        # --------------------------------------------------------------
+
+        (
+            constrained_weights,
+            constraint_cash,
+            constraint_result,
+        ) = self._apply_constraints(
+            tilted_weights,
+            asset_order,
         )
 
-        assert np.isclose(
-            final_gross_exposure
-            +
+        # --------------------------------------------------------------
+        # VOLATILITY TARGETING
+        # --------------------------------------------------------------
+
+        (
+            scaled_weights,
+            volatility_engine_result,
+        ) = self._apply_volatility_targeting(
+            constrained_weights,
+            covariance,
+            target_vol,
+            max_leverage,
+        )
+
+        # --------------------------------------------------------------
+        # LEVERAGE BACKSTOP
+        # --------------------------------------------------------------
+
+        (
+            final_weights,
+            leverage_backstop_binding,
+        ) = self._enforce_leverage_backstop(
+            scaled_weights,
+            max_leverage,
+        )
+
+        # --------------------------------------------------------------
+        # FINAL EXPOSURE ACCOUNTING
+        # --------------------------------------------------------------
+
+        exposure = (
+            self._calculate_exposure_metrics(
+                final_weights
+            )
+        )
+
+        final_gross_exposure = exposure[
+            "gross_exposure"
+        ]
+
+        net_exposure = exposure[
+            "net_exposure"
+        ]
+
+        cash_weight = exposure[
+            "cash_weight"
+        ]
+
+        financing_weight = exposure[
+            "financing_weight"
+        ]
+
+        # --------------------------------------------------------------
+        # FINAL VOLATILITY
+        # --------------------------------------------------------------
+
+        final_volatility = (
+            self._calculate_portfolio_volatility(
+                final_weights,
+                covariance,
+            )
+        )
+
+        # --------------------------------------------------------------
+        # FINAL VALIDATION
+        # --------------------------------------------------------------
+
+        self._validate_final_portfolio(
+            final_weights,
+            max_leverage,
             cash_weight,
-            1.0,
-            atol=1e-6,
-        ), (
-            "Final weights + cash != 1. "
-            f"Got "
-            f"{final_gross_exposure + cash_weight:.12f}"
+            financing_weight,
+            final_gross_exposure,
+            final_volatility,
         )
 
-        assert np.isfinite(
-            final_volatility
-        ), (
-            "Final volatility is non-finite."
+        # --------------------------------------------------------------
+        # VOLATILITY DIAGNOSTICS
+        # --------------------------------------------------------------
+
+        volatility_diagnostics = (
+            self._build_volatility_diagnostics(
+                volatility_engine_result,
+                target_vol,
+                max_leverage,
+                final_weights,
+                final_volatility,
+                leverage_backstop_binding,
+            )
         )
 
-        # ============================================
-        # STORE FINAL STATE
-        # ============================================
+        volatility_diagnostics[
+            "constraint_cash"
+        ] = float(
+            constraint_cash
+        )
+
+        volatility_diagnostics[
+            "final_gross_exposure"
+        ] = float(
+            final_gross_exposure
+        )
+
+        volatility_diagnostics[
+            "final_net_exposure"
+        ] = float(
+            net_exposure
+        )
+
+        volatility_diagnostics[
+            "final_cash_weight"
+        ] = float(
+            cash_weight
+        )
+
+        volatility_diagnostics[
+            "final_financing_weight"
+        ] = float(
+            financing_weight
+        )
+
+        volatility_diagnostics[
+            "final_financing"
+        ] = float(
+            financing_weight
+        )
+
+        # --------------------------------------------------------------
+        # RISK-BUDGET RESOLUTION DIAGNOSTICS
+        # --------------------------------------------------------------
+
+        budget_resolution = getattr(
+            self.risk_budget_engine,
+            "last_budget_resolution",
+            None,
+        )
+
+        if isinstance(
+            budget_resolution,
+            dict,
+        ):
+            volatility_diagnostics[
+                "risk_budget_resolution"
+            ] = dict(
+                budget_resolution
+            )
+
+        # --------------------------------------------------------------
+        # RISK REPORT
+        # --------------------------------------------------------------
+
+        try:
+            risk_report = (
+                RiskBudgetReport.create(
+                    asset_order,
+                    final_weights,
+                    covariance,
+                    risk_budget,
+                )
+            )
+        except Exception as exc:
+            raise PortfolioOptimizerCalculationError(
+                "Risk-budget report creation failed: "
+                f"{exc}"
+            ) from exc
+
+        # --------------------------------------------------------------
+        # STORE STATE
+        # --------------------------------------------------------------
 
         self.last_weights = (
-            weights.copy()
+            final_weights.copy()
         )
 
-        self.last_cash = (
-            float(
-                cash_weight
-            )
+        self.last_cash = float(
+            cash_weight
+        )
+
+        self.last_financing = float(
+            financing_weight
+        )
+
+        self.last_net_exposure = float(
+            net_exposure
+        )
+
+        self.last_gross_exposure = float(
+            final_gross_exposure
         )
 
         self.last_volatility_diagnostics = (
             volatility_diagnostics
         )
 
-        # ============================================
-        # RETURN PRODUCTION PORTFOLIO
-        # ============================================
+        # --------------------------------------------------------------
+        # PUBLIC PRODUCTION MAPPINGS
+        # --------------------------------------------------------------
+
+        weight_map = {
+            asset: float(
+                final_weights[index]
+            )
+            for index, asset
+            in enumerate(
+                asset_order
+            )
+        }
+
+        expected_return_map = (
+            None
+            if posterior_returns is None
+            else {
+                asset: float(
+                    posterior_returns[index]
+                )
+                for index, asset
+                in enumerate(
+                    asset_order
+                )
+            }
+        )
+
+        baseline_weight_map = {
+            asset: float(
+                baseline_weights[index]
+            )
+            for index, asset
+            in enumerate(
+                asset_order
+            )
+        }
+
+        bl_tilted_weight_map = {
+            asset: float(
+                tilted_weights[index]
+            )
+            for index, asset
+            in enumerate(
+                asset_order
+            )
+        }
+
+        constrained_weight_map = {
+            asset: float(
+                constrained_weights[index]
+            )
+            for index, asset
+            in enumerate(
+                asset_order
+            )
+        }
+
+        multiplier_map = {
+            asset: float(
+                bl_multipliers[index]
+            )
+            for index, asset
+            in enumerate(
+                asset_order
+            )
+        }
+
+        # --------------------------------------------------------------
+        # FINAL PUBLIC CONTRACT
+        # --------------------------------------------------------------
 
         return {
-            "weights": (
-                weights
-            ),
+            "weights": final_weights.copy(),
 
-            "cash": (
+            "cash": float(
                 cash_weight
             ),
 
-            "regime": (
-                regime
+            "financing": float(
+                financing_weight
             ),
+
+            "financing_weight": float(
+                financing_weight
+            ),
+
+            "net_exposure": float(
+                net_exposure
+            ),
+
+            "gross_exposure": float(
+                final_gross_exposure
+            ),
+
+            "regime": normalized_regime,
 
             "expected_returns": (
-                posterior_returns
+                None
+                if posterior_returns is None
+                else posterior_returns.copy()
             ),
 
-            "forecasts": (
-                self.last_forecasts
+            "expected_return_map": (
+                expected_return_map
             ),
 
-            "risk_report": (
-                risk_report
-            ),
+            "forecasts": self.last_forecasts,
+
+            "risk_report": risk_report,
 
             "volatility_diagnostics": (
                 volatility_diagnostics
             ),
+
+            "asset_order": list(
+                asset_order
+            ),
+
+            "risk_budget": dict(
+                self.last_risk_budget
+            ),
+
+            "baseline_weights": (
+                baseline_weights.copy()
+            ),
+
+            "baseline_weight_map": (
+                baseline_weight_map
+            ),
+
+            "bl_multipliers": (
+                bl_multipliers.copy()
+            ),
+
+            "bl_multiplier_map": (
+                multiplier_map
+            ),
+
+            "bl_tilted_weights": (
+                tilted_weights.copy()
+            ),
+
+            "bl_tilted_weight_map": (
+                bl_tilted_weight_map
+            ),
+
+            "constrained_weights": (
+                constrained_weights.copy()
+            ),
+
+            "constrained_weight_map": (
+                constrained_weight_map
+            ),
+
+            "constraint_cash": float(
+                constraint_cash
+            ),
+
+            "target_volatility": float(
+                target_vol
+            ),
+
+            "maximum_leverage": float(
+                max_leverage
+            ),
+
+            "weight_map": dict(
+                weight_map
+            ),
         }
+
+    # ==================================================================
+    # HEALTH CHECK
+    # ==================================================================
+
+    def health_check(
+        self,
+    ) -> dict[str, Any]:
+        """
+        Return production component health.
+        """
+
+        try:
+            checks = {
+                "risk_budget_engine": (
+                    self.risk_budget_engine
+                    is not None
+                    and hasattr(
+                        self.risk_budget_engine,
+                        "get_target_budgets",
+                    )
+                    and hasattr(
+                        self.risk_budget_engine,
+                        "optimize",
+                    )
+                ),
+
+                "constraints": (
+                    self.constraints
+                    is not None
+                    and hasattr(
+                        self.constraints,
+                        "enforce",
+                    )
+                ),
+
+                "volatility_targeting": (
+                    self.vol_target_engine
+                    is not None
+                    and hasattr(
+                        self.vol_target_engine,
+                        "scale_weights",
+                    )
+                ),
+
+                "forecast_engine": (
+                    self.forecast_engine
+                    is not None
+                    and hasattr(
+                        self.forecast_engine,
+                        "forecast",
+                    )
+                ),
+
+                "black_litterman": (
+                    self.black_litterman
+                    is not None
+                    and hasattr(
+                        self.black_litterman,
+                        "posterior_returns",
+                    )
+                ),
+
+                "configuration": True,
+            }
+
+            healthy = all(
+                checks.values()
+            )
+
+            return {
+                "status": (
+                    "HEALTHY"
+                    if healthy
+                    else "UNHEALTHY"
+                ),
+                "healthy": healthy,
+                "component": self.COMPONENT,
+                "api_version": self.API_VERSION,
+                "phase": self.PHASE,
+                "checks": checks,
+            }
+
+        except Exception as exc:
+            return {
+                "status": "UNHEALTHY",
+                "healthy": False,
+                "component": self.COMPONENT,
+                "api_version": self.API_VERSION,
+                "phase": self.PHASE,
+                "error": str(exc),
+            }
+
+
+# ======================================================================
+# PRODUCTION FACTORY
+# ======================================================================
+
+
+def build_portfolio_optimizer(
+    risk_budget_engine,
+    constraints,
+    vol_target_engine,
+    forecast_engine=None,
+    black_litterman=None,
+    **kwargs,
+) -> PortfolioOptimizer:
+    """
+    Production factory for PortfolioOptimizer.
+    """
+
+    return PortfolioOptimizer(
+        risk_budget_engine=risk_budget_engine,
+        constraints=constraints,
+        vol_target_engine=vol_target_engine,
+        forecast_engine=forecast_engine,
+        black_litterman=black_litterman,
+        **kwargs,
+    )
+
+
+# ======================================================================
+# BASIC PRODUCTION TEST
+# ======================================================================
+
+
+def test_portfolio_optimizer_configuration() -> None:
+    """
+    Validate that production dependencies are mandatory.
+    """
+
+    try:
+        PortfolioOptimizer(
+            risk_budget_engine=None,
+            constraints=None,
+            vol_target_engine=None,
+        )
+
+    except PortfolioOptimizerConfigurationError:
+        return
+
+    raise AssertionError(
+        "PortfolioOptimizer should reject missing "
+        "production dependencies."
+    )
+
+
+# ======================================================================
+# EXPOSURE ACCOUNTING SELF-TEST
+# ======================================================================
+
+
+def test_portfolio_optimizer_exposure_accounting() -> None:
+    """
+    Validate the hardened cash/financing accounting model.
+
+    Cases:
+
+        0.75 gross -> 0.25 cash
+        1.00 gross -> 0.00 cash
+        1.25 gross -> 0.25 financing
+    """
+
+    unleveraged = (
+        PortfolioOptimizer._calculate_exposure_metrics(
+            np.asarray(
+                [0.25, 0.25, 0.25],
+                dtype=float,
+            )
+        )
+    )
+
+    assert np.isclose(
+        unleveraged["gross_exposure"],
+        0.75,
+    )
+
+    assert np.isclose(
+        unleveraged["cash_weight"],
+        0.25,
+    )
+
+    assert np.isclose(
+        unleveraged["financing_weight"],
+        0.0,
+    )
+
+    fully_invested = (
+        PortfolioOptimizer._calculate_exposure_metrics(
+            np.asarray(
+                [0.40, 0.30, 0.30],
+                dtype=float,
+            )
+        )
+    )
+
+    assert np.isclose(
+        fully_invested["gross_exposure"],
+        1.0,
+    )
+
+    assert np.isclose(
+        fully_invested["cash_weight"],
+        0.0,
+    )
+
+    assert np.isclose(
+        fully_invested["financing_weight"],
+        0.0,
+    )
+
+    leveraged = (
+        PortfolioOptimizer._calculate_exposure_metrics(
+            np.asarray(
+                [0.50, 0.40, 0.35],
+                dtype=float,
+            )
+        )
+    )
+
+    assert np.isclose(
+        leveraged["gross_exposure"],
+        1.25,
+    )
+
+    assert np.isclose(
+        leveraged["cash_weight"],
+        0.0,
+    )
+
+    assert np.isclose(
+        leveraged["financing_weight"],
+        0.25,
+    )
+
+    assert np.isclose(
+        leveraged["gross_exposure"]
+        + leveraged["cash_weight"]
+        - leveraged["financing_weight"],
+        1.0,
+    )
+
+
+# ======================================================================
+# MAIN
+# ======================================================================
+
+
+if __name__ == "__main__":
+    test_portfolio_optimizer_configuration()
+    test_portfolio_optimizer_exposure_accounting()
+
+    print(
+        "PortfolioOptimizer Phase IV-B.1B tests passed."
+    )
