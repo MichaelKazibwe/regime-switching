@@ -8,7 +8,7 @@ portfolio/trading repository.
 
 Design goals
 ------------
-* Inventory exactly the 67 project modules, excluding this harness.
+* Inventory exactly the 69 project modules, excluding this harness.
 * Compile every module.
 * Run Ruff over the complete repository.
 * AST-audit every module and build the local import graph.
@@ -66,7 +66,7 @@ SELF_NAME = Path(
     __file__
 ).name
 
-EXPECTED_PROJECT_FILE_COUNT = 68
+EXPECTED_PROJECT_FILE_COUNT = 69
 
 
 # The active production allocation universe is defined by the regime risk
@@ -115,6 +115,7 @@ REGRESSION_MODULES = (
     "test_portfoliooptimizer_hardening.py",
     "test_phase_iv_d_production_gate.py",
     "test_phase_iv_f_execution_safety.py",
+    "test_phase_iv_g_downstream_execution_safety.py",
 )
 
 
@@ -185,6 +186,7 @@ REQUIRED_MODULES = (
     "test_portfoliooptimizer_hardening.py",
     "test_phase_iv_d_production_gate.py",
     "test_phase_iv_f_execution_safety.py",
+    "test_phase_iv_g_downstream_execution_safety.py",
     "trade.py",
     "tradeanalytics.py",
     "tradegenerator.py",
