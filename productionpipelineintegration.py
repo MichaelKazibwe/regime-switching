@@ -1,16 +1,17 @@
 # ======================================================================
 # PRODUCTION PIPELINE INTEGRATION
-# PHASE IV-B.6
+# PHASE IV-E
 # ======================================================================
 
 """
 Production end-to-end pipeline integration boundary.
 
-Phase IV-B.6
-------------
+Phase IV-E
+----------
 
-This module integrates the validated Phase IV-B production stages into
-one deterministic production pipeline.
+This module integrates the validated production stages into one
+deterministic production pipeline and establishes the execution
+authorization boundary.
 
 Pipeline
 --------
@@ -30,7 +31,7 @@ Pipeline
     IV-B.5  Production Execution Gate
         |
         v
-    IV-B.6  Production Pipeline Integration
+    IV-E    Production Pipeline Integration
 
 Design principles
 -----------------
@@ -52,20 +53,32 @@ Design principles
 
 8. FAILED decisions must remain failed.
 
-9. No stage may silently convert a failure into approval.
+9. BLOCKED decisions must remain blocked.
 
-10. Pipeline state transitions are explicit and deterministic.
+10. No stage may silently convert a failure into approval.
 
-11. Every stage must expose structured health information.
+11. Pipeline state transitions are explicit and deterministic.
 
-12. Regression tests use deterministic production-safe data.
+12. Every stage must expose structured health information.
 
-13. The pipeline owns orchestration only.
+13. Regression tests use deterministic production-safe data.
 
-14. Portfolio construction and decision logic remain downstream in
+14. The pipeline owns orchestration only.
+
+15. Portfolio construction and decision logic remain downstream in
     PortfolioDecisionEngine.
 
-15. Execution remains outside this phase.
+16. ProductionExecutionGate is the sole execution authorization
+    authority.
+
+17. The pipeline must invoke require_authorization() after successful
+    authorization.
+
+18. Execution authorization does not imply broker submission.
+
+19. Live trading remains categorically disabled.
+
+20. Execution remains outside this phase.
 """
 
 # ======================================================================
@@ -87,18 +100,17 @@ from typing import Any
 # 1.2 PRODUCTION COMPONENTS
 # ----------------------------------------------------------------------
 
-from productioncomposition import (
-    ProductionComposition,
-)
+from productioncomposition import ProductionComposition
 
-from productionintegration import (
-    ProductionIntegration,
-)
+from productionintegration import ProductionIntegration
 
 from productiondecisionexecution import (
     ProductionDecisionExecution,
     ProductionDecisionExecutionResult,
 )
+
+from productionexecutiongate import ProductionExecutionGate
+
 
 # ======================================================================
 # SECTION 2
@@ -106,12 +118,10 @@ from productiondecisionexecution import (
 # ======================================================================
 
 
-class ProductionPipelineIntegrationError(
-    RuntimeError
-):
+class ProductionPipelineIntegrationError(RuntimeError):
     """
-    Raised when the Phase IV-B.6 production pipeline cannot safely
-    construct, validate, or execute the integrated production flow.
+    Raised when the production pipeline cannot safely construct,
+    validate, execute, or validate the integrated production flow.
     """
 
     pass
@@ -125,24 +135,16 @@ class ProductionPipelineIntegrationError(
 
 class ProductionPipelineStatus:
     """
-    Canonical Phase IV-B.6 pipeline states.
+    Canonical production pipeline states.
     """
 
-    APPROVED = (
-        "APPROVED"
-    )
+    APPROVED = "APPROVED"
 
-    REJECTED = (
-        "REJECTED"
-    )
+    REJECTED = "REJECTED"
 
-    FAILED = (
-        "FAILED"
-    )
+    FAILED = "FAILED"
 
-    BLOCKED = (
-        "BLOCKED"
-    )
+    BLOCKED = "BLOCKED"
 
 
 # ======================================================================
@@ -151,12 +153,10 @@ class ProductionPipelineStatus:
 # ======================================================================
 
 
-@dataclass(
-    frozen=True
-)
+@dataclass(frozen=True)
 class ProductionPipelineResult:
     """
-    Immutable representation of one complete Phase IV-B.6 pipeline
+    Immutable representation of one complete production pipeline
     execution.
     """
 
@@ -239,25 +239,24 @@ class ProductionPipelineResult:
 
 class ProductionPipelineIntegration:
     """
-    Phase IV-B.6 production pipeline integration boundary.
+    Production pipeline integration boundary.
 
-    This class does not implement portfolio decision logic.
+    This class owns orchestration only.
 
-    It composes the already validated Phase IV-B production stages and
-    ensures that state transitions remain explicit and deterministic.
+    It does not implement portfolio construction, portfolio optimization,
+    risk budgeting, forecasting, or execution logic.
+
+    ProductionExecutionGate remains the sole execution authorization
+    authority.
     """
 
     # ==================================================================
     # 5.1 API METADATA
     # ==================================================================
 
-    API_VERSION = (
-        "1.0.0"
-    )
+    API_VERSION = "1.0.0"
 
-    PHASE = (
-        "IV-B.6"
-    )
+    PHASE = "IV-E"
 
     # ==================================================================
     # 5.2 PRODUCTION FLAGS
@@ -274,6 +273,8 @@ class ProductionPipelineIntegration:
     DETERMINISTIC_REGRESSION_DATA = True
 
     DECISION_ENGINE_IS_AUTHORITATIVE = True
+
+    EXECUTION_GATE_IS_AUTHORITATIVE = True
 
     # ==================================================================
     # 5.3 REQUIRED STAGES
@@ -294,26 +295,18 @@ class ProductionPipelineIntegration:
     def __init__(
         self,
         *,
-        composition: (
-            ProductionComposition
-            | None
-        ) = None,
-        integration: (
-            ProductionIntegration
-            | None
-        ) = None,
-        decision_execution: (
-            ProductionDecisionExecution
-            | None
-        ) = None,
+        composition: ProductionComposition | None = None,
+        integration: ProductionIntegration | None = None,
+        decision_execution: ProductionDecisionExecution | None = None,
+        execution_gate: ProductionExecutionGate | None = None,
     ) -> None:
         """
         Construct the production pipeline.
 
-        No test doubles are accepted.
+        Supplied components must be real production components.
 
-        Optional arguments exist only to permit reuse of already
-        constructed REAL production components.
+        The execution gate is explicitly bound to the same
+        ProductionDecisionExecution instance owned by this pipeline.
         """
 
         # --------------------------------------------------------------
@@ -347,10 +340,22 @@ class ProductionPipelineIntegration:
         )
 
         # --------------------------------------------------------------
-        # 5.4.4 PIPELINE STATE
+        # 5.4.4 EXECUTION GATE
         # --------------------------------------------------------------
 
-        self.last_result = None
+        self.execution_gate = (
+            execution_gate
+            if execution_gate is not None
+            else ProductionExecutionGate(
+                decision_execution=self.decision_execution,
+            )
+        )
+
+        # --------------------------------------------------------------
+        # 5.4.5 PIPELINE STATE
+        # --------------------------------------------------------------
+
+        self.last_result: ProductionPipelineResult | None = None
 
         self.execution_count = 0
 
@@ -361,6 +366,13 @@ class ProductionPipelineIntegration:
         self.failed_count = 0
 
         self.blocked_count = 0
+
+        # --------------------------------------------------------------
+        # 5.4.6 CONSTRUCTOR VALIDATION
+        # --------------------------------------------------------------
+
+        self._validate_dependencies()
+
 
     # ==================================================================
     # SECTION 6
@@ -382,11 +394,7 @@ class ProductionPipelineIntegration:
         implementation of the expected class.
         """
 
-        if not isinstance(
-            component,
-            expected_type,
-        ):
-
+        if not isinstance(component, expected_type):
             raise ProductionPipelineIntegrationError(
                 (
                     f"'{component_name}' must be an instance of "
@@ -396,15 +404,14 @@ class ProductionPipelineIntegration:
                 )
             )
 
+
     # ------------------------------------------------------------------
     # 6.2 CONSTRUCTOR VALIDATION
     # ------------------------------------------------------------------
 
-    def _validate_dependencies(
-        self,
-    ) -> None:
+    def _validate_dependencies(self) -> None:
         """
-        Validate all mandatory Phase IV-B production dependencies.
+        Validate all mandatory production dependencies.
         """
 
         self._validate_production_object(
@@ -425,6 +432,30 @@ class ProductionPipelineIntegration:
             "decision_execution",
         )
 
+        self._validate_production_object(
+            self.execution_gate,
+            ProductionExecutionGate,
+            "execution_gate",
+        )
+
+        # The execution gate must use the same authoritative
+        # decision-execution component as the pipeline.
+        gate_decision_execution = getattr(
+            self.execution_gate,
+            "decision_execution",
+            None,
+        )
+
+        if gate_decision_execution is not self.decision_execution:
+            raise ProductionPipelineIntegrationError(
+                (
+                    "ProductionExecutionGate must reference the same "
+                    "ProductionDecisionExecution instance owned by the "
+                    "pipeline."
+                )
+            )
+
+
     # ==================================================================
     # SECTION 7
     # STAGE HEALTH
@@ -434,184 +465,162 @@ class ProductionPipelineIntegration:
     # 7.1 COMPOSITION HEALTH
     # ------------------------------------------------------------------
 
-    def _composition_health(
-        self,
-    ) -> dict[str, Any]:
+    def _composition_health(self) -> dict[str, Any]:
         """
-        Validate Phase IV-B.1 production composition.
+        Validate production composition.
         """
 
         try:
-
-            result = (
-                self.composition.health_check()
-            )
-
+            result = self.composition.health_check()
         except Exception as exc:
-
             raise ProductionPipelineIntegrationError(
                 (
-                    "Phase IV-B.1 production composition health "
-                    f"check failed: {exc}"
+                    "Production composition health check failed: "
+                    f"{exc}"
                 )
             ) from exc
 
-        if not result.get(
-            "healthy",
-            False,
-        ):
-
+        if not result.get("healthy", False):
             raise ProductionPipelineIntegrationError(
                 (
-                    "Phase IV-B.1 production composition is "
-                    "unhealthy: "
+                    "Production composition is unhealthy: "
                     f"{result}"
                 )
             )
 
         return result
+
 
     # ------------------------------------------------------------------
     # 7.2 INTEGRATION HEALTH
     # ------------------------------------------------------------------
 
-    def _integration_health(
-        self,
-    ) -> dict[str, Any]:
+    def _integration_health(self) -> dict[str, Any]:
         """
-        Validate Phase IV-B.2 production integration.
+        Validate production integration.
         """
 
         try:
-
-            result = (
-                self.integration.health_check()
-            )
-
+            result = self.integration.health_check()
         except Exception as exc:
-
             raise ProductionPipelineIntegrationError(
                 (
-                    "Phase IV-B.2 production integration health "
-                    f"check failed: {exc}"
+                    "Production integration health check failed: "
+                    f"{exc}"
                 )
             ) from exc
 
-        if not result.get(
-            "healthy",
-            False,
-        ):
-
+        if not result.get("healthy", False):
             raise ProductionPipelineIntegrationError(
                 (
-                    "Phase IV-B.2 production integration is "
-                    "unhealthy: "
+                    "Production integration is unhealthy: "
                     f"{result}"
                 )
             )
 
         return result
+
 
     # ------------------------------------------------------------------
     # 7.3 DECISION EXECUTION HEALTH
     # ------------------------------------------------------------------
 
-    def _decision_execution_health(
-        self,
-    ) -> dict[str, Any]:
+    def _decision_execution_health(self) -> dict[str, Any]:
         """
-        Validate Phase IV-B.3 production decision execution.
+        Validate production decision execution.
         """
 
         try:
-
-            result = (
-                self.decision_execution.health_check()
-            )
-
+            result = self.decision_execution.health_check()
         except Exception as exc:
-
             raise ProductionPipelineIntegrationError(
                 (
-                    "Phase IV-B.3 production decision execution "
-                    f"health check failed: {exc}"
+                    "Production decision execution health check "
+                    f"failed: {exc}"
                 )
             ) from exc
 
-        if not result.get(
-            "healthy",
-            False,
-        ):
-
+        if not result.get("healthy", False):
             raise ProductionPipelineIntegrationError(
                 (
-                    "Phase IV-B.3 production decision execution "
-                    "is unhealthy: "
+                    "Production decision execution is unhealthy: "
                     f"{result}"
                 )
             )
 
         return result
 
+
     # ------------------------------------------------------------------
-    # 7.4 COMPLETE HEALTH
+    # 7.4 EXECUTION GATE HEALTH
     # ------------------------------------------------------------------
 
-    def health_check(
-        self,
-    ) -> dict[str, Any]:
+    def _execution_gate_health(self) -> dict[str, Any]:
         """
-        Perform the complete Phase IV-B.6 structural health check.
+        Validate the production execution gate.
 
-        This checks the production chain before execution.
+        The gate is an authorization boundary only. It does not submit
+        orders and does not enable live trading.
         """
 
         try:
+            result = self.execution_gate.health_check()
+        except Exception as exc:
+            raise ProductionPipelineIntegrationError(
+                (
+                    "Production execution gate health check failed: "
+                    f"{exc}"
+                )
+            ) from exc
 
+        if not result.get("healthy", False):
+            raise ProductionPipelineIntegrationError(
+                (
+                    "Production execution gate is unhealthy: "
+                    f"{result}"
+                )
+            )
+
+        return result
+
+
+    # ------------------------------------------------------------------
+    # 7.5 COMPLETE HEALTH
+    # ------------------------------------------------------------------
+
+    def health_check(self) -> dict[str, Any]:
+        """
+        Perform the complete production pipeline health check.
+        """
+
+        try:
             self._validate_dependencies()
 
-            composition_health = (
-                self._composition_health()
-            )
+            composition_health = self._composition_health()
 
-            integration_health = (
-                self._integration_health()
-            )
+            integration_health = self._integration_health()
 
             decision_execution_health = (
                 self._decision_execution_health()
             )
 
-        except ProductionPipelineIntegrationError as exc:
+            execution_gate_health = self._execution_gate_health()
 
+        except ProductionPipelineIntegrationError as exc:
             return {
-                "api_version": (
-                    self.API_VERSION
-                ),
-                "phase": (
-                    self.PHASE
-                ),
+                "api_version": self.API_VERSION,
+                "phase": self.PHASE,
                 "healthy": False,
-                "error": str(
-                    exc
-                ),
+                "error": str(exc),
             }
 
         return {
-            "api_version": (
-                self.API_VERSION
-            ),
-            "phase": (
-                self.PHASE
-            ),
+            "api_version": self.API_VERSION,
+            "phase": self.PHASE,
             "healthy": True,
             "stages": {
-                "production_composition": (
-                    composition_health
-                ),
-                "production_integration": (
-                    integration_health
-                ),
+                "production_composition": composition_health,
+                "production_integration": integration_health,
                 "production_decision_execution": (
                     decision_execution_health
                 ),
@@ -622,10 +631,24 @@ class ProductionPipelineIntegration:
                 "production_execution_gate": {
                     "available": True,
                     "production_boundary": True,
-                    "live_trading_enabled": False,
+                    "authorization_authority": True,
+                    "live_trading_enabled": (
+                        self.LIVE_TRADING_ENABLED
+                    ),
+                    "broker_submission_enabled": (
+                        self.BROKER_SUBMISSION_ENABLED
+                    ),
+                    "health": execution_gate_health,
                 },
             },
+            "execution_authority": {
+                "execution_gate_is_authoritative": (
+                    self.EXECUTION_GATE_IS_AUTHORITATIVE
+                ),
+                "require_authorization_enforced": True,
+            },
         }
+
 
     # ==================================================================
     # SECTION 8
@@ -644,24 +667,18 @@ class ProductionPipelineIntegration:
         Validate the deterministic pipeline input envelope.
         """
 
-        if not isinstance(
-            pipeline_inputs,
-            dict,
-        ):
-
+        if not isinstance(pipeline_inputs, dict):
             raise TypeError(
                 "pipeline_inputs must be a dictionary."
             )
 
         if not pipeline_inputs:
-
             raise ValueError(
                 "pipeline_inputs cannot be empty."
             )
 
-        return dict(
-            pipeline_inputs
-        )
+        return dict(pipeline_inputs)
+
 
     # ==================================================================
     # SECTION 9
@@ -681,27 +698,21 @@ class ProductionPipelineIntegration:
 
         The decision execution stage remains authoritative.
 
-        The exact keyword envelope accepted by ProductionDecisionExecution
-        is discovered explicitly rather than silently manufacturing a
-        new decision.
+        The execution gate remains the sole authority for execution
+        authorization.
 
-        Live execution is categorically disabled.
+        Live execution and broker submission remain disabled.
         """
 
         self._validate_dependencies()
 
-        inputs = (
-            self._validate_pipeline_inputs(
-                pipeline_inputs
-            )
+        inputs = self._validate_pipeline_inputs(
+            pipeline_inputs
         )
 
         self.execution_count += 1
 
-        stage_results: dict[
-            str,
-            Any,
-        ] = {}
+        stage_results: dict[str, Any] = {}
 
         stages = [
             "production_composition",
@@ -715,9 +726,7 @@ class ProductionPipelineIntegration:
         # 9.1.1 COMPOSITION
         # --------------------------------------------------------------
 
-        composition_health = (
-            self._composition_health()
-        )
+        composition_health = self._composition_health()
 
         stage_results[
             "production_composition"
@@ -727,9 +736,7 @@ class ProductionPipelineIntegration:
         # 9.1.2 INTEGRATION
         # --------------------------------------------------------------
 
-        integration_health = (
-            self._integration_health()
-        )
+        integration_health = self._integration_health()
 
         stage_results[
             "production_integration"
@@ -740,23 +747,17 @@ class ProductionPipelineIntegration:
         # --------------------------------------------------------------
 
         try:
-
-            execution_result = (
-                self._execute_decision(
-                    inputs
-                )
+            execution_result = self._execute_decision(
+                inputs
             )
 
         except Exception as exc:
-
             self.failed_count += 1
 
-            result = (
-                self._failed_result(
-                    error=str(exc),
-                    stages=stages,
-                    stage_results=stage_results,
-                )
+            result = self._failed_result(
+                error=str(exc),
+                stages=stages,
+                stage_results=stage_results,
             )
 
             self.last_result = result
@@ -771,31 +772,40 @@ class ProductionPipelineIntegration:
         # 9.1.4 RISK VALIDATION
         # --------------------------------------------------------------
 
-        risk_result = (
-            self._validate_risk_stage(
-                execution_result
-            )
+        risk_result = self._validate_risk_stage(
+            execution_result
         )
 
         stage_results[
             "production_risk_validation"
         ] = risk_result
 
-        if not risk_result.get(
-            "approved",
-            False,
-        ):
+        if not risk_result.get("approved", False):
+            status = risk_result.get(
+                "status",
+                ProductionPipelineStatus.REJECTED,
+            )
 
-            self.rejected_count += 1
+            if status == ProductionPipelineStatus.FAILED:
+                self.failed_count += 1
 
-            result = (
-                self._rejected_result(
+                result = self._failed_result(
+                    error=risk_result.get(
+                        "error",
+                        "Production risk validation failed.",
+                    ),
+                    stages=stages,
+                    stage_results=stage_results,
+                )
+            else:
+                self.rejected_count += 1
+
+                result = self._rejected_result(
                     execution_result,
                     risk_result,
                     stages,
                     stage_results,
                 )
-            )
 
             self.last_result = result
 
@@ -805,31 +815,23 @@ class ProductionPipelineIntegration:
         # 9.1.5 EXECUTION GATE
         # --------------------------------------------------------------
 
-        gate_result = (
-            self._execution_gate(
-                execution_result,
-                risk_result,
-            )
+        gate_result = self._execution_gate(
+            execution_result,
+            risk_result,
         )
 
         stage_results[
             "production_execution_gate"
         ] = gate_result
 
-        if not gate_result.get(
-            "authorized",
-            False,
-        ):
+        if not gate_result.get("authorized", False):
+            self.blocked_count += 1
 
-            self.rejected_count += 1
-
-            result = (
-                self._rejected_result(
-                    execution_result,
-                    gate_result,
-                    stages,
-                    stage_results,
-                )
+            result = self._blocked_result(
+                execution_result,
+                gate_result,
+                stages,
+                stage_results,
             )
 
             self.last_result = result
@@ -842,17 +844,16 @@ class ProductionPipelineIntegration:
 
         self.approved_count += 1
 
-        result = (
-            self._approved_result(
-                execution_result,
-                stages,
-                stage_results,
-            )
+        result = self._approved_result(
+            execution_result,
+            stages,
+            stage_results,
         )
 
         self.last_result = result
 
         return result
+
 
     # ==================================================================
     # SECTION 10
@@ -870,8 +871,8 @@ class ProductionPipelineIntegration:
         """
         Delegate decision execution to ProductionDecisionExecution.
 
-        This method supports the established production interface while
-        refusing to silently invent an incompatible call contract.
+        The established production interface is respected without
+        silently manufacturing an incompatible call contract.
         """
 
         execution_method = getattr(
@@ -881,7 +882,6 @@ class ProductionPipelineIntegration:
         )
 
         if execution_method is None:
-
             raise ProductionPipelineIntegrationError(
                 (
                     "ProductionDecisionExecution does not expose "
@@ -890,42 +890,22 @@ class ProductionPipelineIntegration:
             )
 
         try:
-
-            result = (
-                execution_method(
-                    **inputs
-                )
-            )
+            result = execution_method(**inputs)
 
         except TypeError as first_error:
-
-            if len(inputs) == 1 and (
-                "pipeline_inputs"
-                in inputs
-            ):
-
+            if len(inputs) == 1 and "pipeline_inputs" in inputs:
                 try:
-
-                    result = (
-                        execution_method(
-                            inputs[
-                                "pipeline_inputs"
-                            ]
-                        )
+                    result = execution_method(
+                        inputs["pipeline_inputs"]
                     )
-
                 except Exception as exc:
-
                     raise ProductionPipelineIntegrationError(
                         (
-                            "Unable to execute Phase IV-B.3 "
-                            "ProductionDecisionExecution: "
-                            f"{exc}"
+                            "Unable to execute production decision "
+                            f"execution: {exc}"
                         )
                     ) from exc
-
             else:
-
                 raise ProductionPipelineIntegrationError(
                     (
                         "ProductionDecisionExecution.execute() "
@@ -935,11 +915,10 @@ class ProductionPipelineIntegration:
                 ) from first_error
 
         except Exception as exc:
-
             raise ProductionPipelineIntegrationError(
                 (
-                    "Phase IV-B.3 production decision execution "
-                    f"failed: {exc}"
+                    "Production decision execution failed: "
+                    f"{exc}"
                 )
             ) from exc
 
@@ -947,7 +926,6 @@ class ProductionPipelineIntegration:
             result,
             ProductionDecisionExecutionResult,
         ):
-
             raise ProductionPipelineIntegrationError(
                 (
                     "ProductionDecisionExecution returned an "
@@ -957,6 +935,7 @@ class ProductionPipelineIntegration:
             )
 
         return result
+
 
     # ==================================================================
     # SECTION 11
@@ -975,55 +954,33 @@ class ProductionPipelineIntegration:
         Validate the risk state already produced by the authoritative
         production decision.
 
-        IV-B.6 does not replace IV-B.4 risk logic.
+        IV-E does not replace IV-B.4 risk logic.
 
         It verifies that the decision contains the mandatory risk
         information required for an approval transition.
         """
 
-        if (
-            result.status
-            == "FAILED"
-        ):
-
+        if result.status == "FAILED":
             return {
                 "healthy": False,
                 "approved": False,
-                "status": (
-                    ProductionPipelineStatus.FAILED
-                ),
-                "error": (
-                    "Decision execution failed."
-                ),
+                "status": ProductionPipelineStatus.FAILED,
+                "error": "Decision execution failed.",
             }
 
-        if (
-            result.status
-            == "REJECTED"
-        ):
-
+        if result.status == "REJECTED":
             return {
                 "healthy": True,
                 "approved": False,
-                "status": (
-                    ProductionPipelineStatus.REJECTED
-                ),
-                "error": (
-                    "Authoritative decision was rejected."
-                ),
+                "status": ProductionPipelineStatus.REJECTED,
+                "error": "Authoritative decision was rejected.",
             }
 
-        if (
-            result.status
-            != "APPROVED"
-        ):
-
+        if result.status != "APPROVED":
             return {
                 "healthy": False,
                 "approved": False,
-                "status": (
-                    ProductionPipelineStatus.FAILED
-                ),
+                "status": ProductionPipelineStatus.FAILED,
                 "error": (
                     "Unknown authoritative decision status: "
                     f"{result.status}"
@@ -1031,13 +988,10 @@ class ProductionPipelineIntegration:
             }
 
         if not result.weights:
-
             return {
                 "healthy": False,
                 "approved": False,
-                "status": (
-                    ProductionPipelineStatus.REJECTED
-                ),
+                "status": ProductionPipelineStatus.REJECTED,
                 "error": (
                     "Approved decision contains no portfolio "
                     "weights."
@@ -1045,13 +999,10 @@ class ProductionPipelineIntegration:
             }
 
         if not result.risk_contributions:
-
             return {
                 "healthy": False,
                 "approved": False,
-                "status": (
-                    ProductionPipelineStatus.REJECTED
-                ),
+                "status": ProductionPipelineStatus.REJECTED,
                 "error": (
                     "Approved decision contains no risk "
                     "contributions."
@@ -1059,13 +1010,10 @@ class ProductionPipelineIntegration:
             }
 
         if result.portfolio_volatility < 0:
-
             return {
                 "healthy": False,
                 "approved": False,
-                "status": (
-                    ProductionPipelineStatus.REJECTED
-                ),
+                "status": ProductionPipelineStatus.REJECTED,
                 "error": (
                     "Portfolio volatility cannot be negative."
                 ),
@@ -1074,11 +1022,10 @@ class ProductionPipelineIntegration:
         return {
             "healthy": True,
             "approved": True,
-            "status": (
-                ProductionPipelineStatus.APPROVED
-            ),
+            "status": ProductionPipelineStatus.APPROVED,
             "risk_validated": True,
         }
+
 
     # ==================================================================
     # SECTION 12
@@ -1089,59 +1036,144 @@ class ProductionPipelineIntegration:
     # 12.1 EXECUTION AUTHORIZATION
     # ------------------------------------------------------------------
 
-    @staticmethod
     def _execution_gate(
+        self,
         result: ProductionDecisionExecutionResult,
         risk_result: dict[str, Any],
     ) -> dict[str, Any]:
         """
-        Apply the Phase IV-B.5 execution authorization boundary.
+        Apply the authoritative production execution gate.
 
-        Authorization here means only that the portfolio decision has
-        passed the production pipeline gate.
+        ProductionExecutionGate is the sole authority for execution
+        authorization.
 
-        It does NOT mean that an order is submitted to a broker.
+        This method does not submit orders, communicate with brokers,
+        or mutate portfolio state.
+
+        Authorization is only valid after successful risk validation.
         """
 
-        if (
-            result.status
-            != ProductionPipelineStatus.APPROVED
-        ):
-
+        if not risk_result.get("approved", False):
             return {
                 "authorized": False,
-                "status": (
-                    ProductionPipelineStatus.BLOCKED
-                ),
+                "status": ProductionPipelineStatus.BLOCKED,
                 "reason": (
-                    "Decision is not APPROVED."
+                    "Execution gate cannot authorize a decision "
+                    "that failed risk validation."
+                ),
+                "authorization": None,
+                "error": None,
+            }
+
+        try:
+            authorization = self.execution_gate.authorize(
+                result
+            )
+
+        except Exception as exc:
+            return {
+                "authorized": False,
+                "status": ProductionPipelineStatus.BLOCKED,
+                "reason": (
+                    "ProductionExecutionGate authorization failed: "
+                    f"{exc}"
+                ),
+                "authorization": None,
+                "error": str(exc),
+            }
+
+        authorization_status = getattr(
+            authorization,
+            "status",
+            None,
+        )
+
+        if authorization_status != "AUTHORIZED":
+            return {
+                "authorized": False,
+                "status": ProductionPipelineStatus.BLOCKED,
+                "reason": (
+                    "ProductionExecutionGate denied execution "
+                    "authorization: "
+                    f"{authorization_status}"
+                ),
+                "authorization": authorization,
+                "error": None,
+            }
+
+        # This is a mandatory hard-stop enforcement point.
+        try:
+            self.execution_gate.require_authorization(
+                authorization
+            )
+
+        except Exception as exc:
+            return {
+                "authorized": False,
+                "status": ProductionPipelineStatus.BLOCKED,
+                "reason": (
+                    "Execution authorization hard stop triggered: "
+                    f"{exc}"
+                ),
+                "authorization": authorization,
+                "error": str(exc),
+            }
+
+        # Live trading and broker submission must remain disabled.
+        live_trading_enabled = bool(
+            getattr(
+                authorization,
+                "live_trading_enabled",
+                False,
+            )
+        )
+
+        broker_submission_enabled = bool(
+            getattr(
+                authorization,
+                "broker_submission_enabled",
+                False,
+            )
+        )
+
+        if live_trading_enabled:
+            return {
+                "authorized": False,
+                "status": ProductionPipelineStatus.BLOCKED,
+                "reason": (
+                    "Live trading authorization is forbidden in "
+                    "this pipeline phase."
+                ),
+                "authorization": authorization,
+                "error": (
+                    "live_trading_enabled=True"
                 ),
             }
 
-        if not risk_result.get(
-            "approved",
-            False,
-        ):
-
+        if broker_submission_enabled:
             return {
                 "authorized": False,
-                "status": (
-                    ProductionPipelineStatus.BLOCKED
-                ),
+                "status": ProductionPipelineStatus.BLOCKED,
                 "reason": (
-                    "Risk validation did not approve "
-                    "the decision."
+                    "Broker submission is forbidden in this "
+                    "pipeline phase."
+                ),
+                "authorization": authorization,
+                "error": (
+                    "broker_submission_enabled=True"
                 ),
             }
 
         return {
             "authorized": True,
-            "status": (
-                ProductionPipelineStatus.APPROVED
-            ),
+            "status": ProductionPipelineStatus.APPROVED,
+            "authorization": authorization,
             "broker_submission": False,
             "live_trading_enabled": False,
+            "authorization_authority": True,
+            "require_authorization_enforced": True,
         }
+
 
     # ==================================================================
     # SECTION 13
@@ -1163,33 +1195,19 @@ class ProductionPipelineIntegration:
         """
 
         return ProductionPipelineResult(
-            status=(
-                ProductionPipelineStatus.APPROVED
-            ),
+            status=ProductionPipelineStatus.APPROVED,
             approved=True,
             decision_id=result.decision_id,
             regime=result.regime,
-            weights=dict(
-                result.weights
-            ),
-            number_of_positions=(
-                result.number_of_positions
-            ),
-            portfolio_return=float(
-                result.portfolio_return
-            ),
-            portfolio_variance=float(
-                result.portfolio_variance
-            ),
+            weights=dict(result.weights),
+            number_of_positions=result.number_of_positions,
+            portfolio_return=float(result.portfolio_return),
+            portfolio_variance=float(result.portfolio_variance),
             portfolio_volatility=float(
                 result.portfolio_volatility
             ),
-            gross_exposure=float(
-                result.gross_exposure
-            ),
-            net_exposure=float(
-                result.net_exposure
-            ),
+            gross_exposure=float(result.gross_exposure),
+            net_exposure=float(result.net_exposure),
             risk_contributions=dict(
                 result.risk_contributions
             ),
@@ -1199,22 +1217,13 @@ class ProductionPipelineIntegration:
             scenario_results=dict(
                 result.scenario_results
             ),
-            warnings=tuple(
-                result.warnings
-            ),
-            errors=tuple(
-                result.errors
-            ),
-            diagnostics=dict(
-                result.diagnostics
-            ),
-            stages=tuple(
-                stages
-            ),
-            stage_results=dict(
-                stage_results
-            ),
+            warnings=tuple(result.warnings),
+            errors=tuple(result.errors),
+            diagnostics=dict(result.diagnostics),
+            stages=tuple(stages),
+            stage_results=dict(stage_results),
         )
+
 
     # ------------------------------------------------------------------
     # 13.2 REJECTED RESULT
@@ -1233,62 +1242,32 @@ class ProductionPipelineIntegration:
         Rejection is never converted into approval.
         """
 
-        errors = list(
-            result.errors
-        )
+        errors = list(result.errors)
 
-        if gate_result.get(
-            "error"
-        ):
-
+        if gate_result.get("error"):
             errors.append(
-                str(
-                    gate_result[
-                        "error"
-                    ]
-                )
+                str(gate_result["error"])
             )
 
-        if gate_result.get(
-            "reason"
-        ):
-
+        if gate_result.get("reason"):
             errors.append(
-                str(
-                    gate_result[
-                        "reason"
-                    ]
-                )
+                str(gate_result["reason"])
             )
 
         return ProductionPipelineResult(
-            status=(
-                ProductionPipelineStatus.REJECTED
-            ),
+            status=ProductionPipelineStatus.REJECTED,
             approved=False,
             decision_id=result.decision_id,
             regime=result.regime,
-            weights=dict(
-                result.weights
-            ),
-            number_of_positions=(
-                result.number_of_positions
-            ),
-            portfolio_return=float(
-                result.portfolio_return
-            ),
-            portfolio_variance=float(
-                result.portfolio_variance
-            ),
+            weights=dict(result.weights),
+            number_of_positions=result.number_of_positions,
+            portfolio_return=float(result.portfolio_return),
+            portfolio_variance=float(result.portfolio_variance),
             portfolio_volatility=float(
                 result.portfolio_volatility
             ),
-            gross_exposure=float(
-                result.gross_exposure
-            ),
-            net_exposure=float(
-                result.net_exposure
-            ),
+            gross_exposure=float(result.gross_exposure),
+            net_exposure=float(result.net_exposure),
             risk_contributions=dict(
                 result.risk_contributions
             ),
@@ -1298,25 +1277,86 @@ class ProductionPipelineIntegration:
             scenario_results=dict(
                 result.scenario_results
             ),
-            warnings=tuple(
-                result.warnings
-            ),
-            errors=tuple(
-                errors
-            ),
-            diagnostics=dict(
-                result.diagnostics
-            ),
-            stages=tuple(
-                stages
-            ),
-            stage_results=dict(
-                stage_results
-            ),
+            warnings=tuple(result.warnings),
+            errors=tuple(errors),
+            diagnostics=dict(result.diagnostics),
+            stages=tuple(stages),
+            stage_results=dict(stage_results),
         )
 
+
     # ------------------------------------------------------------------
-    # 13.3 FAILED RESULT
+    # 13.3 BLOCKED RESULT
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _blocked_result(
+        result: ProductionDecisionExecutionResult,
+        gate_result: dict[str, Any],
+        stages: list[str],
+        stage_results: dict[str, Any],
+    ) -> ProductionPipelineResult:
+        """
+        Construct a blocked pipeline result.
+
+        BLOCKED is distinct from REJECTED because the decision may have
+        passed risk validation while execution authorization failed.
+        """
+
+        errors = list(result.errors)
+
+        if gate_result.get("error"):
+            errors.append(
+                str(gate_result["error"])
+            )
+
+        if gate_result.get("reason"):
+            errors.append(
+                str(gate_result["reason"])
+            )
+
+        diagnostics = dict(result.diagnostics)
+
+        diagnostics.update(
+            {
+                "execution_blocked": True,
+                "execution_authorization": gate_result,
+            }
+        )
+
+        return ProductionPipelineResult(
+            status=ProductionPipelineStatus.BLOCKED,
+            approved=False,
+            decision_id=result.decision_id,
+            regime=result.regime,
+            weights=dict(result.weights),
+            number_of_positions=result.number_of_positions,
+            portfolio_return=float(result.portfolio_return),
+            portfolio_variance=float(result.portfolio_variance),
+            portfolio_volatility=float(
+                result.portfolio_volatility
+            ),
+            gross_exposure=float(result.gross_exposure),
+            net_exposure=float(result.net_exposure),
+            risk_contributions=dict(
+                result.risk_contributions
+            ),
+            risk_contribution_pct=dict(
+                result.risk_contribution_pct
+            ),
+            scenario_results=dict(
+                result.scenario_results
+            ),
+            warnings=tuple(result.warnings),
+            errors=tuple(errors),
+            diagnostics=diagnostics,
+            stages=tuple(stages),
+            stage_results=dict(stage_results),
+        )
+
+
+    # ------------------------------------------------------------------
+    # 13.4 FAILED RESULT
     # ------------------------------------------------------------------
 
     @staticmethod
@@ -1332,9 +1372,7 @@ class ProductionPipelineIntegration:
         """
 
         return ProductionPipelineResult(
-            status=(
-                ProductionPipelineStatus.FAILED
-            ),
+            status=ProductionPipelineStatus.FAILED,
             approved=False,
             decision_id=None,
             regime=None,
@@ -1349,19 +1387,14 @@ class ProductionPipelineIntegration:
             risk_contribution_pct={},
             scenario_results={},
             warnings=(),
-            errors=(
-                str(error),
-            ),
+            errors=(str(error),),
             diagnostics={
                 "pipeline_failure": True,
             },
-            stages=tuple(
-                stages
-            ),
-            stage_results=dict(
-                stage_results
-            ),
+            stages=tuple(stages),
+            stage_results=dict(stage_results),
         )
+
 
     # ==================================================================
     # SECTION 14
@@ -1386,7 +1419,6 @@ class ProductionPipelineIntegration:
             result,
             ProductionPipelineResult,
         ):
-
             raise ProductionPipelineIntegrationError(
                 "Invalid pipeline result type."
             )
@@ -1395,13 +1427,8 @@ class ProductionPipelineIntegration:
         # APPROVED
         # --------------------------------------------------------------
 
-        if (
-            result.status
-            == ProductionPipelineStatus.APPROVED
-        ):
-
+        if result.status == ProductionPipelineStatus.APPROVED:
             if not result.approved:
-
                 raise ProductionPipelineIntegrationError(
                     (
                         "Pipeline returned APPROVED but "
@@ -1410,7 +1437,6 @@ class ProductionPipelineIntegration:
                 )
 
             if not result.decision_id:
-
                 raise ProductionPipelineIntegrationError(
                     (
                         "Approved pipeline result has no "
@@ -1419,7 +1445,6 @@ class ProductionPipelineIntegration:
                 )
 
             if not result.weights:
-
                 raise ProductionPipelineIntegrationError(
                     (
                         "Approved pipeline result has no "
@@ -1428,7 +1453,6 @@ class ProductionPipelineIntegration:
                 )
 
             if not result.risk_contributions:
-
                 raise ProductionPipelineIntegrationError(
                     (
                         "Approved pipeline result has no "
@@ -1442,13 +1466,8 @@ class ProductionPipelineIntegration:
         # REJECTED
         # --------------------------------------------------------------
 
-        if (
-            result.status
-            == ProductionPipelineStatus.REJECTED
-        ):
-
+        if result.status == ProductionPipelineStatus.REJECTED:
             if result.approved:
-
                 raise ProductionPipelineIntegrationError(
                     (
                         "Rejected pipeline result has "
@@ -1462,13 +1481,8 @@ class ProductionPipelineIntegration:
         # FAILED
         # --------------------------------------------------------------
 
-        if (
-            result.status
-            == ProductionPipelineStatus.FAILED
-        ):
-
+        if result.status == ProductionPipelineStatus.FAILED:
             if result.approved:
-
                 raise ProductionPipelineIntegrationError(
                     (
                         "Failed pipeline result has "
@@ -1477,7 +1491,6 @@ class ProductionPipelineIntegration:
                 )
 
             if not result.errors:
-
                 raise ProductionPipelineIntegrationError(
                     (
                         "Failed pipeline result contains "
@@ -1491,17 +1504,20 @@ class ProductionPipelineIntegration:
         # BLOCKED
         # --------------------------------------------------------------
 
-        if (
-            result.status
-            == ProductionPipelineStatus.BLOCKED
-        ):
-
+        if result.status == ProductionPipelineStatus.BLOCKED:
             if result.approved:
-
                 raise ProductionPipelineIntegrationError(
                     (
                         "Blocked pipeline result has "
                         "approved=True."
+                    )
+                )
+
+            if not result.errors:
+                raise ProductionPipelineIntegrationError(
+                    (
+                        "Blocked pipeline result contains "
+                        "no authorization error information."
                     )
                 )
 
@@ -1518,44 +1534,27 @@ class ProductionPipelineIntegration:
             )
         )
 
+
     # ==================================================================
     # SECTION 15
     # SUMMARY
     # ==================================================================
 
-    def summary(
-        self,
-    ) -> dict[str, Any]:
+    def summary(self) -> dict[str, Any]:
         """
         Return deterministic pipeline state information.
         """
 
-        last = (
-            self.last_result
-        )
+        last = self.last_result
 
         return {
-            "api_version": (
-                self.API_VERSION
-            ),
-            "phase": (
-                self.PHASE
-            ),
-            "execution_count": (
-                self.execution_count
-            ),
-            "approved_count": (
-                self.approved_count
-            ),
-            "rejected_count": (
-                self.rejected_count
-            ),
-            "failed_count": (
-                self.failed_count
-            ),
-            "blocked_count": (
-                self.blocked_count
-            ),
+            "api_version": self.API_VERSION,
+            "phase": self.PHASE,
+            "execution_count": self.execution_count,
+            "approved_count": self.approved_count,
+            "rejected_count": self.rejected_count,
+            "failed_count": self.failed_count,
+            "blocked_count": self.blocked_count,
             "last_status": (
                 last.status
                 if last is not None
@@ -1572,18 +1571,21 @@ class ProductionPipelineIntegration:
             "broker_submission_enabled": (
                 self.BROKER_SUBMISSION_ENABLED
             ),
+            "execution_gate_is_authoritative": (
+                self.EXECUTION_GATE_IS_AUTHORITATIVE
+            ),
+            "require_authorization_enforced": True,
         }
+
 
     # ==================================================================
     # SECTION 16
     # METADATA
     # ==================================================================
 
-    def metadata(
-        self,
-    ) -> dict[str, Any]:
+    def metadata(self) -> dict[str, Any]:
         """
-        Return Phase IV-B.6 production metadata.
+        Return production pipeline metadata.
         """
 
         return {
@@ -1593,12 +1595,8 @@ class ProductionPipelineIntegration:
             "component": (
                 "ProductionPipelineIntegration"
             ),
-            "api_version": (
-                self.API_VERSION
-            ),
-            "phase": (
-                self.PHASE
-            ),
+            "api_version": self.API_VERSION,
+            "phase": self.PHASE,
             "required_stages": list(
                 self.REQUIRED_STAGES
             ),
@@ -1620,7 +1618,12 @@ class ProductionPipelineIntegration:
             "decision_engine_is_authoritative": (
                 self.DECISION_ENGINE_IS_AUTHORITATIVE
             ),
+            "execution_gate_is_authoritative": (
+                self.EXECUTION_GATE_IS_AUTHORITATIVE
+            ),
+            "require_authorization_enforced": True,
         }
+
 
     # ==================================================================
     # SECTION 17
@@ -1631,41 +1634,22 @@ class ProductionPipelineIntegration:
     # 17.1 METADATA TEST
     # ------------------------------------------------------------------
 
-    def test_metadata(
-        self,
-    ) -> None:
+    def test_metadata(self) -> None:
         """
-        Verify Phase IV-B.6 metadata.
+        Verify production pipeline metadata.
         """
 
-        metadata = (
-            self.metadata()
-        )
+        metadata = self.metadata()
 
-        assert (
-            metadata["api_version"]
-            == "1.0.0"
-        )
+        assert metadata["api_version"] == "1.0.0"
 
-        assert (
-            metadata["phase"]
-            == "IV-B.6"
-        )
+        assert metadata["phase"] == "IV-E"
 
-        assert (
-            metadata["production_only"]
-            is True
-        )
+        assert metadata["production_only"] is True
 
-        assert (
-            metadata["test_doubles_allowed"]
-            is False
-        )
+        assert metadata["test_doubles_allowed"] is False
 
-        assert (
-            metadata["live_trading_enabled"]
-            is False
-        )
+        assert metadata["live_trading_enabled"] is False
 
         assert (
             metadata["broker_submission_enabled"]
@@ -1679,8 +1663,65 @@ class ProductionPipelineIntegration:
             is True
         )
 
+        assert (
+            metadata[
+                "execution_gate_is_authoritative"
+            ]
+            is True
+        )
+
+        assert (
+            metadata[
+                "require_authorization_enforced"
+            ]
+            is True
+        )
+
+
     # ------------------------------------------------------------------
-    # 17.2 STATUS INVARIANT TEST
+    # 17.2 DEPENDENCY AUTHORITY TEST
+    # ------------------------------------------------------------------
+
+    def test_execution_gate_authority(self) -> None:
+        """
+        Verify that the execution gate is real, authoritative, and
+        bound to the same decision-execution component.
+        """
+
+        assert isinstance(
+            self.execution_gate,
+            ProductionExecutionGate,
+        )
+
+        gate_decision_execution = getattr(
+            self.execution_gate,
+            "decision_execution",
+            None,
+        )
+
+        assert (
+            gate_decision_execution
+            is self.decision_execution
+        )
+
+        assert (
+            self.EXECUTION_GATE_IS_AUTHORITATIVE
+            is True
+        )
+
+        assert (
+            self.LIVE_TRADING_ENABLED
+            is False
+        )
+
+        assert (
+            self.BROKER_SUBMISSION_ENABLED
+            is False
+        )
+
+
+    # ------------------------------------------------------------------
+    # 17.3 STATUS INVARIANT TEST
     # ------------------------------------------------------------------
 
     @staticmethod
@@ -1690,9 +1731,7 @@ class ProductionPipelineIntegration:
         """
 
         failed = ProductionPipelineResult(
-            status=(
-                ProductionPipelineStatus.FAILED
-            ),
+            status=ProductionPipelineStatus.FAILED,
             approved=False,
             decision_id=None,
             regime=None,
@@ -1707,9 +1746,7 @@ class ProductionPipelineIntegration:
             risk_contribution_pct={},
             scenario_results={},
             warnings=(),
-            errors=(
-                "deterministic failure",
-            ),
+            errors=("deterministic failure",),
             diagnostics={},
             stages=(),
             stage_results={},
@@ -1723,17 +1760,12 @@ class ProductionPipelineIntegration:
         )
 
         try:
-
             invalid = ProductionPipelineResult(
-                status=(
-                    ProductionPipelineStatus.FAILED
-                ),
+                status=ProductionPipelineStatus.FAILED,
                 approved=True,
                 decision_id="INVALID",
                 regime="Expansion",
-                weights={
-                    "SPY": 1.0,
-                },
+                weights={"SPY": 1.0},
                 number_of_positions=1,
                 portfolio_return=0.0,
                 portfolio_variance=0.01,
@@ -1748,9 +1780,7 @@ class ProductionPipelineIntegration:
                 },
                 scenario_results={},
                 warnings=(),
-                errors=(
-                    "invalid state",
-                ),
+                errors=("invalid state",),
                 diagnostics={},
                 stages=(),
                 stage_results={},
@@ -1768,103 +1798,123 @@ class ProductionPipelineIntegration:
             )
 
         except ProductionPipelineIntegrationError:
-
             pass
 
+
     # ------------------------------------------------------------------
-    # 17.3 HEALTH TEST
+    # 17.4 HEALTH TEST
     # ------------------------------------------------------------------
 
-    def test_health(
-        self,
-    ) -> None:
+    def test_health(self) -> None:
         """
-        Verify that the production pipeline exposes a deterministic
-        health-check interface.
+        Verify the production pipeline health-check interface.
         """
 
-        result = (
-            self.health_check()
-        )
+        result = self.health_check()
 
         assert isinstance(
             result,
             dict,
         )
 
-        assert (
-            result["api_version"]
-            == "1.0.0"
-        )
+        assert result["api_version"] == "1.0.0"
+
+        assert result["phase"] == "IV-E"
+
+        assert "healthy" in result
 
         assert (
-            result["phase"]
-            == "IV-B.6"
+            "production_execution_gate"
+            in result["stages"]
         )
 
-        assert (
-            "healthy"
-            in result
-        )
 
     # ------------------------------------------------------------------
-    # 17.4 SUMMARY TEST
+    # 17.5 SUMMARY TEST
     # ------------------------------------------------------------------
 
-    def test_summary(
-        self,
-    ) -> None:
+    def test_summary(self) -> None:
         """
         Verify pipeline summary structure.
         """
 
-        summary = (
-            self.summary()
+        summary = self.summary()
+
+        assert summary["api_version"] == "1.0.0"
+
+        assert summary["phase"] == "IV-E"
+
+        assert summary["execution_count"] >= 0
+
+        assert summary["approved_count"] >= 0
+
+        assert summary["rejected_count"] >= 0
+
+        assert summary["failed_count"] >= 0
+
+        assert summary["blocked_count"] >= 0
+
+        assert (
+            summary[
+                "execution_gate_is_authoritative"
+            ]
+            is True
         )
 
         assert (
-            summary["api_version"]
-            == "1.0.0"
+            summary[
+                "require_authorization_enforced"
+            ]
+            is True
+        )
+
+
+    # ------------------------------------------------------------------
+    # 17.6 AUTHORIZATION BOUNDARY TEST
+    # ------------------------------------------------------------------
+
+    def test_authorization_boundary(self) -> None:
+        """
+        Verify that the pipeline exposes the execution gate as the
+        final authorization boundary.
+        """
+
+        health = self.health_check()
+
+        gate = health["stages"][
+            "production_execution_gate"
+        ]
+
+        assert gate["available"] is True
+
+        assert gate["production_boundary"] is True
+
+        assert gate["authorization_authority"] is True
+
+        assert (
+            gate["live_trading_enabled"]
+            is False
         )
 
         assert (
-            summary["phase"]
-            == "IV-B.6"
+            gate["broker_submission_enabled"]
+            is False
         )
 
-        assert (
-            summary["execution_count"]
-            >= 0
-        )
-
-        assert (
-            summary["approved_count"]
-            >= 0
-        )
-
-        assert (
-            summary["rejected_count"]
-            >= 0
-        )
-
-        assert (
-            summary["failed_count"]
-            >= 0
-        )
 
     # ==================================================================
     # SECTION 18
     # REGRESSION ENTRY POINT
     # ==================================================================
 
-    def run_regression_tests(
-        self,
-    ) -> None:
+    def run_regression_tests(self) -> None:
         """
-        Execute Phase IV-B.6 structural regression tests.
+        Execute production pipeline structural regression tests.
         """
 
         self.test_metadata()
+
+        self.test_execution_gate_authority()
 
         self.test_status_invariants()
 
@@ -1872,9 +1922,11 @@ class ProductionPipelineIntegration:
 
         self.test_summary()
 
+        self.test_authorization_boundary()
+
         print(
             "ProductionPipelineIntegration "
-            "Phase IV-B.6 tests passed."
+            "Phase IV-E tests passed."
         )
 
 
@@ -1884,10 +1936,9 @@ class ProductionPipelineIntegration:
 # ======================================================================
 
 
-def build_production_pipeline(
-) -> ProductionPipelineIntegration:
+def build_production_pipeline() -> ProductionPipelineIntegration:
     """
-    Construct the Phase IV-B.6 production pipeline.
+    Construct the production pipeline.
 
     Returns
     -------
@@ -1895,9 +1946,7 @@ def build_production_pipeline(
         Fully constructed production pipeline boundary.
     """
 
-    return (
-        ProductionPipelineIntegration()
-    )
+    return ProductionPipelineIntegration()
 
 
 # ======================================================================
@@ -1913,22 +1962,18 @@ if __name__ == "__main__":
     )
 
     print(
-        "PHASE IV-B.6 PRODUCTION PIPELINE INTEGRATION"
+        "PHASE IV-E PRODUCTION PIPELINE INTEGRATION"
     )
 
     print(
         "============================================================"
     )
 
-    pipeline = (
-        ProductionPipelineIntegration()
-    )
+    pipeline = ProductionPipelineIntegration()
 
     print()
 
-    print(
-        "METADATA:"
-    )
+    print("METADATA:")
 
     print(
         pipeline.metadata()
@@ -1936,34 +1981,18 @@ if __name__ == "__main__":
 
     print()
 
-    print(
-        "HEALTH CHECK:"
-    )
+    print("HEALTH CHECK:")
 
-    health = (
-        pipeline.health_check()
-    )
+    health = pipeline.health_check()
 
-    print(
-        health
-    )
+    print(health)
 
     print()
 
-    if health.get(
-        "healthy",
-        False,
-    ):
-
-        print(
-            "STATUS: HEALTHY"
-        )
-
+    if health.get("healthy", False):
+        print("STATUS: HEALTHY")
     else:
-
-        print(
-            "STATUS: UNHEALTHY"
-        )
+        print("STATUS: UNHEALTHY")
 
         print(
             "ERROR:",
@@ -1975,9 +2004,7 @@ if __name__ == "__main__":
 
     print()
 
-    print(
-        "SUMMARY:"
-    )
+    print("SUMMARY:")
 
     print(
         pipeline.summary()
