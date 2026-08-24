@@ -2003,7 +2003,8 @@ ANALYTICS / REGRESSION
 ├── step8_historical_data_test.py
 ├── step9_historical_backtest.py
 ├── testsupport.py
-└── test_phase_iv_d_production_gate.py
+├── test_phase_iv_d_production_gate.py
+└── test_phase_iv_f_execution_safety.py
 
 LEGACY / MONOLITHIC IMPLEMENTATION
 │

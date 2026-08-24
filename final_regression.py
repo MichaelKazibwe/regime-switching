@@ -66,7 +66,7 @@ SELF_NAME = Path(
     __file__
 ).name
 
-EXPECTED_PROJECT_FILE_COUNT = 67
+EXPECTED_PROJECT_FILE_COUNT = 68
 
 
 # The active production allocation universe is defined by the regime risk
@@ -114,6 +114,7 @@ REGRESSION_MODULES = (
     "executionanalytics.py",
     "test_portfoliooptimizer_hardening.py",
     "test_phase_iv_d_production_gate.py",
+    "test_phase_iv_f_execution_safety.py",
 )
 
 
@@ -183,6 +184,7 @@ REQUIRED_MODULES = (
     "testsupport.py",
     "test_portfoliooptimizer_hardening.py",
     "test_phase_iv_d_production_gate.py",
+    "test_phase_iv_f_execution_safety.py",
     "trade.py",
     "tradeanalytics.py",
     "tradegenerator.py",
