@@ -2002,7 +2002,8 @@ ANALYTICS / REGRESSION
 ├── step7_production_test.py
 ├── step8_historical_data_test.py
 ├── step9_historical_backtest.py
-└── testsupport.py
+├── testsupport.py
+└── test_phase_iv_d_production_gate.py
 
 LEGACY / MONOLITHIC IMPLEMENTATION
 │
@@ -2043,3 +2044,37 @@ RiskBudgetEngine
 build_risk_budget_engine()
 
 test_risk_budget_engine()
+
+REGIME-SWITCHING SYSTEM
+│
+├── CORE PRODUCTION
+│   ├── market data
+│   ├── covariance
+│   ├── forecasting
+│   ├── regime detection
+│   ├── risk budgets
+│   ├── portfolio optimization
+│   ├── decision engine
+│   └── portfolio/account layer
+│
+├── PRODUCTION EXECUTION
+│   ├── orders
+│   ├── OMS
+│   ├── execution
+│   ├── brokers
+│   ├── reconciliation
+│   └── monitoring
+│
+├── REGRESSION / VALIDATION
+│   ├── final_regression.py
+│   ├── quantitative_regression.py
+│   ├── regression_suite.py
+│   ├── step7...
+│   ├── step8...
+│   ├── step9...
+│   └── hardening tests
+│
+└── ARCHIVE
+    ├── rewrite.py
+    ├── archive/*
+    └── historical snapshots
