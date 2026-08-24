@@ -8,7 +8,7 @@ portfolio/trading repository.
 
 Design goals
 ------------
-* Inventory exactly the 69 project modules, excluding this harness.
+* Inventory exactly the 70 project modules, excluding this harness.
 * Compile every module.
 * Run Ruff over the complete repository.
 * AST-audit every module and build the local import graph.
@@ -66,7 +66,7 @@ SELF_NAME = Path(
     __file__
 ).name
 
-EXPECTED_PROJECT_FILE_COUNT = 69
+EXPECTED_PROJECT_FILE_COUNT = 70
 
 
 # The active production allocation universe is defined by the regime risk
@@ -116,6 +116,7 @@ REGRESSION_MODULES = (
     "test_phase_iv_d_production_gate.py",
     "test_phase_iv_f_execution_safety.py",
     "test_phase_iv_g_downstream_execution_safety.py",
+    "test_phase_iv_h_execution_integrity.py",
 )
 
 
@@ -187,6 +188,7 @@ REQUIRED_MODULES = (
     "test_phase_iv_d_production_gate.py",
     "test_phase_iv_f_execution_safety.py",
     "test_phase_iv_g_downstream_execution_safety.py",
+    "test_phase_iv_h_execution_integrity.py",
     "trade.py",
     "tradeanalytics.py",
     "tradegenerator.py",
@@ -1000,7 +1002,7 @@ class FinalRegression:
     ) -> bool:
 
         banner(
-            "PHASE 1 — COMPLETE 65-FILE INVENTORY"
+            "PHASE 1 — COMPLETE 70-FILE INVENTORY"
         )
 
         actual = [
