@@ -16,8 +16,34 @@ Design principles
 3. Mandatory dependencies fail fast.
 4. Constructor incompatibilities are explicit.
 5. Composite components must be fully configured.
-6. Health checks must pass before the engine is released.
-7. Live trading remains disabled in Phase IV-B.1.
+6. The canonical 14-asset production universe is mandatory.
+7. Health checks must pass before the engine is released.
+8. Live trading remains disabled in Phase IV-B.1.
+
+Canonical production universe
+-----------------------------
+The production engine consumes AssetUniverse.production().
+
+Expected production assets:
+
+    SPY
+    QQQ
+    IWM
+    VEA
+    VWO
+    TLT
+    IEF
+    SHY
+    LQD
+    HYG
+    GLD
+    SLV
+    DBC
+    VNQ
+
+The production composition layer is deliberately responsible for
+enforcing this contract so downstream components do not accidentally
+construct or receive a reduced universe.
 """
 
 # ======================================================================
@@ -30,10 +56,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 import inspect
 from typing import Any, Callable
+
 import numpy as np
 
 from assetuniverse import (
     AssetUniverse,
+    PRODUCTION_ASSETS,
+    PRODUCTION_ASSET_COUNT,
 )
 
 from blacklitterman import (
@@ -91,6 +120,7 @@ from portfoliodecisionengine import (
 from volatilitytargeting import (
     VolatilityTargeting,
 )
+
 
 # ======================================================================
 # SECTION 2
@@ -229,6 +259,15 @@ class ProductionComposition:
         "scenario_engine",
     )
 
+    # Canonical production universe.
+    PRODUCTION_ASSETS = (
+        PRODUCTION_ASSETS
+    )
+
+    PRODUCTION_ASSET_COUNT = (
+        PRODUCTION_ASSET_COUNT
+    )
+
     # ==================================================================
     # SECTION 5
     # CONSTRUCTOR
@@ -304,6 +343,183 @@ class ProductionComposition:
 
     # ==================================================================
     # SECTION 7
+    # CANONICAL ASSET UNIVERSE
+    # ==================================================================
+
+    @classmethod
+    def _construct_asset_universe(
+        cls,
+    ) -> AssetUniverse:
+        """
+        Construct and validate the canonical production universe.
+
+        The production composition boundary must never construct a
+        generic blank AssetUniverse.
+
+        AssetUniverse.production() is the sole source of the production
+        asset universe.
+        """
+
+        try:
+
+            universe = (
+                AssetUniverse.production()
+            )
+
+        except Exception as exc:
+
+            raise ProductionCompositionError(
+                (
+                    "Unable to construct the canonical "
+                    "production AssetUniverse: "
+                    f"{exc}"
+                )
+            ) from exc
+
+        if universe is None:
+
+            raise ProductionCompositionError(
+                "AssetUniverse.production() returned None."
+            )
+
+        # --------------------------------------------------------------
+        # Type validation
+        # --------------------------------------------------------------
+
+        if not isinstance(
+            universe,
+            AssetUniverse,
+        ):
+
+            raise ProductionCompositionError(
+                (
+                    "AssetUniverse.production() returned "
+                    "an unexpected object type: "
+                    f"{type(universe).__name__}."
+                )
+            )
+
+        # --------------------------------------------------------------
+        # Production flag
+        # --------------------------------------------------------------
+
+        if not bool(
+            getattr(
+                universe,
+                "is_production_universe",
+                False,
+            )
+        ):
+
+            raise ProductionCompositionError(
+                (
+                    "Canonical AssetUniverse is not marked "
+                    "as a production universe."
+                )
+            )
+
+        # --------------------------------------------------------------
+        # Size
+        # --------------------------------------------------------------
+
+        if (
+            universe.size
+            != cls.PRODUCTION_ASSET_COUNT
+        ):
+
+            raise ProductionCompositionError(
+                (
+                    "Canonical production AssetUniverse "
+                    "contains "
+                    f"{universe.size} assets; expected "
+                    f"{cls.PRODUCTION_ASSET_COUNT}."
+                )
+            )
+
+        # --------------------------------------------------------------
+        # Ticker integrity
+        # --------------------------------------------------------------
+
+        actual_tickers = (
+            list(
+                universe.tickers
+            )
+        )
+
+        expected_tickers = (
+            list(
+                cls.PRODUCTION_ASSETS
+            )
+        )
+
+        if set(actual_tickers) != set(
+            expected_tickers
+        ):
+
+            missing = sorted(
+                set(expected_tickers)
+                - set(actual_tickers)
+            )
+
+            unexpected = sorted(
+                set(actual_tickers)
+                - set(expected_tickers)
+            )
+
+            raise ProductionCompositionError(
+                (
+                    "Canonical production AssetUniverse "
+                    "ticker mismatch. "
+                    f"Missing={missing}; "
+                    f"Unexpected={unexpected}."
+                )
+            )
+
+        # --------------------------------------------------------------
+        # Duplicate protection
+        # --------------------------------------------------------------
+
+        if len(
+            actual_tickers
+        ) != len(
+            set(actual_tickers)
+        ):
+
+            raise ProductionCompositionError(
+                "Canonical production AssetUniverse contains duplicate tickers."
+            )
+
+        # --------------------------------------------------------------
+        # Health check
+        # --------------------------------------------------------------
+
+        try:
+
+            health = (
+                universe.health_check()
+            )
+
+        except Exception as exc:
+
+            raise ProductionCompositionError(
+                (
+                    "Canonical production AssetUniverse "
+                    f"health check failed: {exc}"
+                )
+            ) from exc
+
+        if not bool(
+            health
+        ):
+
+            raise ProductionCompositionError(
+                "Canonical production AssetUniverse health check returned False."
+            )
+
+        return universe
+
+    # ==================================================================
+    # SECTION 8
     # OPTIMIZER DEPENDENCY DISCOVERY
     # ==================================================================
 
@@ -346,7 +562,7 @@ class ProductionComposition:
         ]
 
     # ==================================================================
-    # SECTION 8
+    # SECTION 9
     # OPTIMIZER DEPENDENCY RESOLUTION
     # ==================================================================
 
@@ -411,7 +627,7 @@ class ProductionComposition:
                 raise ProductionCompositionError(
                     (
                         "Unable to construct "
-                        f"PortfolioOptimizer dependency "
+                        "PortfolioOptimizer dependency "
                         f"'{name}': {exc}"
                     )
                 ) from exc
@@ -420,7 +636,7 @@ class ProductionComposition:
 
                 raise ProductionCompositionError(
                     (
-                        f"PortfolioOptimizer dependency "
+                        "PortfolioOptimizer dependency "
                         f"'{name}' returned None."
                     )
                 )
@@ -533,7 +749,7 @@ class ProductionComposition:
         )
 
     # ==================================================================
-    # SECTION 9
+    # SECTION 10
     # OPTIMIZER CONSTRUCTION
     # ==================================================================
 
@@ -600,7 +816,7 @@ class ProductionComposition:
         return optimizer
 
     # ==================================================================
-    # SECTION 10
+    # SECTION 11
     # COVARIANCE ENSEMBLE CONSTRUCTION
     # ==================================================================
 
@@ -611,8 +827,6 @@ class ProductionComposition:
     ) -> EnsembleCovariance:
         """
         Construct the production covariance ensemble.
-
-        The ensemble contains only real production covariance models.
 
         Default production blend
         -------------------------
@@ -651,19 +865,32 @@ class ProductionComposition:
                 )
             ) from exc
 
-        health = ensemble.health_check()
+        try:
+
+            health = (
+                ensemble.health_check()
+            )
+
+        except Exception as exc:
+
+            raise ProductionCompositionError(
+                (
+                    "Production covariance ensemble "
+                    f"health check failed: {exc}"
+                )
+            ) from exc
 
         if isinstance(
-           health,
-           dict,
+            health,
+            dict,
         ):
 
-           healthy = bool(
-               health.get(
-                  "healthy",
-                  False,
+            healthy = bool(
+                health.get(
+                    "healthy",
+                    False,
+                )
             )
-        )
 
         else:
 
@@ -673,14 +900,14 @@ class ProductionComposition:
 
         if not healthy:
 
-           raise ProductionCompositionError(
-               "Covariance ensemble health check failed."
+            raise ProductionCompositionError(
+                "Covariance ensemble health check failed."
             )
 
         return ensemble
 
     # ==================================================================
-    # SECTION 11
+    # SECTION 12
     # DEFAULT RISK BUDGET ENGINE
     # ==================================================================
 
@@ -693,15 +920,15 @@ class ProductionComposition:
         )
 
     @staticmethod
-    def _default_volatility_targeting_factory():
-        """
-        Construct the production volatility-targeting engine.
-        """
+    def _default_volatility_targeting_factory(
+    ) -> VolatilityTargeting:
 
-        return VolatilityTargeting()
-    
+        return (
+            VolatilityTargeting()
+        )
+
     # ==================================================================
-    # SECTION 12
+    # SECTION 13
     # BUILD COMPONENTS
     # ==================================================================
 
@@ -710,7 +937,7 @@ class ProductionComposition:
     ) -> ProductionComponents:
 
         # --------------------------------------------------------------
-        # 12.1 CONSTRAINTS
+        # 13.1 CONSTRAINTS
         # --------------------------------------------------------------
 
         constraints = (
@@ -721,18 +948,15 @@ class ProductionComposition:
         )
 
         # --------------------------------------------------------------
-        # 12.2 ASSET UNIVERSE
+        # 13.2 CANONICAL 14-ASSET UNIVERSE
         # --------------------------------------------------------------
 
         asset_universe = (
-            self._construct(
-                AssetUniverse,
-                "asset_universe",
-            )
+            self._construct_asset_universe()
         )
 
         # --------------------------------------------------------------
-        # 12.3 REGIME MODEL
+        # 13.3 REGIME MODEL
         # --------------------------------------------------------------
 
         regime_model = (
@@ -743,7 +967,7 @@ class ProductionComposition:
         )
 
         # --------------------------------------------------------------
-        # 12.4 EXPECTED RETURN FORECASTER
+        # 13.4 EXPECTED RETURN FORECASTER
         # --------------------------------------------------------------
 
         expected_return_forecaster = (
@@ -754,7 +978,7 @@ class ProductionComposition:
         )
 
         # --------------------------------------------------------------
-        # 12.5 BASE COVARIANCE
+        # 13.5 BASE COVARIANCE
         # --------------------------------------------------------------
 
         covariance_engine = (
@@ -765,7 +989,7 @@ class ProductionComposition:
         )
 
         # --------------------------------------------------------------
-        # 12.6 REGIME COVARIANCE
+        # 13.6 REGIME COVARIANCE
         # --------------------------------------------------------------
 
         regime_covariance = (
@@ -776,10 +1000,10 @@ class ProductionComposition:
         )
 
         # --------------------------------------------------------------
-        # 12.7 ENSEMBLE COVARIANCE
+        # 13.7 ENSEMBLE COVARIANCE
         # --------------------------------------------------------------
 
-        self.ensemble_covariance = (
+        ensemble_covariance = (
             self._construct_covariance_ensemble(
                 covariance_engine,
                 regime_covariance,
@@ -787,7 +1011,7 @@ class ProductionComposition:
         )
 
         # --------------------------------------------------------------
-        # 12.8 BLACK-LITTERMAN
+        # 13.8 BLACK-LITTERMAN
         # --------------------------------------------------------------
 
         black_litterman = (
@@ -798,7 +1022,7 @@ class ProductionComposition:
         )
 
         # --------------------------------------------------------------
-        # 12.9 OPTIMIZER
+        # 13.9 OPTIMIZER
         # --------------------------------------------------------------
 
         optimizer = (
@@ -808,7 +1032,7 @@ class ProductionComposition:
         )
 
         # --------------------------------------------------------------
-        # 12.10 RISK MODEL
+        # 13.10 RISK MODEL
         # --------------------------------------------------------------
 
         risk_model = (
@@ -819,7 +1043,7 @@ class ProductionComposition:
         )
 
         # --------------------------------------------------------------
-        # 12.11 RISK CONTRIBUTION ANALYZER
+        # 13.11 RISK CONTRIBUTION ANALYZER
         # --------------------------------------------------------------
 
         risk_contribution_analyzer = (
@@ -830,7 +1054,7 @@ class ProductionComposition:
         )
 
         # --------------------------------------------------------------
-        # 12.12 SCENARIO ENGINE
+        # 13.12 SCENARIO ENGINE
         # --------------------------------------------------------------
 
         scenario_engine = (
@@ -841,7 +1065,7 @@ class ProductionComposition:
         )
 
         # --------------------------------------------------------------
-        # 12.13 REGISTRY
+        # 13.13 REGISTRY
         # --------------------------------------------------------------
 
         return ProductionComponents(
@@ -861,7 +1085,7 @@ class ProductionComposition:
                 regime_covariance
             ),
             ensemble_covariance=(
-                self.ensemble_covariance
+                ensemble_covariance
             ),
             black_litterman=(
                 black_litterman
@@ -884,7 +1108,7 @@ class ProductionComposition:
         )
 
     # ==================================================================
-    # SECTION 13
+    # SECTION 14
     # ENGINE CONSTRUCTION
     # ==================================================================
 
@@ -895,6 +1119,44 @@ class ProductionComposition:
         components = (
             self.build_components()
         )
+
+        # --------------------------------------------------------------
+        # FINAL UNIVERSE BOUNDARY VALIDATION
+        # --------------------------------------------------------------
+
+        universe = (
+            components.asset_universe
+        )
+
+        if universe.size != (
+            self.PRODUCTION_ASSET_COUNT
+        ):
+
+            raise ProductionCompositionError(
+                (
+                    "Production engine cannot be released "
+                    "with an invalid asset universe. "
+                    f"Expected {self.PRODUCTION_ASSET_COUNT} "
+                    f"assets; received {universe.size}."
+                )
+            )
+
+        if set(
+            universe.tickers
+        ) != set(
+            self.PRODUCTION_ASSETS
+        ):
+
+            raise ProductionCompositionError(
+                (
+                    "Production engine asset universe does "
+                    "not match the canonical 14-asset universe."
+                )
+            )
+
+        # --------------------------------------------------------------
+        # ENGINE CONSTRUCTION
+        # --------------------------------------------------------------
 
         try:
 
@@ -939,6 +1201,18 @@ class ProductionComposition:
                     f"check failed: {exc}"
                 )
             ) from exc
+
+        if not isinstance(
+            health,
+            dict,
+        ):
+
+            raise ProductionCompositionError(
+                (
+                    "PortfolioDecisionEngine health_check() "
+                    "must return a dictionary."
+                )
+            )
 
         if not health.get(
             "healthy",
@@ -987,10 +1261,66 @@ class ProductionComposition:
                 )
             )
 
+        # --------------------------------------------------------------
+        # ENGINE UNIVERSE VALIDATION
+        # --------------------------------------------------------------
+
+        engine_universe = getattr(
+            engine,
+            "asset_universe",
+            None,
+        )
+
+        if engine_universe is None:
+
+            raise ProductionCompositionError(
+                (
+                    "PortfolioDecisionEngine does not expose "
+                    "the canonical asset_universe dependency."
+                )
+            )
+
+        if engine_universe is not universe:
+
+            raise ProductionCompositionError(
+                (
+                    "PortfolioDecisionEngine is not using "
+                    "the exact AssetUniverse instance supplied "
+                    "by ProductionComposition."
+                )
+            )
+
+        if (
+            engine_universe.size
+            != self.PRODUCTION_ASSET_COUNT
+        ):
+
+            raise ProductionCompositionError(
+                (
+                    "PortfolioDecisionEngine received an "
+                    f"invalid asset universe size: "
+                    f"{engine_universe.size}; expected "
+                    f"{self.PRODUCTION_ASSET_COUNT}."
+                )
+            )
+
+        if set(
+            engine_universe.tickers
+        ) != set(
+            self.PRODUCTION_ASSETS
+        ):
+
+            raise ProductionCompositionError(
+                (
+                    "PortfolioDecisionEngine received a "
+                    "non-canonical production asset universe."
+                )
+            )
+
         return engine
 
     # ==================================================================
-    # SECTION 14
+    # SECTION 15
     # HEALTH CHECK
     # ==================================================================
 
@@ -1040,6 +1370,38 @@ class ProductionComposition:
                 ),
             }
 
+        universe = getattr(
+            engine,
+            "asset_universe",
+            None,
+        )
+
+        universe_healthy = (
+            universe is not None
+            and isinstance(
+                universe,
+                AssetUniverse,
+            )
+            and universe.size
+            == self.PRODUCTION_ASSET_COUNT
+            and set(
+                universe.tickers
+            )
+            == set(
+                self.PRODUCTION_ASSETS
+            )
+        )
+
+        healthy = (
+            bool(
+                result.get(
+                    "healthy",
+                    False,
+                )
+            )
+            and universe_healthy
+        )
+
         return {
             "api_version": (
                 self.API_VERSION
@@ -1047,11 +1409,12 @@ class ProductionComposition:
             "phase": (
                 self.PHASE
             ),
-            "healthy": bool(
-                result.get(
-                    "healthy",
-                    False,
-                )
+            "healthy": healthy,
+            "production_asset_count": (
+                self.PRODUCTION_ASSET_COUNT
+            ),
+            "production_assets": list(
+                self.PRODUCTION_ASSETS
             ),
             "engine_health": (
                 result
@@ -1059,7 +1422,7 @@ class ProductionComposition:
         }
 
     # ==================================================================
-    # SECTION 15
+    # SECTION 16
     # METADATA
     # ==================================================================
 
@@ -1087,6 +1450,13 @@ class ProductionComposition:
             "test_doubles_allowed": False,
             "strict_dependency_validation": True,
             "fail_fast": True,
+            "canonical_production_universe": True,
+            "production_asset_count": (
+                self.PRODUCTION_ASSET_COUNT
+            ),
+            "production_assets": list(
+                self.PRODUCTION_ASSETS
+            ),
             "covariance_ensemble": {
                 "base_weight": 0.60,
                 "regime_weight": 0.40,
@@ -1095,7 +1465,7 @@ class ProductionComposition:
 
 
 # ======================================================================
-# SECTION 16
+# SECTION 17
 # CONVENIENCE FACTORY
 # ======================================================================
 
@@ -1129,7 +1499,7 @@ def build_production_engine(
 
 
 # ======================================================================
-# SECTION 17
+# SECTION 18
 # REGRESSION TESTS
 # ======================================================================
 
@@ -1173,6 +1543,114 @@ def test_production_composition_metadata() -> None:
         metadata["fail_fast"]
         is True
     )
+
+    assert (
+        metadata["canonical_production_universe"]
+        is True
+    )
+
+    assert (
+        metadata["production_asset_count"]
+        == 14
+    )
+
+    assert (
+        metadata["production_assets"]
+        == list(
+            PRODUCTION_ASSETS
+        )
+    )
+
+
+def test_production_composition_asset_universe() -> None:
+    """
+    Verify that ProductionComposition consumes the canonical
+    14-asset production AssetUniverse.
+    """
+
+    composition = (
+        ProductionComposition()
+    )
+
+    components = (
+        composition.build_components()
+    )
+
+    universe = (
+        components.asset_universe
+    )
+
+    assert isinstance(
+        universe,
+        AssetUniverse,
+    )
+
+    assert (
+        universe.is_production_universe
+        is True
+    )
+
+    assert (
+        universe.size
+        == 14
+    )
+
+    assert (
+        universe.PRODUCTION_ASSET_COUNT
+        == 14
+    )
+
+    assert (
+        universe.tickers
+        == sorted(
+            PRODUCTION_ASSETS
+        )
+    )
+
+    assert (
+        set(
+            universe.tickers
+        )
+        == set(
+            PRODUCTION_ASSETS
+        )
+    )
+
+    assert (
+        len(
+            set(
+                universe.tickers
+            )
+        )
+        == 14
+    )
+
+    assert universe.health_check()
+
+
+def test_production_composition_component_registry() -> None:
+    """
+    Verify that all mandatory production components are present.
+    """
+
+    composition = (
+        ProductionComposition()
+    )
+
+    components = (
+        composition.build_components()
+    )
+
+    for component_name in (
+        ProductionComposition.REQUIRED_COMPONENTS
+    ):
+
+        component = getattr(
+            components,
+            component_name,
+        )
+
+        assert component is not None
 
 
 def test_covariance_ensemble_composition() -> None:
@@ -1221,6 +1699,63 @@ def test_covariance_ensemble_composition() -> None:
     )
 
 
+def test_production_composition_engine_uses_14_assets() -> None:
+    """
+    Verify that the final PortfolioDecisionEngine receives the
+    canonical 14-asset production universe.
+    """
+
+    composition = (
+        ProductionComposition()
+    )
+
+    engine = (
+        composition.build_engine()
+    )
+
+    assert engine is not None
+
+    assert hasattr(
+        engine,
+        "asset_universe",
+    )
+
+    universe = (
+        engine.asset_universe
+    )
+
+    assert isinstance(
+        universe,
+        AssetUniverse,
+    )
+
+    assert (
+        universe.is_production_universe
+        is True
+    )
+
+    assert (
+        universe.size
+        == 14
+    )
+
+    assert (
+        set(
+            universe.tickers
+        )
+        == set(
+            PRODUCTION_ASSETS
+        )
+    )
+
+    assert (
+        len(
+            universe.tickers
+        )
+        == 14
+    )
+
+
 def test_production_composition_health() -> None:
 
     composition = (
@@ -1251,9 +1786,25 @@ def test_production_composition_health() -> None:
         in result
     )
 
+    assert (
+        result[
+            "production_asset_count"
+        ]
+        == 14
+    )
+
+    assert (
+        result[
+            "production_assets"
+        ]
+        == list(
+            PRODUCTION_ASSETS
+        )
+    )
+
 
 # ======================================================================
-# SECTION 18
+# SECTION 19
 # REGRESSION ENTRY POINT
 # ======================================================================
 
@@ -1262,7 +1813,13 @@ def run_regression_tests() -> None:
 
     test_production_composition_metadata()
 
+    test_production_composition_asset_universe()
+
+    test_production_composition_component_registry()
+
     test_covariance_ensemble_composition()
+
+    test_production_composition_engine_uses_14_assets()
 
     test_production_composition_health()
 
@@ -1272,7 +1829,7 @@ def run_regression_tests() -> None:
 
 
 # ======================================================================
-# SECTION 19
+# SECTION 20
 # MODULE ENTRY POINT
 # ======================================================================
 
@@ -1303,6 +1860,18 @@ if __name__ == "__main__":
 
     print(
         composition.metadata()
+    )
+
+    print()
+
+    print(
+        "CANONICAL PRODUCTION ASSETS:"
+    )
+
+    print(
+        list(
+            PRODUCTION_ASSETS
+        )
     )
 
     print()

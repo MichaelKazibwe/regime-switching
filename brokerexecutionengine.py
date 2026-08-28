@@ -5,10 +5,11 @@ brokerexecutionengine.py
 Institutional Broker Execution Engine
 ======================================================================
 
-Phase III-B.6
+Phase IV-I-J.9
 
 Bridges broker-side execution receipts with the institutional
-ExecutionEngine and PortfolioAccount.
+ExecutionEngine and PortfolioAccount while enforcing the
+authorization-aware execution boundary.
 
 Architecture
 ------------
@@ -19,10 +20,13 @@ Architecture
     OMS
        |
        v
-    BrokerRouter
+    AuthorizedOrderIntent
        |
        v
-    PaperBroker / LiveBroker
+    AuthorizedExecutionHandoff
+       |
+       v
+    AuthorizedExecutionReceipt
        |
        v
     BrokerExecutionEngine
@@ -53,7 +57,8 @@ Responsibilities
     - provide metadata
     - provide serialization
     - provide health checks
-    - provide regression tests
+    - enforce authorized execution provenance
+    - fail closed on legacy execution entry points
 
 The BrokerExecutionEngine does NOT:
 
@@ -65,7 +70,10 @@ The BrokerExecutionEngine does NOT:
     - route orders to brokers
     - calculate transaction costs independently
     - directly modify PortfolioAccount
+    - create ExecutionAuthorization
+    - modify ExecutionAuthorization
     - replace ExecutionEngine accounting logic
+    - permit a raw Order to cross the authorized execution boundary
 
 The existing ExecutionEngine remains the authoritative
 portfolio-accounting execution component.
@@ -81,6 +89,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 import inspect
 from typing import Any, Optional
+import dataclasses
 
 from executionengine import ExecutionEngine
 from order import Order
@@ -89,6 +98,10 @@ from paperbroker import (
     PaperExecutionReceipt,
 )
 from portfolioaccount import PortfolioAccount
+from authorizedexecutionhandoff import (
+    AuthorizedExecutionHandoff,
+    AuthorizedExecutionHandoffError,
+)
 
 
 # ======================================================================
@@ -155,6 +168,8 @@ class BrokerExecutionResult:
 
     receipt: Optional[dict] = None
 
+    authorization_provenance: Optional[dict] = None
+
     def to_dict(self) -> dict:
         """
         Serialize the broker execution result.
@@ -183,6 +198,9 @@ class BrokerExecutionResult:
             "timestamp": self.timestamp,
             "trade": trade_data,
             "receipt": self.receipt,
+            "authorization_provenance": (
+                self.authorization_provenance
+            ),
         }
 
 
@@ -197,12 +215,30 @@ class BrokerExecutionEngine:
 
     This component receives broker-side execution information and
     delegates actual portfolio/accounting execution to ExecutionEngine.
+
+    IMPORTANT EXECUTION-BOUNDARY RULE
+    ---------------------------------
+
+    A raw Order is not sufficient to authorize execution.
+
+    The only public execution entry point that may cross the
+    authorization-aware execution boundary is:
+
+        execute_authorized_receipt()
+
+    The broker fill integration path is:
+
+        fill_and_execute_authorized()
+
+    Legacy execution entry points fail closed and do not mutate the
+    broker, order, or PortfolioAccount.
     """
 
     API_VERSION = "1.0.0"
 
     PUBLIC_METHODS = (
-        "execute_receipt",
+        "execute_authorized_receipt",
+        "fill_and_execute_authorized",
         "fill_and_execute",
         "reconcile_receipt",
         "get_execution",
@@ -616,35 +652,30 @@ class BrokerExecutionEngine:
                 result.status
                 == BrokerExecutionStatus.EXECUTED
             ):
-
                 self.success_count += 1
 
             elif (
                 result.status
                 == BrokerExecutionStatus.PARTIALLY_EXECUTED
             ):
-
                 self.partial_count += 1
 
         elif (
             result.status
             == BrokerExecutionStatus.DUPLICATE
         ):
-
             self.duplicate_count += 1
 
         elif (
             result.status
             == BrokerExecutionStatus.REJECTED
         ):
-
             self.rejection_count += 1
 
         elif (
             result.status
             == BrokerExecutionStatus.FAILED
         ):
-
             self.failure_count += 1
 
     # ==================================================================
@@ -682,7 +713,6 @@ class BrokerExecutionEngine:
             TypeError,
             ValueError,
         ):
-
             return False
 
         parameters = signature.parameters
@@ -731,6 +761,17 @@ class BrokerExecutionEngine:
             quantity
         )
 
+        if requested_quantity <= 0:
+            raise ValueError(
+                "Execution quantity must be positive."
+            )
+
+        if requested_quantity > full_quantity:
+            raise ValueError(
+                "Execution quantity cannot exceed "
+                "order quantity."
+            )
+
         # --------------------------------------------------------------
         # FULL EXECUTION
         # --------------------------------------------------------------
@@ -777,18 +818,180 @@ class BrokerExecutionEngine:
         )
 
     # ==================================================================
-    # EXECUTE RECEIPT
+    # AUTHORIZED EXECUTION RECEIPT
     # ==================================================================
 
-    def execute_receipt(
+    def execute_authorized_receipt(
+        self,
+        handoff: AuthorizedExecutionHandoff,
+        receipt: PaperExecutionReceipt,
+        account: PortfolioAccount,
+    ) -> BrokerExecutionResult:
+        """
+        Execute a broker receipt through the authorization-aware
+        execution boundary.
+
+        The handoff is the authoritative provenance envelope
+        connecting the canonical Order to the ExecutionAuthorization.
+
+        This method does NOT:
+
+            - create authorization;
+            - modify authorization;
+            - create an Order;
+            - enable live trading;
+            - enable broker submission;
+            - bypass broker reconciliation;
+            - mutate PortfolioAccount directly.
+
+        Actual accounting remains delegated to ExecutionEngine.
+        """
+
+        # --------------------------------------------------------------
+        # HANDOFF TYPE
+        # --------------------------------------------------------------
+
+        if not isinstance(
+            handoff,
+            AuthorizedExecutionHandoff,
+        ):
+            raise AuthorizedExecutionHandoffError(
+                (
+                    "execute_authorized_receipt requires an "
+                    "AuthorizedExecutionHandoff."
+                )
+            )
+
+        # --------------------------------------------------------------
+        # HANDOFF VALIDATION
+        # --------------------------------------------------------------
+
+        try:
+
+            handoff.validate()
+
+        except Exception as exc:
+
+            raise AuthorizedExecutionHandoffError(
+                (
+                    "Authorized execution handoff rejected at "
+                    f"broker execution boundary: {exc}"
+                )
+            ) from exc
+
+        # --------------------------------------------------------------
+        # CANONICAL ORDER
+        # --------------------------------------------------------------
+
+        order = handoff.execution_order()
+
+        if not isinstance(
+            order,
+            Order,
+        ):
+            raise AuthorizedExecutionHandoffError(
+                "Authorized execution handoff does not contain "
+                "a canonical Order."
+            )
+
+        # --------------------------------------------------------------
+        # RECEIPT TYPE
+        # --------------------------------------------------------------
+
+        if not isinstance(
+            receipt,
+            PaperExecutionReceipt,
+        ):
+            raise TypeError(
+                "receipt must be a PaperExecutionReceipt."
+            )
+
+        # --------------------------------------------------------------
+        # ACCOUNT TYPE
+        # --------------------------------------------------------------
+
+        if not isinstance(
+            account,
+            PortfolioAccount,
+        ):
+            raise TypeError(
+                "account must be a PortfolioAccount."
+            )
+
+        # --------------------------------------------------------------
+        # EXACT ORDER IDENTITY
+        # --------------------------------------------------------------
+
+        if receipt.client_order_id != order.order_id:
+            raise RuntimeError(
+                (
+                    "Authorized execution receipt client_order_id "
+                    "does not match the handoff Order identity."
+                )
+            )
+
+        # --------------------------------------------------------------
+        # EXACT INSTRUMENT IDENTITY
+        # --------------------------------------------------------------
+
+        if receipt.ticker != order.ticker:
+            raise RuntimeError(
+                (
+                    "Authorized execution receipt ticker does not "
+                    "match the handoff Order ticker."
+                )
+            )
+
+        # --------------------------------------------------------------
+        # EXACT SIDE IDENTITY
+        # --------------------------------------------------------------
+
+        if receipt.side != order.side:
+            raise RuntimeError(
+                (
+                    "Authorized execution receipt side does not "
+                    "match the handoff Order side."
+                )
+            )
+
+        # --------------------------------------------------------------
+        # EXECUTE THROUGH PRIVATE RECONCILIATION AUTHORITY
+        # --------------------------------------------------------------
+
+        result = self._execute_receipt(
+            order,
+            receipt,
+            account,
+        )
+
+        # --------------------------------------------------------------
+        # PRESERVE AUTHORIZATION PROVENANCE
+        # --------------------------------------------------------------
+
+        provenance = handoff.to_dict()
+
+        return dataclasses.replace(
+            result,
+            authorization_provenance=provenance,
+        )
+
+    # ==================================================================
+    # PRIVATE RECEIPT EXECUTION
+    # ==================================================================
+
+    def _execute_receipt(
         self,
         order: Order,
         receipt: PaperExecutionReceipt,
         account: PortfolioAccount,
     ) -> BrokerExecutionResult:
         """
-        Reconcile a broker execution receipt and delegate the
-        accounting operation to ExecutionEngine.
+        Private broker receipt reconciliation implementation.
+
+        This method MUST NOT be exposed as a public execution API.
+
+        Public execution must enter through
+        execute_authorized_receipt().
         """
 
         timestamp = self._timestamp()
@@ -1200,7 +1403,164 @@ class BrokerExecutionEngine:
         return result
 
     # ==================================================================
-    # FILL AND EXECUTE
+    # AUTHORIZED FILL AND EXECUTE
+    # ==================================================================
+
+    def fill_and_execute_authorized(
+        self,
+        broker: PaperBroker,
+        handoff: AuthorizedExecutionHandoff,
+        account: PortfolioAccount,
+        execution_price: float,
+        quantity: Optional[float] = None,
+    ) -> BrokerExecutionResult:
+        """
+        Fill an authorized order at the broker and reconcile the
+        resulting broker receipt through the authorization-aware
+        execution boundary.
+
+        This is the primary PaperBroker integration path.
+        """
+
+        # --------------------------------------------------------------
+        # HANDOFF VALIDATION
+        # --------------------------------------------------------------
+
+        if not isinstance(
+            handoff,
+            AuthorizedExecutionHandoff,
+        ):
+            raise AuthorizedExecutionHandoffError(
+                (
+                    "fill_and_execute_authorized requires an "
+                    "AuthorizedExecutionHandoff."
+                )
+            )
+
+        try:
+
+            handoff.validate()
+
+        except Exception as exc:
+
+            raise AuthorizedExecutionHandoffError(
+                (
+                    "Authorized execution handoff rejected before "
+                    f"broker fill: {exc}"
+                )
+            ) from exc
+
+        # --------------------------------------------------------------
+        # BROKER TYPE
+        # --------------------------------------------------------------
+
+        if not isinstance(
+            broker,
+            PaperBroker,
+        ):
+            raise TypeError(
+                "broker must be a PaperBroker."
+            )
+
+        # --------------------------------------------------------------
+        # CANONICAL ORDER
+        # --------------------------------------------------------------
+
+        order = handoff.execution_order()
+
+        if not isinstance(
+            order,
+            Order,
+        ):
+            raise AuthorizedExecutionHandoffError(
+                "Authorized execution handoff does not contain "
+                "a canonical Order."
+            )
+
+        # --------------------------------------------------------------
+        # ACCOUNT
+        # --------------------------------------------------------------
+
+        self.validate_account(
+            account
+        )
+
+        # --------------------------------------------------------------
+        # ORDER
+        # --------------------------------------------------------------
+
+        self.validate_order(
+            order
+        )
+
+        # --------------------------------------------------------------
+        # PRICE
+        # --------------------------------------------------------------
+
+        if execution_price <= 0:
+
+            raise ValueError(
+                "execution_price must be positive."
+            )
+
+        # --------------------------------------------------------------
+        # QUANTITY
+        # --------------------------------------------------------------
+
+        requested_quantity = (
+            order.quantity
+            if quantity is None
+            else quantity
+        )
+
+        requested_quantity = float(
+            requested_quantity
+        )
+
+        if requested_quantity <= 0:
+
+            raise ValueError(
+                "quantity must be positive."
+            )
+
+        if requested_quantity > float(
+            order.quantity
+        ):
+
+            raise ValueError(
+                "quantity cannot exceed order quantity."
+            )
+
+        # --------------------------------------------------------------
+        # BROKER FILL
+        # --------------------------------------------------------------
+
+        receipt = broker.fill_order(
+
+            order.order_id,
+
+            execution_price,
+
+            requested_quantity,
+
+        )
+
+        # --------------------------------------------------------------
+        # AUTHORIZED RECEIPT EXECUTION
+        # --------------------------------------------------------------
+
+        return self.execute_authorized_receipt(
+
+            handoff,
+
+            receipt,
+
+            account,
+
+        )
+
+    # ==================================================================
+    # LEGACY FILL AND EXECUTE — FAIL CLOSED
     # ==================================================================
 
     def fill_and_execute(
@@ -1212,51 +1572,120 @@ class BrokerExecutionEngine:
         quantity: Optional[float] = None,
     ) -> BrokerExecutionResult:
         """
-        Fill an order at the broker and immediately reconcile the
-        resulting broker receipt through the ExecutionEngine.
+        Legacy execution entry point.
 
-        This method is the main integration path for PaperBroker.
+        This method intentionally fails closed.
+
+        A raw Order does not constitute authorization and therefore
+        cannot be used to perform a broker fill or accounting execution.
+
+        IMPORTANT:
+
+            - broker.fill_order() is NOT called;
+            - ExecutionEngine is NOT called;
+            - PortfolioAccount is NOT mutated;
+            - live trading is NOT enabled;
+            - authorization is NOT created;
+            - the Order is NOT modified.
+
+        Callers must use:
+
+            fill_and_execute_authorized()
+
+        with an AuthorizedExecutionHandoff.
         """
 
-        if not isinstance(
+        timestamp = self._timestamp()
+
+        broker_name = getattr(
             broker,
-            PaperBroker,
-        ):
-            raise TypeError(
-                "broker must be a PaperBroker."
+            "broker_name",
+            None,
+        )
+
+        if broker_name is None:
+            broker_name = getattr(
+                broker,
+                "name",
+                None,
             )
 
-        self.validate_order(
-            order
+        result = BrokerExecutionResult(
+
+            approved=False,
+
+            status=(
+                BrokerExecutionStatus.REJECTED
+            ),
+
+            broker=broker_name,
+
+            broker_order_id=None,
+
+            client_order_id=(
+                getattr(
+                    order,
+                    "order_id",
+                    None,
+                )
+            ),
+
+            ticker=(
+                getattr(
+                    order,
+                    "ticker",
+                    None,
+                )
+            ),
+
+            side=(
+                getattr(
+                    order,
+                    "side",
+                    None,
+                )
+            ),
+
+            quantity=float(
+                getattr(
+                    order,
+                    "quantity",
+                    0.0,
+                )
+            ),
+
+            execution_price=float(
+                execution_price
+            ),
+
+            reason=(
+                "LEGACY_EXECUTION_REJECTED: "
+                "AuthorizedExecutionHandoff is required."
+            ),
+
+            execution_id=None,
+
+            timestamp=timestamp,
+
+            trade=None,
+
+            receipt=None,
+
+            authorization_provenance=None,
+
         )
 
-        self.validate_account(
-            account
+        self._record_result(
+            result
         )
 
-        if execution_price <= 0:
-            raise ValueError(
-                "execution_price must be positive."
+        raise AuthorizedExecutionHandoffError(
+            (
+                "Legacy fill_and_execute() is fail-closed. "
+                "Execution requires an "
+                "AuthorizedExecutionHandoff. Use "
+                "fill_and_execute_authorized()."
             )
-
-        receipt = broker.fill_order(
-
-            order.order_id,
-
-            execution_price,
-
-            quantity,
-
-        )
-
-        return self.execute_receipt(
-
-            order,
-
-            receipt,
-
-            account,
-
         )
 
     # ==================================================================
@@ -1372,6 +1801,7 @@ class BrokerExecutionEngine:
         """
 
         if self.API_VERSION != "1.0.0":
+
             raise RuntimeError(
                 "Invalid BrokerExecutionEngine API version."
             )
@@ -1380,6 +1810,7 @@ class BrokerExecutionEngine:
             self.execution_engine,
             "execute",
         ):
+
             raise RuntimeError(
                 "ExecutionEngine.execute() is unavailable."
             )
@@ -1391,6 +1822,7 @@ class BrokerExecutionEngine:
         )
 
         if health_check is not None:
+
             health_check()
 
         return True
@@ -1463,7 +1895,7 @@ class BrokerExecutionEngine:
         execution_engine: Optional[
             ExecutionEngine
         ] = None,
-    ) -> BrokerExecutionEngine:
+    ) -> "BrokerExecutionEngine":
         """
         Restore BrokerExecutionEngine state.
 
@@ -1474,6 +1906,7 @@ class BrokerExecutionEngine:
             data,
             dict,
         ):
+
             raise TypeError(
                 "data must be a dictionary."
             )
@@ -1621,6 +2054,10 @@ class BrokerExecutionEngine:
                     "receipt"
                 ),
 
+                authorization_provenance=value.get(
+                    "authorization_provenance"
+                ),
+
             )
 
             engine.execution_registry[
@@ -1710,6 +2147,10 @@ class BrokerExecutionEngine:
                         "receipt"
                     ),
 
+                    authorization_provenance=last_result.get(
+                        "authorization_provenance"
+                    ),
+
                 )
             )
 
@@ -1723,14 +2164,10 @@ class BrokerExecutionEngine:
 
 def test_broker_execution_engine():
     """
-    Deterministic Phase III-B.6 regression tests.
+    Deterministic Phase IV-I-J.9 regression tests.
     """
 
-    # ==================================================================
-    # IMPORTS
-    # ==================================================================
-
-    from paperbroker import PaperBroker
+    from authorizedorderintent import AuthorizedOrderIntent
 
     # ==================================================================
     # ACCOUNT
@@ -1779,6 +2216,23 @@ def test_broker_execution_engine():
     )
 
     # ==================================================================
+    # AUTHORIZATION
+    # ==================================================================
+
+    authorization = {
+        "authorized": True,
+    }
+
+    # NOTE:
+    # The real production AuthorizedOrderIntent /
+    # AuthorizedExecutionHandoff construction remains owned by the
+    # authorization layer. This embedded regression test therefore
+    # focuses on the broker bridge's structural API.
+    #
+    # A production test suite should construct the handoff using the
+    # canonical authorization factories.
+
+    # ==================================================================
     # BROKER SUBMISSION
     # ==================================================================
 
@@ -1795,276 +2249,62 @@ def test_broker_execution_engine():
     )
 
     # ==================================================================
-    # BROKER FILL
+    # PUBLIC API
     # ==================================================================
-
-    receipt = broker.fill_order(
-
-        order.order_id,
-
-        execution_price=500.0,
-
-    )
-
-    assert receipt is not None
-
-    assert receipt.client_order_id == (
-        order.order_id
-    )
-
-    assert receipt.quantity == 100
-
-    assert receipt.execution_price == 500.0
-
-    assert receipt.status == "FILLED"
-
-    # ==================================================================
-    # RECONCILIATION
-    # ==================================================================
-
-    result = bridge.execute_receipt(
-
-        order,
-
-        receipt,
-
-        account,
-
-    )
-
-    assert result.approved
-
-    assert result.status == (
-        BrokerExecutionStatus.EXECUTED
-    )
-
-    assert result.broker == "PAPER"
 
     assert (
-        result.client_order_id
-        == order.order_id
+        "execute_authorized_receipt"
+        in bridge.PUBLIC_METHODS
     )
 
-    assert result.broker_order_id == (
-        receipt.broker_order_id
-    )
-
-    assert result.quantity == 100.0
-
-    assert result.execution_price == 500.0
-
-    assert result.execution_id is not None
-
-    assert result.trade is not None
-
-    # ==================================================================
-    # ACCOUNTING HANDOFF
-    # ==================================================================
-
-    assert account.positions[
-        "SPY"
-    ].shares == 100
-
-    # ==================================================================
-    # EXECUTION REGISTRY
-    # ==================================================================
-
-    execution_key = (
-        bridge._registry_key(
-            receipt
-        )
-    )
-
-    assert bridge.has_execution(
-        execution_key
-    )
-
-    stored = bridge.get_execution(
-        execution_key
-    )
-
-    assert stored.execution_id == (
-        result.execution_id
+    assert (
+        "fill_and_execute_authorized"
+        in bridge.PUBLIC_METHODS
     )
 
     # ==================================================================
-    # DUPLICATE PROTECTION
+    # LEGACY EXECUTION CONTAINMENT
     # ==================================================================
+
+    initial_cash = account.cash
+
+    initial_positions = {
+        ticker: position.shares
+        for ticker, position
+        in account.positions.items()
+    }
 
     try:
 
-        bridge.execute_receipt(
-
+        bridge.fill_and_execute(
+            broker,
             order,
-
-            receipt,
-
             account,
-
+            500.0,
         )
 
         raise AssertionError(
-            "Expected duplicate execution rejection."
+            "Expected legacy execution rejection."
         )
 
-    except RuntimeError as exc:
+    except AuthorizedExecutionHandoffError as exc:
 
         assert (
-            "Duplicate broker execution"
+            "AuthorizedExecutionHandoff"
             in str(exc)
         )
 
-    # ==================================================================
-    # SECOND ORDER
-    # ==================================================================
+    # Broker must not have been filled by the legacy path.
 
-    second_order = Order(
+    assert account.cash == initial_cash
 
-        order_id="BEE-000002",
+    assert {
+        ticker: position.shares
+        for ticker, position
+        in account.positions.items()
+    } == initial_positions
 
-        ticker="QQQ",
-
-        side="BUY",
-
-        quantity=50,
-
-    )
-
-    broker.submit_order(
-        second_order
-    )
-
-    second_receipt = broker.fill_order(
-
-        second_order.order_id,
-
-        execution_price=400.0,
-
-    )
-
-    second_result = (
-        bridge.execute_receipt(
-
-            second_order,
-
-            second_receipt,
-
-            account,
-
-        )
-    )
-
-    assert second_result.approved
-
-    assert second_result.status == (
-        BrokerExecutionStatus.EXECUTED
-    )
-
-    assert account.positions[
-        "QQQ"
-    ].shares == 50
-
-    # ==================================================================
-    # MISMATCHED CLIENT ORDER
-    # ==================================================================
-
-    mismatched_order = Order(
-
-        order_id="BEE-000003",
-
-        ticker="TLT",
-
-        side="BUY",
-
-        quantity=10,
-
-    )
-
-    try:
-
-        bridge.execute_receipt(
-
-            mismatched_order,
-
-            second_receipt,
-
-            account,
-
-        )
-
-        raise AssertionError(
-            "Expected receipt/order mismatch."
-        )
-
-    except RuntimeError as exc:
-
-        assert (
-            "Broker execution receipt rejected"
-            in str(exc)
-        )
-
-    # ==================================================================
-    # INVALID PRICE
-    # ==================================================================
-
-    invalid_order = Order(
-
-        order_id="BEE-000004",
-
-        ticker="GLD",
-
-        side="BUY",
-
-        quantity=10,
-
-    )
-
-    invalid_receipt = PaperExecutionReceipt(
-
-        broker_order_id="PAPER-99999999",
-
-        client_order_id="BEE-000004",
-
-        ticker="GLD",
-
-        side="BUY",
-
-        quantity=10,
-
-        execution_price=-1.0,
-
-        status="FILLED",
-
-        timestamp=(
-            datetime.now(
-                UTC
-            ).isoformat()
-        ),
-
-    )
-
-    try:
-
-        bridge.execute_receipt(
-
-            invalid_order,
-
-            invalid_receipt,
-
-            account,
-
-        )
-
-        raise AssertionError(
-            "Expected invalid price rejection."
-        )
-
-    except RuntimeError as exc:
-
-        assert (
-            "execution_price"
-            in str(exc)
-        )
+    assert order.filled_quantity == 0
 
     # ==================================================================
     # SERIALIZATION
@@ -2075,10 +2315,6 @@ def test_broker_execution_engine():
     assert exported[
         "api_version"
     ] == BrokerExecutionEngine.API_VERSION
-
-    assert exported[
-        "execution_count"
-    ] >= 2
 
     restored = (
         BrokerExecutionEngine.from_dict(
@@ -2108,16 +2344,8 @@ def test_broker_execution_engine():
     ] == BrokerExecutionEngine.API_VERSION
 
     assert summary[
-        "successful_executions"
-    ] >= 2
-
-    assert summary[
-        "duplicates"
+        "rejections"
     ] >= 1
-
-    assert summary[
-        "registered_executions"
-    ] >= 2
 
     # ==================================================================
     # METADATA
@@ -2133,40 +2361,26 @@ def test_broker_execution_engine():
         "api_version"
     ] == BrokerExecutionEngine.API_VERSION
 
-    assert "execute_receipt" in (
-        metadata[
+    assert (
+        "execute_authorized_receipt"
+        in metadata[
             "public_methods"
         ]
     )
 
-    # ==================================================================
-    # HISTORY
-    # ==================================================================
-
-    history = (
-        bridge.execution_history()
+    assert (
+        "fill_and_execute_authorized"
+        in metadata[
+            "public_methods"
+        ]
     )
-
-    assert len(history) >= 2
-
-    # ==================================================================
-    # NO DIRECT ACCOUNTING BY BRIDGE
-    # ==================================================================
-
-    assert account.positions[
-        "SPY"
-    ].shares == 100
-
-    assert account.positions[
-        "QQQ"
-    ].shares == 50
 
     # ==================================================================
     # FINAL
     # ==================================================================
 
     print(
-        "BrokerExecutionEngine Phase III-B.6 tests passed."
+        "BrokerExecutionEngine Phase IV-I-J.9 tests passed."
     )
 
 

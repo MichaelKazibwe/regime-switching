@@ -9,17 +9,23 @@ Production integration boundary for the institutional portfolio stack.
 Phase IV-B.2 proves that the production dependency graph assembled by
 ProductionComposition can execute an end-to-end portfolio decision.
 
+The production portfolio is based on the canonical 14-asset universe
+defined by AssetUniverse.production().
+
 Design principles
 -----------------
 1. ProductionComposition owns dependency construction.
 2. ProductionIntegration owns integration validation.
-3. PortfolioDecisionEngine owns decision orchestration.
-4. PortfolioOptimizer owns portfolio optimization.
-5. RiskBudgetEngine owns risk budgeting.
-6. No optimization logic is duplicated here.
-7. No trading or broker execution occurs in this phase.
-8. Test doubles are not permitted at the production boundary.
-9. Failures must remain explicit and auditable.
+3. AssetUniverse owns the canonical production asset universe.
+4. PortfolioDecisionEngine owns decision orchestration.
+5. PortfolioOptimizer owns portfolio optimization.
+6. RiskBudgetEngine owns risk budgeting.
+7. No optimization logic is duplicated here.
+8. No trading or broker execution occurs in this phase.
+9. Test doubles are not permitted at the production boundary.
+10. Production inputs must align to the canonical 14 assets.
+11. Historical macro series and scalar macro observations are supported.
+12. Failures remain explicit and auditable.
 """
 
 # ======================================================================
@@ -27,29 +33,22 @@ Design principles
 # IMPORTS
 # ======================================================================
 
-# ----------------------------------------------------------------------
-# 1.1 STANDARD LIBRARY
-# ----------------------------------------------------------------------
-
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+
 import numpy as np
 
-# ----------------------------------------------------------------------
-# 1.2 PRODUCTION COMPOSITION
-# ----------------------------------------------------------------------
+from assetuniverse import (
+    AssetUniverse,
+    PRODUCTION_ASSETS,
+)
 
 from productioncomposition import (
     ProductionComposition,
     ProductionCompositionError,
 )
-
-
-# ----------------------------------------------------------------------
-# 1.3 DECISION ENGINE
-# ----------------------------------------------------------------------
 
 from portfoliodecisionengine import (
     PortfolioDecision,
@@ -115,9 +114,23 @@ class ProductionIntegration:
 
     This class does not implement portfolio mathematics.
 
-    It validates the production dependency graph, validates production
-    inputs, invokes PortfolioDecisionEngine, and validates the resulting
-    decision.
+    It validates:
+
+        AssetUniverse
+                |
+                v
+        Production inputs
+                |
+                v
+        ProductionComposition
+                |
+                v
+        PortfolioDecisionEngine
+                |
+                v
+        PortfolioDecision
+
+    The canonical production universe contains exactly 14 assets.
     """
 
     # ------------------------------------------------------------------
@@ -133,7 +146,32 @@ class ProductionIntegration:
     )
 
     # ------------------------------------------------------------------
-    # 4.2 REQUIRED ENGINE COMPONENTS
+    # 4.2 CANONICAL PRODUCTION ASSETS
+    # ------------------------------------------------------------------
+
+    PRODUCTION_ASSETS = (
+        "SPY",
+        "QQQ",
+        "IWM",
+        "VEA",
+        "VWO",
+        "TLT",
+        "IEF",
+        "SHY",
+        "LQD",
+        "HYG",
+        "GLD",
+        "SLV",
+        "DBC",
+        "VNQ",
+    )
+
+    PRODUCTION_ASSET_COUNT = (
+        len(PRODUCTION_ASSETS)
+    )
+
+    # ------------------------------------------------------------------
+    # 4.3 REQUIRED ENGINE COMPONENTS
     # ------------------------------------------------------------------
 
     REQUIRED_COMPONENTS = (
@@ -152,7 +190,7 @@ class ProductionIntegration:
     )
 
     # ==================================================================
-    # 4.3 CONSTRUCTOR
+    # 4.4 CONSTRUCTOR
     # ==================================================================
 
     def __init__(
@@ -180,9 +218,12 @@ class ProductionIntegration:
             else ProductionComposition()
         )
 
-        self.engine = None
+        self.engine: Any = None
 
-        self.last_result = None
+        self.last_result: (
+            ProductionIntegrationResult
+            | None
+        ) = None
 
         self.execution_count = 0
 
@@ -192,12 +233,101 @@ class ProductionIntegration:
 
     # ==================================================================
     # SECTION 5
-    # ENGINE CONSTRUCTION
+    # CANONICAL UNIVERSE VALIDATION
     # ==================================================================
 
-    # ------------------------------------------------------------------
-    # 5.1 BUILD ENGINE
-    # ------------------------------------------------------------------
+    @classmethod
+    def _canonical_asset_set(
+        cls,
+    ) -> set[str]:
+
+        return set(
+            cls.PRODUCTION_ASSETS
+        )
+
+    @classmethod
+    def _validate_canonical_universe(
+        cls,
+        universe: Any,
+    ) -> None:
+        """
+        Validate that the supplied AssetUniverse is the canonical
+        14-asset production universe.
+        """
+
+        if universe is None:
+
+            raise ProductionIntegrationError(
+                "Production asset universe cannot be None."
+            )
+
+        if not hasattr(
+            universe,
+            "tickers",
+        ):
+
+            raise ProductionIntegrationError(
+                (
+                    "Production asset universe must expose "
+                    "a tickers property."
+                )
+            )
+
+        tickers = list(
+            universe.tickers
+        )
+
+        if len(tickers) != (
+            cls.PRODUCTION_ASSET_COUNT
+        ):
+
+            raise ProductionIntegrationError(
+                (
+                    "Production asset universe must contain "
+                    f"exactly {cls.PRODUCTION_ASSET_COUNT} assets. "
+                    f"Got {len(tickers)}."
+                )
+            )
+
+        expected = (
+            cls._canonical_asset_set()
+        )
+
+        actual = set(
+            tickers
+        )
+
+        if actual != expected:
+
+            missing = sorted(
+                expected - actual
+            )
+
+            unexpected = sorted(
+                actual - expected
+            )
+
+            raise ProductionIntegrationError(
+                (
+                    "Production asset universe does not match "
+                    "the canonical 14-asset universe. "
+                    f"Missing: {missing}; "
+                    f"Unexpected: {unexpected}."
+                )
+            )
+
+        if len(
+            actual
+        ) != len(tickers):
+
+            raise ProductionIntegrationError(
+                "Production asset universe contains duplicate tickers."
+            )
+
+    # ==================================================================
+    # SECTION 6
+    # ENGINE CONSTRUCTION
+    # ==================================================================
 
     def _build_engine(
         self,
@@ -207,6 +337,7 @@ class ProductionIntegration:
         """
 
         if self.engine is not None:
+
             return self.engine
 
         try:
@@ -231,18 +362,22 @@ class ProductionIntegration:
                 "ProductionComposition returned None."
             )
 
+        self._validate_canonical_universe(
+            getattr(
+                engine,
+                "asset_universe",
+                None,
+            )
+        )
+
         self.engine = engine
 
         return engine
 
     # ==================================================================
-    # SECTION 6
+    # SECTION 7
     # DEPENDENCY VALIDATION
     # ==================================================================
-
-    # ------------------------------------------------------------------
-    # 6.1 COMPONENT EXISTENCE
-    # ------------------------------------------------------------------
 
     def _validate_dependencies(
         self,
@@ -251,6 +386,12 @@ class ProductionIntegration:
         """
         Validate the complete production dependency graph.
         """
+
+        if engine is None:
+
+            raise ProductionIntegrationError(
+                "Production decision engine cannot be None."
+            )
 
         missing: list[str] = []
 
@@ -281,6 +422,14 @@ class ProductionIntegration:
                     )
                 )
             )
+
+        # --------------------------------------------------------------
+        # ASSET UNIVERSE
+        # --------------------------------------------------------------
+
+        self._validate_canonical_universe(
+            engine.asset_universe
+        )
 
         # --------------------------------------------------------------
         # OPTIMIZER
@@ -334,21 +483,52 @@ class ProductionIntegration:
                 )
             )
 
+        # --------------------------------------------------------------
+        # VOLATILITY TARGETING
+        # --------------------------------------------------------------
+
+        if getattr(
+            optimizer,
+            "volatility_targeting",
+            None,
+        ) is None:
+
+            raise ProductionIntegrationError(
+                (
+                    "PortfolioOptimizer does not contain "
+                    "production volatility targeting."
+                )
+            )
+
     # ==================================================================
-    # SECTION 7
+    # SECTION 8
     # INPUT VALIDATION
     # ==================================================================
 
     # ------------------------------------------------------------------
-    # 7.1 PORTFOLIO
+    # 8.1 PORTFOLIO EXTRACTION
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _validate_portfolio(
+    @classmethod
+    def _extract_portfolio_weights(
+        cls,
         portfolio: Any,
-    ) -> None:
+    ) -> dict[str, Any]:
         """
-        Validate the portfolio input.
+        Extract ticker weights from the supported production portfolio
+        structure.
+
+        Supported form:
+
+            {
+                "weights": {
+                    "SPY": ...,
+                    ...
+                }
+            }
+
+        A direct ticker-to-weight dictionary is also accepted for
+        compatibility with the underlying decision engine.
         """
 
         if portfolio is None:
@@ -364,19 +544,91 @@ class ProductionIntegration:
 
             raise ProductionIntegrationError(
                 (
-                    "Portfolio input must be a "
-                    "dictionary of ticker weights."
+                    "Portfolio input must be a dictionary."
                 )
             )
 
-        if not portfolio:
+        if "weights" in portfolio:
+
+            weights = portfolio.get(
+                "weights"
+            )
+
+            if not isinstance(
+                weights,
+                dict,
+            ):
+
+                raise ProductionIntegrationError(
+                    (
+                        "Portfolio 'weights' field must "
+                        "be a dictionary."
+                    )
+                )
+
+            return dict(
+                weights
+            )
+
+        return dict(
+            portfolio
+        )
+
+    # ------------------------------------------------------------------
+    # 8.2 PORTFOLIO
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def _validate_portfolio(
+        cls,
+        portfolio: Any,
+    ) -> None:
+        """
+        Validate the production portfolio against the canonical
+        14-asset universe.
+        """
+
+        weights = (
+            cls._extract_portfolio_weights(
+                portfolio
+            )
+        )
+
+        if not weights:
 
             raise ProductionIntegrationError(
                 "Portfolio input cannot be empty."
             )
 
+        expected = (
+            cls._canonical_asset_set()
+        )
+
+        actual = set(
+            weights.keys()
+        )
+
+        if actual != expected:
+
+            missing = sorted(
+                expected - actual
+            )
+
+            unexpected = sorted(
+                actual - expected
+            )
+
+            raise ProductionIntegrationError(
+                (
+                    "Portfolio must contain exactly the "
+                    "canonical 14 production assets. "
+                    f"Missing: {missing}; "
+                    f"Unexpected: {unexpected}."
+                )
+            )
+
         for ticker, weight in (
-            portfolio.items()
+            weights.items()
         ):
 
             if not isinstance(
@@ -406,28 +658,61 @@ class ProductionIntegration:
                     )
                 ) from exc
 
-            if not (
+            if not np.isfinite(
                 numeric_weight
-                == numeric_weight
             ):
 
                 raise ProductionIntegrationError(
                     (
                         f"Portfolio weight for "
-                        f"'{ticker}' is NaN."
+                        f"'{ticker}' must be finite."
                     )
                 )
 
+            if numeric_weight < 0.0:
+
+                raise ProductionIntegrationError(
+                    (
+                        f"Portfolio weight for "
+                        f"'{ticker}' cannot be negative "
+                        "in the production long-only contract."
+                    )
+                )
+
+        total = sum(
+            float(weight)
+            for weight in weights.values()
+        )
+
+        if not np.isclose(
+            total,
+            1.0,
+            atol=1e-8,
+            rtol=0.0,
+        ):
+
+            raise ProductionIntegrationError(
+                (
+                    "Portfolio weights must sum to one. "
+                    f"Got {total}."
+                )
+            )
+
     # ------------------------------------------------------------------
-    # 7.2 RETURNS
+    # 8.3 RETURNS
     # ------------------------------------------------------------------
 
-    @staticmethod
+    @classmethod
     def _validate_returns(
+        cls,
         returns: Any,
     ) -> None:
         """
-        Validate the returns input.
+        Validate production return/price history.
+
+        The production decision engine may receive either return history
+        or price history, but the input must contain exactly the
+        canonical 14 assets.
         """
 
         if returns is None:
@@ -448,16 +733,100 @@ class ProductionIntegration:
                 )
             )
 
-        if len(
+        columns = list(
             returns.columns
-        ) == 0:
+        )
+
+        if not columns:
 
             raise ProductionIntegrationError(
                 "Returns input contains no assets."
             )
 
+        expected = (
+            cls._canonical_asset_set()
+        )
+
+        actual = set(
+            columns
+        )
+
+        if len(columns) != (
+            cls.PRODUCTION_ASSET_COUNT
+        ):
+
+            raise ProductionIntegrationError(
+                (
+                    "Production return history must contain "
+                    f"exactly {cls.PRODUCTION_ASSET_COUNT} assets. "
+                    f"Got {len(columns)}."
+                )
+            )
+
+        if actual != expected:
+
+            missing = sorted(
+                expected - actual
+            )
+
+            unexpected = sorted(
+                actual - expected
+            )
+
+            raise ProductionIntegrationError(
+                (
+                    "Production return history does not match "
+                    "the canonical 14-asset universe. "
+                    f"Missing: {missing}; "
+                    f"Unexpected: {unexpected}."
+                )
+            )
+
+        if hasattr(
+            returns,
+            "empty",
+        ) and returns.empty:
+
+            raise ProductionIntegrationError(
+                "Returns input cannot be empty."
+            )
+
+        # --------------------------------------------------------------
+        # NUMERIC / FINITE CHECK
+        # --------------------------------------------------------------
+
+        try:
+
+            values = np.asarray(
+                returns.to_numpy(),
+                dtype=float,
+            )
+
+        except Exception as exc:
+
+            raise ProductionIntegrationError(
+                (
+                    "Returns input contains "
+                    "non-numeric values."
+                )
+            ) from exc
+
+        if values.size == 0:
+
+            raise ProductionIntegrationError(
+                "Returns input contains no observations."
+            )
+
+        if not np.isfinite(
+            values
+        ).all():
+
+            raise ProductionIntegrationError(
+                "Returns input contains non-finite values."
+            )
+
     # ------------------------------------------------------------------
-    # 7.3 REGIMES
+    # 8.4 REGIMES
     # ------------------------------------------------------------------
 
     @staticmethod
@@ -466,6 +835,9 @@ class ProductionIntegration:
     ) -> None:
         """
         Validate regime information.
+
+        Supports pandas Series, arrays, lists and other sized
+        historical regime containers.
         """
 
         if regimes is None:
@@ -474,18 +846,191 @@ class ProductionIntegration:
                 "Regime information cannot be None."
             )
 
-        if not regimes:
+        try:
+
+            length = len(
+                regimes
+            )
+
+        except TypeError as exc:
+
+            raise ProductionIntegrationError(
+                (
+                    "Regime information must be "
+                    "a non-empty historical container."
+                )
+            ) from exc
+
+        if length == 0:
 
             raise ProductionIntegrationError(
                 "Regime information cannot be empty."
             )
 
+        # --------------------------------------------------------------
+        # FINITE / NULL-LIKE VALIDATION
+        # --------------------------------------------------------------
+
+        if hasattr(
+            regimes,
+            "isna",
+        ):
+
+            try:
+
+                missing = regimes.isna()
+
+                if bool(
+                    missing.any()
+                ):
+
+                    raise ProductionIntegrationError(
+                        "Regime information contains missing values."
+                    )
+
+            except ProductionIntegrationError:
+
+                raise
+
+            except Exception:
+
+                pass
+
     # ------------------------------------------------------------------
-    # 7.4 MACRO DATA
+    # 8.5 MACRO SERIES VALIDATION
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _validate_macro_series(
+        value: Any,
+        field_name: str,
+    ) -> None:
+        """
+        Validate a historical numeric macroeconomic series.
+        """
+
+        if value is None:
+
+            raise ProductionIntegrationError(
+                (
+                    f"Macro data '{field_name}' "
+                    "cannot be None."
+                )
+            )
+
+        # --------------------------------------------------------------
+        # SCALAR
+        # --------------------------------------------------------------
+
+        if np.isscalar(
+            value
+        ):
+
+            try:
+
+                numeric_value = float(
+                    value
+                )
+
+            except (
+                TypeError,
+                ValueError,
+            ) as exc:
+
+                raise ProductionIntegrationError(
+                    (
+                        f"Macro data '{field_name}' "
+                        "must be numeric."
+                    )
+                ) from exc
+
+            if not np.isfinite(
+                numeric_value
+            ):
+
+                raise ProductionIntegrationError(
+                    (
+                        f"Macro data '{field_name}' "
+                        "must be finite."
+                    )
+                )
+
+            return
+
+        # --------------------------------------------------------------
+        # HISTORICAL SERIES / ARRAY
+        # --------------------------------------------------------------
+
+        try:
+
+            length = len(
+                value
+            )
+
+        except TypeError as exc:
+
+            raise ProductionIntegrationError(
+                (
+                    f"Macro data '{field_name}' must be "
+                    "numeric or a historical numeric series."
+                )
+            ) from exc
+
+        if length == 0:
+
+            raise ProductionIntegrationError(
+                (
+                    f"Macro data '{field_name}' "
+                    "cannot be empty."
+                )
+            )
+
+        try:
+
+            numeric_values = np.asarray(
+                value,
+                dtype=float,
+            )
+
+        except (
+            TypeError,
+            ValueError,
+        ) as exc:
+
+            raise ProductionIntegrationError(
+                (
+                    f"Macro data '{field_name}' "
+                    "must contain numeric values."
+                )
+            ) from exc
+
+        if numeric_values.size == 0:
+
+            raise ProductionIntegrationError(
+                (
+                    f"Macro data '{field_name}' "
+                    "cannot be empty."
+                )
+            )
+
+        if not np.isfinite(
+            numeric_values
+        ).all():
+
+            raise ProductionIntegrationError(
+                (
+                    f"Macro data '{field_name}' "
+                    "contains non-finite values."
+                )
+            )
+
+    # ------------------------------------------------------------------
+    # 8.6 MACRO DATA
+    # ------------------------------------------------------------------
+
+    @classmethod
     def _validate_macro_data(
+        cls,
         macro_data: Any,
     ) -> None:
         """
@@ -493,14 +1038,15 @@ class ProductionIntegration:
 
         Required fields
         ---------------
+
         unemployment:
-            Historical unemployment series.
+            Historical unemployment series or scalar observation.
 
         yield_spread:
-            Current yield-curve spread.
+            Historical yield-curve spread series or scalar observation.
 
         inflation:
-            Current inflation measure.
+            Historical inflation series or scalar observation.
         """
 
         if macro_data is None:
@@ -533,93 +1079,30 @@ class ProductionIntegration:
         if missing:
 
             raise ProductionIntegrationError(
-                "Macro data is missing required fields: "
-                + ", ".join(missing)
-                + "."
-            )
-
-        unemployment = (
-            macro_data["unemployment"]
-        )
-
-        if unemployment is None:
-
-            raise ProductionIntegrationError(
-                "Macro data 'unemployment' cannot be None."
-            )
-
-        try:
-
-            if len(unemployment) == 0:
-
-                raise ProductionIntegrationError(
-                    "Macro data 'unemployment' cannot be empty."
+                (
+                    "Macro data is missing required fields: "
+                    + ", ".join(
+                        missing
+                    )
+                    + "."
                 )
-
-        except TypeError as exc:
-
-            raise ProductionIntegrationError(
-                "Macro data 'unemployment' must be a "
-                "non-empty historical series."
-            ) from exc
-
-        try:
-
-            yield_spread = float(
-                macro_data["yield_spread"]
             )
 
-        except (
-            TypeError,
-            ValueError,
-        ) as exc:
+        for field_name in required:
 
-            raise ProductionIntegrationError(
-                "Macro data 'yield_spread' must be numeric."
-            ) from exc
-
-        if not np.isfinite(
-            yield_spread
-        ):
-
-            raise ProductionIntegrationError(
-                "Macro data 'yield_spread' must be finite."
-            )
-
-        try:
-
-            inflation = float(
-                macro_data["inflation"]
-            )
-
-        except (
-            TypeError,
-            ValueError,
-        ) as exc:
-
-            raise ProductionIntegrationError(
-                "Macro data 'inflation' must be numeric."
-            ) from exc
-
-        if not np.isfinite(
-            inflation
-        ):
-
-            raise ProductionIntegrationError(
-                "Macro data 'inflation' must be finite."
+            cls._validate_macro_series(
+                macro_data[field_name],
+                field_name,
             )
 
     # ==================================================================
-    # SECTION 8
+    # SECTION 9
     # DECISION VALIDATION
     # ==================================================================
 
-    # ------------------------------------------------------------------
-    # 8.1 BASIC RESULT VALIDATION
-    # ------------------------------------------------------------------
-
-    @staticmethod
+    @classmethod
     def _validate_decision(
+        cls,
         decision: PortfolioDecision,
     ) -> None:
         """
@@ -652,7 +1135,7 @@ class ProductionIntegration:
             )
 
         # --------------------------------------------------------------
-        # APPROVED DECISIONS
+        # APPROVED DECISION
         # --------------------------------------------------------------
 
         if (
@@ -687,10 +1170,66 @@ class ProductionIntegration:
                     "Approved decision contains no weights."
                 )
 
+            # ----------------------------------------------------------
+            # TICKER INTEGRITY
+            # ----------------------------------------------------------
+
+            actual_tickers = set(
+                decision.tickers
+            )
+
+            expected_tickers = (
+                cls._canonical_asset_set()
+            )
+
+            if actual_tickers != expected_tickers:
+
+                missing = sorted(
+                    expected_tickers
+                    - actual_tickers
+                )
+
+                unexpected = sorted(
+                    actual_tickers
+                    - expected_tickers
+                )
+
+                raise ProductionIntegrationError(
+                    (
+                        "Approved decision does not contain "
+                        "the canonical 14 production assets. "
+                        f"Missing: {missing}; "
+                        f"Unexpected: {unexpected}."
+                    )
+                )
+
+            # ----------------------------------------------------------
+            # WEIGHT INTEGRITY
+            # ----------------------------------------------------------
+
+            if set(
+                decision.weights.keys()
+            ) != expected_tickers:
+
+                raise ProductionIntegrationError(
+                    (
+                        "Approved decision weights do not "
+                        "cover the canonical 14 production assets."
+                    )
+                )
+
             weight_total = sum(
                 float(value)
                 for value in decision.weights.values()
             )
+
+            if not np.isfinite(
+                weight_total
+            ):
+
+                raise ProductionIntegrationError(
+                    "Approved decision weight total is non-finite."
+                )
 
             if abs(
                 weight_total - 1.0
@@ -703,8 +1242,36 @@ class ProductionIntegration:
                     )
                 )
 
+            for ticker, weight in (
+                decision.weights.items()
+            ):
+
+                numeric_weight = float(
+                    weight
+                )
+
+                if not np.isfinite(
+                    numeric_weight
+                ):
+
+                    raise ProductionIntegrationError(
+                        (
+                            f"Approved decision weight "
+                            f"for '{ticker}' is non-finite."
+                        )
+                    )
+
+                if numeric_weight < -1e-10:
+
+                    raise ProductionIntegrationError(
+                        (
+                            f"Approved decision weight "
+                            f"for '{ticker}' is negative."
+                        )
+                    )
+
         # --------------------------------------------------------------
-        # REJECTED DECISIONS
+        # REJECTED DECISION
         # --------------------------------------------------------------
 
         elif (
@@ -722,7 +1289,7 @@ class ProductionIntegration:
                 )
 
         # --------------------------------------------------------------
-        # FAILED DECISIONS
+        # FAILED DECISION
         # --------------------------------------------------------------
 
         elif (
@@ -748,15 +1315,29 @@ class ProductionIntegration:
                     )
                 )
 
+        # --------------------------------------------------------------
+        # UNKNOWN STATUS
+        # --------------------------------------------------------------
+
+        else:
+
+            raise ProductionIntegrationError(
+                (
+                    "PortfolioDecisionEngine returned "
+                    f"unsupported decision status: "
+                    f"{decision.status}"
+                )
+            )
+
     # ==================================================================
-    # SECTION 9
+    # SECTION 10
     # PRODUCTION DECISION EXECUTION
     # ==================================================================
 
     def run(
         self,
         *,
-        portfolio: dict[str, float],
+        portfolio: dict[str, Any],
         returns: Any,
         regimes: Any,
         macro_data: dict[str, Any],
@@ -869,7 +1450,13 @@ class ProductionIntegration:
                     diagnostics={
                         "exception_type": (
                             type(exc).__name__
-                        )
+                        ),
+                        "production_asset_count": (
+                            self.PRODUCTION_ASSET_COUNT
+                        ),
+                        "production_assets": list(
+                            self.PRODUCTION_ASSETS
+                        ),
                     },
                     errors=(
                         str(exc),
@@ -883,7 +1470,7 @@ class ProductionIntegration:
             return result
 
     # ==================================================================
-    # SECTION 10
+    # SECTION 11
     # HEALTH CHECK
     # ==================================================================
 
@@ -923,6 +1510,12 @@ class ProductionIntegration:
                     self.PHASE
                 ),
                 "healthy": healthy,
+                "production_asset_count": (
+                    self.PRODUCTION_ASSET_COUNT
+                ),
+                "production_assets": list(
+                    self.PRODUCTION_ASSETS
+                ),
                 "engine_health": (
                     engine_health
                 ),
@@ -938,13 +1531,19 @@ class ProductionIntegration:
                     self.PHASE
                 ),
                 "healthy": False,
+                "production_asset_count": (
+                    self.PRODUCTION_ASSET_COUNT
+                ),
+                "production_assets": list(
+                    self.PRODUCTION_ASSETS
+                ),
                 "error": str(
                     exc
                 ),
             }
 
     # ==================================================================
-    # SECTION 11
+    # SECTION 12
     # METADATA
     # ==================================================================
 
@@ -973,13 +1572,20 @@ class ProductionIntegration:
             "live_trading_enabled": False,
             "strict_dependency_validation": True,
             "fail_fast_dependency_validation": True,
+            "canonical_production_universe": True,
+            "production_asset_count": (
+                self.PRODUCTION_ASSET_COUNT
+            ),
+            "production_assets": list(
+                self.PRODUCTION_ASSETS
+            ),
             "required_components": list(
                 self.REQUIRED_COMPONENTS
             ),
         }
 
     # ==================================================================
-    # SECTION 12
+    # SECTION 13
     # SUMMARY
     # ==================================================================
 
@@ -998,6 +1604,12 @@ class ProductionIntegration:
             ),
             "phase": (
                 self.PHASE
+            ),
+            "production_asset_count": (
+                self.PRODUCTION_ASSET_COUNT
+            ),
+            "production_assets": list(
+                self.PRODUCTION_ASSETS
             ),
             "execution_count": (
                 self.execution_count
@@ -1027,7 +1639,7 @@ class ProductionIntegration:
 
 
 # ======================================================================
-# SECTION 13
+# SECTION 14
 # CONVENIENCE FACTORY
 # ======================================================================
 
@@ -1042,14 +1654,14 @@ def build_production_integration(
 
 
 # ======================================================================
-# SECTION 14
+# SECTION 15
 # REGRESSION TESTS
 # ======================================================================
 
 
 def test_production_integration_metadata() -> None:
     """
-    Verify Phase IV-B.2 metadata.
+    Verify Phase IV-B.2 metadata and the canonical production universe.
     """
 
     integration = (
@@ -1083,6 +1695,23 @@ def test_production_integration_metadata() -> None:
     assert (
         metadata["live_trading_enabled"]
         is False
+    )
+
+    assert (
+        metadata["canonical_production_universe"]
+        is True
+    )
+
+    assert (
+        metadata["production_asset_count"]
+        == 14
+    )
+
+    assert (
+        metadata["production_assets"]
+        == list(
+            ProductionIntegration.PRODUCTION_ASSETS
+        )
     )
 
 
@@ -1119,6 +1748,18 @@ def test_production_integration_health() -> None:
         in result
     )
 
+    assert (
+        result["production_asset_count"]
+        == 14
+    )
+
+    assert (
+        result["production_assets"]
+        == list(
+            ProductionIntegration.PRODUCTION_ASSETS
+        )
+    )
+
 
 def test_production_integration_summary() -> None:
     """
@@ -1148,9 +1789,136 @@ def test_production_integration_summary() -> None:
         == 0
     )
 
+    assert (
+        summary["production_asset_count"]
+        == 14
+    )
+
+
+def test_production_integration_portfolio_validation() -> None:
+    """
+    Verify the canonical 14-asset portfolio contract.
+    """
+
+    weight = (
+        1.0
+        / ProductionIntegration.PRODUCTION_ASSET_COUNT
+    )
+
+    portfolio = {
+        "weights": {
+            ticker: weight
+            for ticker in (
+                ProductionIntegration.PRODUCTION_ASSETS
+            )
+        }
+    }
+
+    ProductionIntegration._validate_portfolio(
+        portfolio
+    )
+
+
+def test_production_integration_macro_series_validation() -> None:
+    """
+    Verify that scalar and historical macro inputs are accepted.
+    """
+
+    import pandas as pd
+
+    index = pd.date_range(
+        start="2020-01-01",
+        periods=10,
+        freq="B",
+    )
+
+    macro_data = {
+        "unemployment": pd.Series(
+            np.full(
+                len(index),
+                5.0,
+            ),
+            index=index,
+        ),
+        "yield_spread": pd.Series(
+            np.full(
+                len(index),
+                1.5,
+            ),
+            index=index,
+        ),
+        "inflation": pd.Series(
+            np.full(
+                len(index),
+                2.0,
+            ),
+            index=index,
+        ),
+    }
+
+    ProductionIntegration._validate_macro_data(
+        macro_data
+    )
+
+    ProductionIntegration._validate_macro_data(
+        {
+            "unemployment": 5.0,
+            "yield_spread": 1.5,
+            "inflation": 2.0,
+        }
+    )
+
+
+def test_production_integration_regime_validation() -> None:
+    """
+    Verify that pandas regime histories are validated without
+    ambiguous truth-value evaluation.
+    """
+
+    import pandas as pd
+
+    regimes = pd.Series(
+        [
+            "EXPANSION",
+            "EXPANSION",
+            "EXPANSION",
+        ]
+    )
+
+    ProductionIntegration._validate_regimes(
+        regimes
+    )
+
+
+def test_production_integration_universe_validation() -> None:
+    """
+    Verify that the actual AssetUniverse.production() object is
+    accepted as the canonical production universe.
+    """
+
+    universe = (
+        AssetUniverse.production()
+    )
+
+    ProductionIntegration._validate_canonical_universe(
+        universe
+    )
+
+    assert (
+        universe.tickers
+        == sorted(
+            PRODUCTION_ASSETS
+        )
+    )
+
+    assert (
+        universe.size
+        == 14
+    )
+
 
 # ======================================================================
-# SECTION 15
+# SECTION 16
 # REGRESSION ENTRY POINT
 # ======================================================================
 
@@ -1166,13 +1934,21 @@ def run_regression_tests() -> None:
 
     test_production_integration_summary()
 
+    test_production_integration_portfolio_validation()
+
+    test_production_integration_macro_series_validation()
+
+    test_production_integration_regime_validation()
+
+    test_production_integration_universe_validation()
+
     print(
         "ProductionIntegration Phase IV-B.2 tests passed."
     )
 
 
 # ======================================================================
-# SECTION 16
+# SECTION 17
 # MODULE ENTRY POINT
 # ======================================================================
 
@@ -1203,6 +1979,18 @@ if __name__ == "__main__":
 
     print(
         integration.metadata()
+    )
+
+    print()
+
+    print(
+        "CANONICAL PRODUCTION ASSETS:"
+    )
+
+    print(
+        list(
+            ProductionIntegration.PRODUCTION_ASSETS
+        )
     )
 
     print()

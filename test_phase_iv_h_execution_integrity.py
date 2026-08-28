@@ -8,7 +8,7 @@ Phase IV-G.
 Phase IV-H converts the discovered downstream execution behavior into
 explicit regression contracts covering:
 
-1. order lifecycle integrity;
+1. canonical order lifecycle integrity;
 2. order-book integrity;
 3. paper-broker submission and fill integrity;
 4. paper-broker cancellation integrity;
@@ -21,6 +21,55 @@ explicit regression contracts covering:
 11. post-trade execution monitoring;
 12. execution analytics invariants;
 13. deterministic trade generation.
+
+IMPORTANT ARCHITECTURAL BOUNDARY
+--------------------------------
+
+The canonical Order is an OMS-domain order object.
+
+It does NOT own broker submission state.
+
+Therefore:
+
+    Canonical Order.status
+        PENDING
+        PARTIALLY_FILLED
+        FILLED
+        CANCELLED
+        REJECTED
+
+Broker-side submission state, including SUBMITTED, belongs to the
+broker-side execution representation.
+
+The canonical execution path is therefore:
+
+    Order
+        |
+        v
+    PENDING
+        |
+        | authorized OMS / routing boundary
+        v
+    broker-side order
+        |
+        v
+    SUBMITTED
+        |
+        v
+    PARTIALLY_FILLED
+        |
+        v
+    FILLED
+
+This suite deliberately does NOT require:
+
+    Order.status == "SUBMITTED"
+
+and does not call:
+
+    Order.submit()
+
+as a mechanism for mutating the canonical Order.
 
 Phase IV-G remains the authoritative upstream execution-safety
 boundary.
@@ -35,9 +84,27 @@ from dataclasses import dataclass
 from typing import Any
 
 
+# ============================================================================
+# IMPORT HELPERS
+# ============================================================================
+
+
 def _import(module: str, name: str) -> Any:
+    """
+    Import a named public object from a module.
+
+    Keeping imports lazy allows this suite to report component-level
+    availability failures without preventing collection of unrelated
+    tests.
+    """
+
     imported = __import__(module, fromlist=[name])
     return getattr(imported, name)
+
+
+# ============================================================================
+# TEST OBJECT FACTORIES
+# ============================================================================
 
 
 def _make_order(
@@ -47,6 +114,17 @@ def _make_order(
     side: str = "BUY",
     quantity: float = 100.0,
 ) -> Any:
+    """
+    Construct a canonical OMS Order.
+
+    The returned order is intentionally created in its canonical
+    initial state:
+
+        PENDING
+
+    No broker submission is performed here.
+    """
+
     Order = _import("order", "Order")
 
     return Order(
@@ -65,6 +143,11 @@ def _make_live_broker() -> Any:
 def _make_paper_broker() -> Any:
     PaperBroker = _import("paperbroker", "PaperBroker")
     return PaperBroker()
+
+
+# ============================================================================
+# DECLARATIVE EXECUTION-INTEGRITY CONTRACT
+# ============================================================================
 
 
 @dataclass(frozen=True)
@@ -329,123 +412,291 @@ def test_live_broker_summary_is_fail_closed_by_default() -> None:
 
 
 # ============================================================================
-# H1 — ORDER LIFECYCLE INTEGRITY
+# H1 — CANONICAL ORDER LIFECYCLE INTEGRITY
 # ============================================================================
 
 
-def test_order_submit_transition_is_valid() -> None:
+def test_order_initial_state_is_pending() -> None:
+    """
+    A newly created canonical Order must begin in PENDING.
+
+    PENDING means the order exists in the OMS domain but has not yet
+    crossed the broker submission boundary.
+    """
+
     order = _make_order()
 
-    order.submit()
+    assert order.status == "PENDING"
+    assert order.is_pending()
+    assert order.is_open()
+    assert not order.is_filled()
+    assert not order.is_cancelled()
+    assert not order.is_rejected()
 
-    assert order.status == "SUBMITTED"
-    assert order.is_submitted()
 
+def test_canonical_order_does_not_report_broker_submission_state() -> None:
+    """
+    SUBMITTED is not a canonical OMS Order state.
 
-def test_order_partial_fill_transition_is_valid() -> None:
+    The canonical order therefore must not report itself as submitted
+    while it remains PENDING.
+
+    is_submitted() is retained as a compatibility/query surface and
+    must return False rather than raising.
+    """
+
     order = _make_order()
-    order.submit()
 
+    assert order.status == "PENDING"
+    assert order.is_submitted() is False
+
+
+def test_canonical_order_has_no_submitted_status_transition() -> None:
+    """
+    The canonical Order state machine must not introduce SUBMITTED.
+
+    This protects the architectural separation between OMS order
+    state and broker-side submission state.
+    """
+
+    order = _make_order()
+
+    assert order.status != "SUBMITTED"
+
+    # Filling the canonical order represents an execution event.
+    # Submission state is maintained by the broker-side boundary.
     order.fill(40.0, 500.0)
 
     assert order.status == "PARTIALLY_FILLED"
+    assert order.is_submitted() is False
+
+
+def test_order_partial_fill_transition_is_valid() -> None:
+    """
+    Partial execution is a canonical Order state transition.
+
+    The order does not need a local SUBMITTED state before accepting
+    an execution receipt.
+    """
+
+    order = _make_order()
+
+    order.fill(
+        40.0,
+        500.0,
+    )
+
+    assert order.status == "PARTIALLY_FILLED"
+    assert order.is_partially_filled()
+    assert order.is_open()
     assert order.filled_quantity == 40.0
     assert order.remaining_quantity == 60.0
 
 
 def test_order_full_fill_transition_is_valid() -> None:
     order = _make_order()
-    order.submit()
 
-    order.fill(100.0, 500.0)
+    order.fill(
+        100.0,
+        500.0,
+    )
 
     assert order.status == "FILLED"
     assert order.filled_quantity == 100.0
     assert order.remaining_quantity == 0.0
     assert order.is_filled()
+    assert not order.is_open()
+    assert order.is_submitted() is False
+
+
+def test_order_partial_then_full_fill_preserves_average_price() -> None:
+    order = _make_order()
+
+    order.fill(
+        40.0,
+        500.0,
+    )
+
+    order.fill(
+        60.0,
+        501.0,
+    )
+
+    assert order.status == "FILLED"
+    assert order.filled_quantity == 100.0
+    assert order.remaining_quantity == 0.0
+    assert order.average_fill_price == 500.6
 
 
 def test_order_cancellation_is_terminal() -> None:
     order = _make_order()
+
     order.cancel()
 
     assert order.status == "CANCELLED"
     assert order.is_cancelled()
+    assert not order.is_open()
+    assert not order.is_filled()
 
 
 def test_cancelled_order_cannot_be_filled() -> None:
     order = _make_order()
+
     order.cancel()
 
     try:
-        order.fill(10.0, 500.0)
+        order.fill(
+            10.0,
+            500.0,
+        )
     except RuntimeError as exc:
         assert "cancelled" in str(exc).lower()
     else:
-        raise AssertionError("Cancelled order accepted a fill.")
+        raise AssertionError(
+            "Cancelled order accepted a fill."
+        )
 
 
-def test_cancelled_order_cannot_be_submitted() -> None:
+def test_cancelled_order_cannot_reenter_pending_state() -> None:
+    """
+    A cancelled canonical order is terminal.
+
+    There is deliberately no canonical Order.submit() transition
+    back into a broker-side SUBMITTED state.
+    """
+
     order = _make_order()
+
     order.cancel()
 
-    try:
-        order.submit()
-    except RuntimeError as exc:
-        assert "pending" in str(exc).lower()
-    else:
-        raise AssertionError("Cancelled order was resubmitted.")
+    assert order.status == "CANCELLED"
+    assert not order.is_open()
+    assert order.is_submitted() is False
 
 
-def test_rejected_order_cannot_be_filled_or_submitted() -> None:
+def test_rejected_order_cannot_be_filled() -> None:
     order = _make_order()
+
     order.reject()
 
     try:
-        order.fill(10.0, 500.0)
+        order.fill(
+            10.0,
+            500.0,
+        )
     except RuntimeError as exc:
         assert "rejected" in str(exc).lower()
     else:
-        raise AssertionError("Rejected order accepted a fill.")
-
-    try:
-        order.submit()
-    except RuntimeError as exc:
-        assert "pending" in str(exc).lower()
-    else:
-        raise AssertionError("Rejected order was resubmitted.")
+        raise AssertionError(
+            "Rejected order accepted a fill."
+        )
 
 
-def test_filled_order_cannot_be_cancelled_or_resubmitted() -> None:
+def test_rejected_order_is_not_submitted() -> None:
     order = _make_order()
-    order.submit()
-    order.fill(100.0, 500.0)
+
+    order.reject()
+
+    assert order.status == "REJECTED"
+    assert order.is_rejected()
+    assert not order.is_open()
+    assert order.is_submitted() is False
+
+
+def test_filled_order_cannot_be_cancelled() -> None:
+    order = _make_order()
+
+    order.fill(
+        100.0,
+        500.0,
+    )
 
     try:
         order.cancel()
     except RuntimeError as exc:
         assert "filled" in str(exc).lower()
     else:
-        raise AssertionError("Filled order was cancelled.")
+        raise AssertionError(
+            "Filled order was cancelled."
+        )
 
-    try:
-        order.submit()
-    except RuntimeError as exc:
-        assert "pending" in str(exc).lower()
-    else:
-        raise AssertionError("Filled order was resubmitted.")
+
+def test_filled_order_is_terminal() -> None:
+    order = _make_order()
+
+    order.fill(
+        100.0,
+        500.0,
+    )
+
+    assert order.status == "FILLED"
+    assert order.is_filled()
+    assert not order.is_open()
+    assert order.is_submitted() is False
 
 
 def test_order_overfill_is_rejected() -> None:
     order = _make_order()
-    order.submit()
 
     try:
-        order.fill(101.0, 500.0)
+        order.fill(
+            101.0,
+            500.0,
+        )
     except ValueError as exc:
         assert "remaining quantity" in str(exc).lower()
     else:
-        raise AssertionError("Order accepted an overfill.")
+        raise AssertionError(
+            "Order accepted an overfill."
+        )
+
+
+def test_order_zero_fill_is_rejected() -> None:
+    order = _make_order()
+
+    try:
+        order.fill(
+            0.0,
+            500.0,
+        )
+    except ValueError as exc:
+        assert "positive" in str(exc).lower()
+    else:
+        raise AssertionError(
+            "Order accepted zero fill quantity."
+        )
+
+
+def test_order_negative_fill_is_rejected() -> None:
+    order = _make_order()
+
+    try:
+        order.fill(
+            -1.0,
+            500.0,
+        )
+    except ValueError as exc:
+        assert "positive" in str(exc).lower()
+    else:
+        raise AssertionError(
+            "Order accepted negative fill quantity."
+        )
+
+
+def test_order_invalid_fill_price_is_rejected() -> None:
+    order = _make_order()
+
+    try:
+        order.fill(
+            10.0,
+            0.0,
+        )
+    except ValueError as exc:
+        assert "positive" in str(exc).lower()
+    else:
+        raise AssertionError(
+            "Order accepted non-positive execution price."
+        )
 
 
 # ============================================================================
@@ -469,14 +720,21 @@ def test_order_book_rejects_duplicate_order_id() -> None:
     OrderBook = _import("orderbook", "OrderBook")
 
     book = OrderBook()
-    book.add_order(_make_order(order_id="H2-001"))
+
+    book.add_order(
+        _make_order(order_id="H2-001")
+    )
 
     try:
-        book.add_order(_make_order(order_id="H2-001"))
+        book.add_order(
+            _make_order(order_id="H2-001")
+        )
     except ValueError as exc:
         assert "already exists" in str(exc)
     else:
-        raise AssertionError("Duplicate order ID was accepted.")
+        raise AssertionError(
+            "Duplicate order ID was accepted."
+        )
 
 
 def test_order_book_missing_order_operations_fail_closed() -> None:
@@ -505,7 +763,11 @@ def test_order_book_missing_order_operations_fail_closed() -> None:
 
 def test_paper_broker_submission_registers_order() -> None:
     broker = _make_paper_broker()
-    order = _make_order(order_id="H3-001", quantity=100.0)
+
+    order = _make_order(
+        order_id="H3-001",
+        quantity=100.0,
+    )
 
     result = broker.submit_order(order)
 
@@ -515,9 +777,40 @@ def test_paper_broker_submission_registers_order() -> None:
     assert broker.has_order("H3-001")
 
 
+def test_paper_broker_submission_does_not_require_canonical_order_submitted_state() -> None:
+    """
+    The broker owns the SUBMITTED representation.
+
+    The canonical Order itself remains outside the broker-specific
+    submission-state vocabulary.
+    """
+
+    broker = _make_paper_broker()
+
+    order = _make_order(
+        order_id="H3-BOUNDARY",
+        quantity=10.0,
+    )
+
+    assert order.status == "PENDING"
+    assert order.is_submitted() is False
+
+    result = broker.submit_order(order)
+
+    assert result["status"] == "SUBMITTED"
+
+    # Canonical OMS order remains PENDING until execution changes
+    # its canonical lifecycle state.
+    assert order.status == "PENDING"
+    assert order.is_submitted() is False
+
+
 def test_paper_broker_duplicate_submission_is_blocked() -> None:
     broker = _make_paper_broker()
-    order = _make_order(order_id="H3-DUP")
+
+    order = _make_order(
+        order_id="H3-DUP"
+    )
 
     broker.submit_order(order)
 
@@ -533,7 +826,11 @@ def test_paper_broker_duplicate_submission_is_blocked() -> None:
 
 def test_paper_broker_partial_and_full_fills_are_integrity_safe() -> None:
     broker = _make_paper_broker()
-    order = _make_order(order_id="H3-FILL", quantity=100.0)
+
+    order = _make_order(
+        order_id="H3-FILL",
+        quantity=100.0,
+    )
 
     broker.submit_order(order)
 
@@ -556,6 +853,7 @@ def test_paper_broker_partial_and_full_fills_are_integrity_safe() -> None:
     assert final.status == "FILLED"
 
     record = broker.get_order("H3-FILL")
+
     assert record.status == "FILLED"
     assert record.filled_quantity == 100.0
     assert record.remaining_quantity == 0.0
@@ -563,7 +861,11 @@ def test_paper_broker_partial_and_full_fills_are_integrity_safe() -> None:
 
 def test_paper_broker_rejects_excessive_fill() -> None:
     broker = _make_paper_broker()
-    order = _make_order(order_id="H3-OVERFILL", quantity=100.0)
+
+    order = _make_order(
+        order_id="H3-OVERFILL",
+        quantity=100.0,
+    )
 
     broker.submit_order(order)
 
@@ -582,14 +884,21 @@ def test_paper_broker_rejects_excessive_fill() -> None:
     except ValueError as exc:
         assert "remaining quantity" in str(exc).lower()
     else:
-        raise AssertionError("Paper broker accepted excessive fill.")
+        raise AssertionError(
+            "Paper broker accepted excessive fill."
+        )
 
 
 def test_paper_broker_rejects_fill_after_completion() -> None:
     broker = _make_paper_broker()
-    order = _make_order(order_id="H3-COMPLETE", quantity=10.0)
+
+    order = _make_order(
+        order_id="H3-COMPLETE",
+        quantity=10.0,
+    )
 
     broker.submit_order(order)
+
     broker.fill_order(
         "H3-COMPLETE",
         execution_price=500.0,
@@ -617,11 +926,16 @@ def test_paper_broker_rejects_fill_after_completion() -> None:
 
 def test_paper_broker_cancellation_is_terminal() -> None:
     broker = _make_paper_broker()
-    order = _make_order(order_id="H4-001")
+
+    order = _make_order(
+        order_id="H4-001"
+    )
 
     broker.submit_order(order)
 
-    result = broker.cancel_order("H4-001")
+    result = broker.cancel_order(
+        "H4-001"
+    )
 
     assert result["status"] == "CANCELLED"
     assert broker.get_order("H4-001").status == "CANCELLED"
@@ -629,10 +943,16 @@ def test_paper_broker_cancellation_is_terminal() -> None:
 
 def test_paper_broker_cannot_fill_cancelled_order() -> None:
     broker = _make_paper_broker()
-    order = _make_order(order_id="H4-FILL-CANCEL")
+
+    order = _make_order(
+        order_id="H4-FILL-CANCEL"
+    )
 
     broker.submit_order(order)
-    broker.cancel_order("H4-FILL-CANCEL")
+
+    broker.cancel_order(
+        "H4-FILL-CANCEL"
+    )
 
     try:
         broker.fill_order(
@@ -650,13 +970,21 @@ def test_paper_broker_cannot_fill_cancelled_order() -> None:
 
 def test_paper_broker_cannot_cancel_cancelled_order() -> None:
     broker = _make_paper_broker()
-    order = _make_order(order_id="H4-CANCEL-TWICE")
+
+    order = _make_order(
+        order_id="H4-CANCEL-TWICE"
+    )
 
     broker.submit_order(order)
-    broker.cancel_order("H4-CANCEL-TWICE")
+
+    broker.cancel_order(
+        "H4-CANCEL-TWICE"
+    )
 
     try:
-        broker.cancel_order("H4-CANCEL-TWICE")
+        broker.cancel_order(
+            "H4-CANCEL-TWICE"
+        )
     except RuntimeError as exc:
         assert "CANCELLED" in str(exc)
     else:
@@ -670,68 +998,160 @@ def test_paper_broker_cannot_cancel_cancelled_order() -> None:
 # ============================================================================
 
 
-def test_broker_router_requires_broker_selection() -> None:
-    BrokerRouter = _import("brokerrouter", "BrokerRouter")
+def test_broker_router_rejects_raw_order_without_broker_selection() -> None:
+    """
+    Phase IV-I-J.12
+
+    Raw Order objects must not cross the production routing
+    boundary.
+
+    route_order() remains available for API compatibility but
+    is fail-closed.
+    """
+
+    BrokerRouter = _import(
+        "brokerrouter",
+        "BrokerRouter",
+    )
 
     router = BrokerRouter()
-    order = _make_order(order_id="H5-NO-BROKER")
+
+    order = _make_order(
+        order_id="H5-NO-BROKER"
+    )
+
+    initial_route_count = router.route_count
+
+    initial_history_length = len(
+        router.routing_history
+    )
 
     try:
         router.route_order(order)
     except RuntimeError as exc:
-        assert "No broker specified" in str(exc)
+        assert "Raw Order routing is disabled" in str(exc)
     else:
         raise AssertionError(
-            "Router silently routed without a broker."
+            "Raw Order routing was not rejected."
         )
 
-
-def test_broker_router_rejects_missing_broker() -> None:
-    BrokerRouter = _import("brokerrouter", "BrokerRouter")
-
-    router = BrokerRouter()
-    order = _make_order(order_id="H5-MISSING")
-
-    try:
-        router.route_order(order, broker_name="MISSING")
-    except KeyError as exc:
-        assert "MISSING" in str(exc)
-    else:
-        raise AssertionError(
-            "Router accepted an unregistered broker."
-        )
+    assert router.route_count == initial_route_count
+    assert len(router.routing_history) == initial_history_length
 
 
-def test_broker_router_rejects_missing_default_broker() -> None:
-    BrokerRouter = _import("brokerrouter", "BrokerRouter")
+def test_broker_router_rejects_raw_order_with_explicit_broker() -> None:
+    """
+    Phase IV-I-J.12
+
+    Supplying a broker name must not allow a raw Order to bypass
+    the AuthorizedRoutingHandoff boundary.
+    """
+
+    BrokerRouter = _import(
+        "brokerrouter",
+        "BrokerRouter",
+    )
 
     router = BrokerRouter()
 
+    order = _make_order(
+        order_id="H5-MISSING"
+    )
+
     try:
-        router.set_default_broker("DOES-NOT-EXIST")
-    except KeyError as exc:
-        assert "DOES-NOT-EXIST" in str(exc)
+        router.route_order(
+            order,
+            broker_name="MISSING",
+        )
+    except RuntimeError as exc:
+        assert "Raw Order routing is disabled" in str(exc)
     else:
         raise AssertionError(
-            "Router configured an unavailable default broker."
+            "Raw Order routing accepted an explicit broker."
         )
 
+    assert router.route_count == 0
+    assert router.routing_history == []
 
-def test_broker_router_can_route_to_registered_paper_broker() -> None:
-    BrokerRouter = _import("brokerrouter", "BrokerRouter")
+
+def test_broker_router_rejects_raw_order_for_registered_paper_broker() -> None:
+    """
+    Phase IV-I-J.12
+
+    Even a healthy and registered PaperBroker must not receive a
+    raw Order through route_order().
+
+    Broker submission is reserved for the authorized routing
+    boundary.
+    """
+
+    BrokerRouter = _import(
+        "brokerrouter",
+        "BrokerRouter",
+    )
 
     router = BrokerRouter()
     broker = _make_paper_broker()
 
     router.register_broker(broker)
 
-    result = router.route_order(
-        _make_order(order_id="H5-PAPER"),
-        broker_name="PAPER",
+    order = _make_order(
+        order_id="H5-PAPER"
     )
 
-    assert result is not None
-    assert result.broker == "PAPER"
+    initial_route_count = router.route_count
+    initial_history_length = len(router.routing_history)
+
+    submitted_before = list(
+        getattr(
+            broker,
+            "submitted_orders",
+            [],
+        )
+    )
+
+    try:
+        router.route_order(
+            order,
+            broker_name="PAPER",
+        )
+    except RuntimeError as exc:
+        assert "Raw Order routing is disabled" in str(exc)
+    else:
+        raise AssertionError(
+            "Raw Order reached the broker submission boundary."
+        )
+
+    assert router.route_count == initial_route_count
+    assert len(router.routing_history) == initial_history_length
+
+    assert list(
+        getattr(
+            broker,
+            "submitted_orders",
+            [],
+        )
+    ) == submitted_before
+
+
+def test_broker_router_rejects_missing_default_broker() -> None:
+    BrokerRouter = _import(
+        "brokerrouter",
+        "BrokerRouter",
+    )
+
+    router = BrokerRouter()
+
+    try:
+        router.set_default_broker(
+            "DOES-NOT-EXIST"
+        )
+    except KeyError as exc:
+        assert "DOES-NOT-EXIST" in str(exc)
+    else:
+        raise AssertionError(
+            "Router configured an unavailable default broker."
+        )
 
 
 # ============================================================================
@@ -743,7 +1163,11 @@ def test_live_broker_rejects_submission_when_disconnected() -> None:
     broker = _make_live_broker()
 
     try:
-        broker.submit_order(_make_order(order_id="H6-DISCONNECTED"))
+        broker.submit_order(
+            _make_order(
+                order_id="H6-DISCONNECTED"
+            )
+        )
     except RuntimeError as exc:
         assert str(exc) == "LIVE_BROKER_DISCONNECTED"
     else:
@@ -797,10 +1221,19 @@ def test_live_broker_without_transport_cannot_authenticate() -> None:
 
 
 def test_live_broker_positive_path_requires_explicit_gates() -> None:
-    LiveBroker = _import("livebroker", "LiveBroker")
-    TestLiveTransport = _import("livebroker", "_TestLiveTransport")
+    LiveBroker = _import(
+        "livebroker",
+        "LiveBroker",
+    )
 
-    broker = LiveBroker(transport=TestLiveTransport())
+    TestLiveTransport = _import(
+        "livebroker",
+        "_TestLiveTransport",
+    )
+
+    broker = LiveBroker(
+        transport=TestLiveTransport()
+    )
 
     assert broker.summary()["connected"] is False
     assert broker.summary()["authenticated"] is False
@@ -818,17 +1251,29 @@ def test_live_broker_positive_path_requires_explicit_gates() -> None:
 
 
 def test_live_broker_authorized_positive_path_accepts_submission() -> None:
-    LiveBroker = _import("livebroker", "LiveBroker")
-    TestLiveTransport = _import("livebroker", "_TestLiveTransport")
+    LiveBroker = _import(
+        "livebroker",
+        "LiveBroker",
+    )
 
-    broker = LiveBroker(transport=TestLiveTransport())
+    TestLiveTransport = _import(
+        "livebroker",
+        "_TestLiveTransport",
+    )
+
+    broker = LiveBroker(
+        transport=TestLiveTransport()
+    )
 
     broker.connect()
     broker.authenticate()
     broker.enable_live_trading()
 
     result = broker.submit_order(
-        _make_order(order_id="H7-LIVE-001", quantity=10.0)
+        _make_order(
+            order_id="H7-LIVE-001",
+            quantity=10.0,
+        )
     )
 
     assert result["broker"] == "LIVE"
@@ -848,24 +1293,39 @@ def test_live_broker_authorized_positive_path_accepts_submission() -> None:
 
 
 def test_live_broker_disabling_trading_blocks_future_submission() -> None:
-    LiveBroker = _import("livebroker", "LiveBroker")
-    TestLiveTransport = _import("livebroker", "_TestLiveTransport")
+    LiveBroker = _import(
+        "livebroker",
+        "LiveBroker",
+    )
 
-    broker = LiveBroker(transport=TestLiveTransport())
+    TestLiveTransport = _import(
+        "livebroker",
+        "_TestLiveTransport",
+    )
+
+    broker = LiveBroker(
+        transport=TestLiveTransport()
+    )
 
     broker.connect()
     broker.authenticate()
     broker.enable_live_trading()
 
     broker.submit_order(
-        _make_order(order_id="H8-LIVE-001", quantity=10.0)
+        _make_order(
+            order_id="H8-LIVE-001",
+            quantity=10.0,
+        )
     )
 
     assert broker.disable_live_trading() is True
 
     try:
         broker.submit_order(
-            _make_order(order_id="H8-LIVE-002", quantity=10.0)
+            _make_order(
+                order_id="H8-LIVE-002",
+                quantity=10.0,
+            )
         )
     except RuntimeError as exc:
         assert str(exc) == "LIVE_TRADING_DISABLED"
@@ -876,10 +1336,19 @@ def test_live_broker_disabling_trading_blocks_future_submission() -> None:
 
 
 def test_live_broker_disconnect_revokes_live_state() -> None:
-    LiveBroker = _import("livebroker", "LiveBroker")
-    TestLiveTransport = _import("livebroker", "_TestLiveTransport")
+    LiveBroker = _import(
+        "livebroker",
+        "LiveBroker",
+    )
 
-    broker = LiveBroker(transport=TestLiveTransport())
+    TestLiveTransport = _import(
+        "livebroker",
+        "_TestLiveTransport",
+    )
+
+    broker = LiveBroker(
+        transport=TestLiveTransport()
+    )
 
     broker.connect()
     broker.authenticate()
@@ -900,7 +1369,11 @@ def test_live_broker_disconnect_revokes_live_state() -> None:
 
 
 def test_broker_execution_receipt_can_be_validated() -> None:
-    PaperBroker = _import("paperbroker", "PaperBroker")
+    PaperBroker = _import(
+        "paperbroker",
+        "PaperBroker",
+    )
+
     BrokerExecutionEngine = _import(
         "brokerexecutionengine",
         "BrokerExecutionEngine",
@@ -909,9 +1382,13 @@ def test_broker_execution_receipt_can_be_validated() -> None:
     broker = PaperBroker()
     engine = BrokerExecutionEngine()
 
-    order = _make_order(order_id="H9-001", quantity=10.0)
+    order = _make_order(
+        order_id="H9-001",
+        quantity=10.0,
+    )
 
     broker.submit_order(order)
+
     receipt = broker.fill_order(
         "H9-001",
         execution_price=500.0,
@@ -923,7 +1400,11 @@ def test_broker_execution_receipt_can_be_validated() -> None:
 
 
 def test_broker_execution_engine_validates_structurally_valid_receipt() -> None:
-    PaperBroker = _import("paperbroker", "PaperBroker")
+    PaperBroker = _import(
+        "paperbroker",
+        "PaperBroker",
+    )
+
     BrokerExecutionEngine = _import(
         "brokerexecutionengine",
         "BrokerExecutionEngine",
@@ -932,7 +1413,10 @@ def test_broker_execution_engine_validates_structurally_valid_receipt() -> None:
     broker = PaperBroker()
     engine = BrokerExecutionEngine()
 
-    order = _make_order(order_id="H9-VALID", quantity=10.0)
+    order = _make_order(
+        order_id="H9-VALID",
+        quantity=10.0,
+    )
 
     broker.submit_order(order)
 
@@ -958,7 +1442,10 @@ def test_reconciliation_matching_orders_are_approved() -> None:
 
     engine = ReconciliationEngine()
 
-    order = _make_order(order_id="H10-001", quantity=100.0)
+    order = _make_order(
+        order_id="H10-001",
+        quantity=100.0,
+    )
 
     decision = engine.reconcile_order(
         order,
@@ -981,6 +1468,7 @@ def test_reconciliation_quantity_mismatch_is_rejected() -> None:
         order_id="H10-QTY",
         quantity=100.0,
     )
+
     broker_order = _make_order(
         order_id="H10-QTY",
         quantity=99.0,
@@ -1046,14 +1534,19 @@ def test_post_trade_quantity_check_detects_matching_execution() -> None:
 
     monitor = PostTradeExecutionMonitor()
 
-    order = _make_order(quantity=100.0)
+    order = _make_order(
+        quantity=100.0
+    )
 
     class Execution:
         quantity = 100.0
         execution_price = 500.0
         status = "FILLED"
 
-    result = monitor.check_quantity(order, Execution())
+    result = monitor.check_quantity(
+        order,
+        Execution(),
+    )
 
     assert result[0] is True
     assert result[1] == 100.0
@@ -1090,12 +1583,17 @@ def test_post_trade_duplicate_check_does_not_flag_distinct_execution() -> None:
 
     monitor = PostTradeExecutionMonitor()
 
-    order = _make_order(order_id="H11-001")
+    order = _make_order(
+        order_id="H11-001"
+    )
 
     class Execution:
         broker_order_id = "BROKER-001"
 
-    assert monitor.check_duplicate(order, Execution()) is False
+    assert monitor.check_duplicate(
+        order,
+        Execution(),
+    ) is False
 
 
 # ============================================================================
@@ -1111,8 +1609,15 @@ def test_execution_analytics_fill_ratio_is_bounded() -> None:
 
     analytics = ExecutionAnalytics()
 
-    assert analytics.calculate_fill_ratio(100.0, 100.0) == 1.0
-    assert analytics.calculate_fill_ratio(100.0, 50.0) == 0.5
+    assert analytics.calculate_fill_ratio(
+        100.0,
+        100.0,
+    ) == 1.0
+
+    assert analytics.calculate_fill_ratio(
+        100.0,
+        50.0,
+    ) == 0.5
 
 
 def test_execution_analytics_rejects_overfill_ratio() -> None:
@@ -1124,7 +1629,10 @@ def test_execution_analytics_rejects_overfill_ratio() -> None:
     analytics = ExecutionAnalytics()
 
     try:
-        analytics.calculate_fill_ratio(100.0, 101.0)
+        analytics.calculate_fill_ratio(
+            100.0,
+            101.0,
+        )
     except ValueError as exc:
         assert "cannot exceed" in str(exc)
     else:
@@ -1142,7 +1650,10 @@ def test_execution_analytics_rejects_negative_fill() -> None:
     analytics = ExecutionAnalytics()
 
     try:
-        analytics.calculate_fill_ratio(100.0, -1.0)
+        analytics.calculate_fill_ratio(
+            100.0,
+            -1.0,
+        )
     except ValueError as exc:
         assert "negative" in str(exc)
     else:
@@ -1160,7 +1671,10 @@ def test_execution_analytics_rejects_zero_ordered_quantity() -> None:
     analytics = ExecutionAnalytics()
 
     try:
-        analytics.calculate_fill_ratio(0.0, 0.0)
+        analytics.calculate_fill_ratio(
+            0.0,
+            0.0,
+        )
     except ValueError as exc:
         assert "positive" in str(exc)
     else:
@@ -1201,7 +1715,10 @@ def test_execution_analytics_buy_and_sell_slippage_are_valid() -> None:
 
 
 def test_trade_generator_zero_delta_produces_no_instruction() -> None:
-    TradeGenerator = _import("tradegenerator", "TradeGenerator")
+    TradeGenerator = _import(
+        "tradegenerator",
+        "TradeGenerator",
+    )
 
     generator = TradeGenerator()
 
@@ -1217,7 +1734,10 @@ def test_trade_generator_zero_delta_produces_no_instruction() -> None:
 
 
 def test_trade_generator_buy_delta_is_correct() -> None:
-    TradeGenerator = _import("tradegenerator", "TradeGenerator")
+    TradeGenerator = _import(
+        "tradegenerator",
+        "TradeGenerator",
+    )
 
     generator = TradeGenerator()
 
@@ -1235,7 +1755,10 @@ def test_trade_generator_buy_delta_is_correct() -> None:
 
 
 def test_trade_generator_sell_delta_is_correct() -> None:
-    TradeGenerator = _import("tradegenerator", "TradeGenerator")
+    TradeGenerator = _import(
+        "tradegenerator",
+        "TradeGenerator",
+    )
 
     generator = TradeGenerator()
 
@@ -1253,7 +1776,10 @@ def test_trade_generator_sell_delta_is_correct() -> None:
 
 
 def test_trade_generator_handles_negative_current_position() -> None:
-    TradeGenerator = _import("tradegenerator", "TradeGenerator")
+    TradeGenerator = _import(
+        "tradegenerator",
+        "TradeGenerator",
+    )
 
     generator = TradeGenerator()
 
@@ -1271,7 +1797,10 @@ def test_trade_generator_handles_negative_current_position() -> None:
 
 
 def test_trade_generator_order_generation_is_deterministic() -> None:
-    TradeGenerator = _import("tradegenerator", "TradeGenerator")
+    TradeGenerator = _import(
+        "tradegenerator",
+        "TradeGenerator",
+    )
 
     first_generator = TradeGenerator()
     second_generator = TradeGenerator()
@@ -1282,6 +1811,7 @@ def test_trade_generator_order_generation_is_deterministic() -> None:
         10.0,
         500.0,
     )
+
     second_instruction = second_generator.generate_instruction(
         "SPY",
         0.0,
@@ -1291,8 +1821,13 @@ def test_trade_generator_order_generation_is_deterministic() -> None:
 
     assert first_instruction == second_instruction
 
-    first_order = first_generator.generate_order(first_instruction)
-    second_order = second_generator.generate_order(second_instruction)
+    first_order = first_generator.generate_order(
+        first_instruction
+    )
+
+    second_order = second_generator.generate_order(
+        second_instruction
+    )
 
     assert first_order.ticker == second_order.ticker
     assert first_order.side == second_order.side

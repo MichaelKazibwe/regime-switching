@@ -5,21 +5,23 @@ brokerrouter.py
 Institutional Broker Router
 ======================================================================
 
-Routes approved OMS orders to the appropriate broker adapter.
+Routes authorization-bound OMS orders to the appropriate broker
+adapter.
 
 Responsibilities
 ----------------
 
     - broker registration
     - broker selection
-    - deterministic routing
+    - deterministic authorized routing
     - default broker management
-    - order submission to broker adapters
+    - authorized order submission to broker adapters
     - broker availability checks
     - routing audit trail
     - serialization
     - metadata
     - health checks
+    - legacy raw-routing containment
     - regression tests
 
 The BrokerRouter does NOT:
@@ -32,6 +34,10 @@ The BrokerRouter does NOT:
     - calculate transaction costs
     - directly modify PortfolioAccount
     - implement broker-specific execution logic
+    - create authorization
+    - modify authorization
+    - enable live trading
+    - enable broker submission independently of authorization
 
 Those responsibilities belong to:
 
@@ -43,6 +49,7 @@ Those responsibilities belong to:
     PaperBroker / LiveBroker
     ExecutionEngine
     PortfolioAccount
+    Authorization / Handoff layers
 
 Architecture
 ------------
@@ -62,15 +69,74 @@ Architecture
     OMS
         |
         v
-    BrokerRouter
+    AuthorizedOrderIntent
+        |
+        v
+    AuthorizedExecutionHandoff
+        |
+        v
+    AuthorizedRoutingHandoff
+        |
+        v
+    BrokerRouter.route_authorized_order()
+        |
+        v
+    BrokerRouter._route_authorized_order()
         |
         +----------------+
         |                |
         v                v
     PaperBroker       LiveBroker
 
+
+LEGACY / RAW ROUTING
+
+    Raw Order
+        |
+        X
+    route_order()
+        |
+        X
+    Broker submission
+
+
+RAW BATCH ROUTING
+
+    list[Order]
+        |
+        X
+    route_batch()
+        |
+        X
+    Broker submission
+
+
+Security Boundary
+-----------------
+
+The production broker-submission boundary requires an
+AuthorizedRoutingHandoff.
+
+The legacy public methods:
+
+    route_order()
+    route_batch()
+
+remain present for API compatibility but are deliberately
+fail-closed.
+
+They MUST NOT submit raw Order objects to a broker.
+
+Only:
+
+    route_authorized_order(
+        AuthorizedRoutingHandoff
+    )
+
+may cross the production routing boundary.
+
 Author: Michael Kazibwe
-Version: 1.0.0
+Version: 1.1.0
 ======================================================================
 """
 
@@ -81,6 +147,11 @@ from datetime import UTC, datetime
 from typing import Any, Optional
 
 from order import Order
+
+from authorizedroutinghandoff import (
+    AuthorizedRoutingHandoff,
+    AuthorizedRoutingHandoffError,
+)
 
 
 # ======================================================================
@@ -102,7 +173,9 @@ class BrokerAdapter(ABC):
 
     @property
     @abstractmethod
-    def broker_name(self) -> str:
+    def broker_name(
+        self,
+    ) -> str:
         """
         Return the broker's unique name.
         """
@@ -129,7 +202,9 @@ class BrokerAdapter(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def health_check(self) -> bool:
+    def health_check(
+        self,
+    ) -> bool:
         """
         Return broker health status.
         """
@@ -146,6 +221,9 @@ class RoutingResult:
     Immutable-style routing result.
 
     Contains the broker selected and the broker response.
+
+    Authorization provenance is preserved when the routing operation
+    crosses the authorized routing boundary.
     """
 
     API_VERSION = "1.0.0"
@@ -158,8 +236,8 @@ class RoutingResult:
         response: Any = None,
         reason: Optional[str] = None,
         timestamp: Optional[str] = None,
+        authorization_provenance: Optional[dict] = None,
     ):
-
         self.approved = bool(
             approved
         )
@@ -180,7 +258,13 @@ class RoutingResult:
             ).isoformat()
         )
 
-    def to_dict(self) -> dict:
+        self.authorization_provenance = (
+            authorization_provenance
+        )
+
+    def to_dict(
+        self,
+    ) -> dict:
         """
         Serialize the routing result.
         """
@@ -191,6 +275,9 @@ class RoutingResult:
 
             "approved":
                 self.approved,
+
+            "authorization_provenance":
+                self.authorization_provenance,
 
             "order_id":
                 self.order_id,
@@ -218,10 +305,14 @@ class BrokerRouter:
     """
     Institutional broker routing engine.
 
-    Routes approved Order objects to registered broker adapters.
+    Production broker submission requires an
+    AuthorizedRoutingHandoff.
+
+    Raw Order routing APIs remain available only as fail-closed
+    compatibility surfaces.
     """
 
-    API_VERSION = "1.0.0"
+    API_VERSION = "1.1.0"
 
     PUBLIC_METHODS = (
         "register_broker",
@@ -230,6 +321,7 @@ class BrokerRouter:
         "get_broker",
         "available_brokers",
         "route_order",
+        "route_authorized_order",
         "route_batch",
         "health_check",
         "summary",
@@ -252,8 +344,8 @@ class BrokerRouter:
         Parameters
         ----------
         default_broker:
-            Optional broker name used when route_order() does not
-            explicitly specify a broker.
+            Optional broker name used by the authorized routing path
+            when no explicit broker is supplied.
         """
 
         self._brokers: dict[
@@ -309,18 +401,18 @@ class BrokerRouter:
                 "broker_name must be a string."
             )
 
-        broker_name = (
+        normalized = (
             broker_name
             .strip()
             .upper()
         )
 
-        if not broker_name:
+        if not normalized:
             raise ValueError(
                 "broker_name cannot be empty."
             )
 
-        return broker_name
+        return normalized
 
     # ==================================================================
     # REGISTER BROKER
@@ -484,26 +576,60 @@ class BrokerRouter:
         self.last_result = result
 
     # ==================================================================
-    # ROUTE ORDER
+    # INTERNAL AUTHORIZED ROUTING IMPLEMENTATION
     # ==================================================================
 
-    def route_order(
+    def _route_authorized_order(
         self,
         order: Order,
         broker_name: Optional[str] = None,
     ) -> RoutingResult:
         """
-        Route one order to a broker.
+        Internal broker-routing implementation.
 
-        If broker_name is omitted, the configured default broker
-        is used.
+        IMPORTANT
+        ---------
 
-        The router does not modify the order itself.
+        This method is intentionally private.
+
+        It is called only after route_authorized_order() has validated
+        an AuthorizedRoutingHandoff.
+
+        It performs:
+
+            - canonical Order validation;
+            - broker selection;
+            - broker health validation;
+            - broker submission;
+            - routing accounting;
+            - routing audit.
+
+        It does NOT:
+
+            - create authorization;
+            - validate authorization;
+            - modify authorization;
+            - create an Order;
+            - modify PortfolioAccount;
+            - execute portfolio accounting;
+            - enable live trading independently.
+
+        The authorization boundary is therefore established by the
+        public route_authorized_order() method before this method is
+        reached.
         """
+
+        # --------------------------------------------------------------
+        # CANONICAL ORDER VALIDATION
+        # --------------------------------------------------------------
 
         self._validate_order(
             order
         )
+
+        # --------------------------------------------------------------
+        # BROKER SELECTION
+        # --------------------------------------------------------------
 
         selected_name = (
             broker_name
@@ -512,6 +638,7 @@ class BrokerRouter:
         )
 
         if selected_name is None:
+
             result = RoutingResult(
                 approved=False,
                 order_id=order.order_id,
@@ -533,9 +660,17 @@ class BrokerRouter:
             )
         )
 
+        # --------------------------------------------------------------
+        # BROKER LOOKUP
+        # --------------------------------------------------------------
+
         broker = self.get_broker(
             selected_name
         )
+
+        # --------------------------------------------------------------
+        # BROKER HEALTH
+        # --------------------------------------------------------------
 
         if not broker.health_check():
 
@@ -553,6 +688,10 @@ class BrokerRouter:
             raise RuntimeError(
                 f"Broker '{selected_name}' is unhealthy."
             )
+
+        # --------------------------------------------------------------
+        # BROKER SUBMISSION
+        # --------------------------------------------------------------
 
         try:
 
@@ -583,7 +722,15 @@ class BrokerRouter:
                 f"order '{order.order_id}': {exc}"
             ) from exc
 
+        # --------------------------------------------------------------
+        # ROUTING ACCOUNTING
+        # --------------------------------------------------------------
+
         self.route_count += 1
+
+        # --------------------------------------------------------------
+        # ROUTING RESULT
+        # --------------------------------------------------------------
 
         result = RoutingResult(
             approved=True,
@@ -599,7 +746,201 @@ class BrokerRouter:
         return result
 
     # ==================================================================
-    # ROUTE BATCH
+    # AUTHORIZED ROUTE ORDER
+    # ==================================================================
+
+    def route_authorized_order(
+        self,
+        handoff: AuthorizedRoutingHandoff,
+        broker_name: Optional[str] = None,
+    ) -> RoutingResult:
+        """
+        Route an authorization-bound Order.
+
+        Phase IV-I-G / Phase IV-I-J authorized routing boundary.
+
+        The method requires an immutable
+        AuthorizedRoutingHandoff and preserves the complete
+        upstream authorization provenance.
+
+        The method is the ONLY public production routing method
+        permitted to cross into broker submission.
+
+        It does NOT:
+
+            - create authorization;
+            - modify authorization;
+            - create an Order;
+            - perform portfolio risk authorization;
+            - enable live trading;
+            - independently authorize broker submission.
+        """
+
+        # --------------------------------------------------------------
+        # HANDOFF TYPE
+        # --------------------------------------------------------------
+
+        if not isinstance(
+            handoff,
+            AuthorizedRoutingHandoff,
+        ):
+            raise AuthorizedRoutingHandoffError(
+                (
+                    "route_authorized_order requires an "
+                    "AuthorizedRoutingHandoff."
+                )
+            )
+
+        # --------------------------------------------------------------
+        # HANDOFF VALIDATION
+        # --------------------------------------------------------------
+
+        try:
+
+            handoff.validate()
+
+        except Exception as exc:
+
+            raise AuthorizedRoutingHandoffError(
+                (
+                    "Authorized routing handoff rejected: "
+                    f"{exc}"
+                )
+            ) from exc
+
+        # --------------------------------------------------------------
+        # CANONICAL ORDER
+        # --------------------------------------------------------------
+
+        order = handoff.routing_order()
+
+        if not isinstance(
+            order,
+            Order,
+        ):
+            raise AuthorizedRoutingHandoffError(
+                (
+                    "Authorized routing handoff does not contain "
+                    "a canonical Order."
+                )
+            )
+
+        # --------------------------------------------------------------
+        # COMPLETE UPSTREAM PROVENANCE
+        # --------------------------------------------------------------
+
+        provenance = (
+            handoff.execution_handoff.to_dict()
+        )
+
+        # --------------------------------------------------------------
+        # AUTHORIZED ROUTING
+        # --------------------------------------------------------------
+        #
+        # CRITICAL J.12 CHANGE:
+        #
+        # Do NOT call route_order().
+        #
+        # route_order() is the legacy raw-order compatibility API and
+        # is deliberately fail-closed.
+        #
+        # Authorized routing delegates directly to the private routing
+        # implementation after the AuthorizedRoutingHandoff has been
+        # validated.
+        #
+
+        history_length_before = len(
+            self.routing_history
+        )
+
+        result = self._route_authorized_order(
+            order,
+            broker_name=broker_name,
+        )
+
+        # --------------------------------------------------------------
+        # AUTHORIZATION-AWARE RESULT
+        # --------------------------------------------------------------
+
+        authorized_result = RoutingResult(
+            approved=result.approved,
+            order_id=result.order_id,
+            broker=result.broker,
+            response=result.response,
+            reason=result.reason,
+            timestamp=result.timestamp,
+            authorization_provenance=provenance,
+        )
+
+        # --------------------------------------------------------------
+        # REPLACE ROUTING AUDIT ENTRY
+        # --------------------------------------------------------------
+
+        if len(
+            self.routing_history
+        ) > history_length_before:
+
+            self.routing_history[
+                history_length_before
+            ] = authorized_result.to_dict()
+
+        self.last_result = (
+            authorized_result
+        )
+
+        return authorized_result
+
+    # ==================================================================
+    # LEGACY RAW ROUTE ORDER
+    # ==================================================================
+
+    def route_order(
+        self,
+        order: Order,
+        broker_name: Optional[str] = None,
+    ) -> RoutingResult:
+        """
+        Legacy raw-order routing API.
+
+        PHASE IV-I-J.12
+        ----------------
+
+        Raw Order objects are prohibited from crossing the production
+        broker-submission boundary.
+
+        This method remains present for API compatibility but is
+        deliberately fail-closed.
+
+        Production routing MUST use:
+
+            route_authorized_order(
+                AuthorizedRoutingHandoff
+            )
+
+        The arguments are intentionally accepted so existing callers
+        receive a deterministic RuntimeError rather than an unexpected
+        Python signature error.
+
+        No:
+
+            - Order validation
+            - broker selection
+            - broker health check
+            - broker submission
+            - routing count mutation
+            - routing-history mutation
+
+        occurs here.
+        """
+
+        raise RuntimeError(
+            "Raw Order routing is disabled. "
+            "Use route_authorized_order() with an "
+            "AuthorizedRoutingHandoff."
+        )
+
+    # ==================================================================
+    # LEGACY RAW ROUTE BATCH
     # ==================================================================
 
     def route_batch(
@@ -608,37 +949,35 @@ class BrokerRouter:
         broker_name: Optional[str] = None,
     ) -> list[RoutingResult]:
         """
-        Route a batch of orders.
+        Legacy raw-order batch routing API.
 
-        Orders are processed sequentially and deterministically.
+        PHASE IV-I-J.12
+        ----------------
+
+        Raw Order batches are prohibited from crossing the production
+        broker-submission boundary.
+
+        This method remains present for API compatibility but is
+        deliberately fail-closed.
+
+        Production batch routing must use explicit authorization-bound
+        handoffs.
+
+        No broker submission is performed.
         """
 
-        if not isinstance(
-            orders,
-            list,
-        ):
-            raise TypeError(
-                "orders must be a list."
-            )
-
-        results = []
-
-        for order in orders:
-
-            results.append(
-                self.route_order(
-                    order,
-                    broker_name,
-                )
-            )
-
-        return results
+        raise RuntimeError(
+            "Raw Order batch routing is disabled. "
+            "Use authorized routing handoffs."
+        )
 
     # ==================================================================
     # SUMMARY
     # ==================================================================
 
-    def summary(self) -> dict:
+    def summary(
+        self,
+    ) -> dict:
         """
         Return router state summary.
         """
@@ -651,9 +990,12 @@ class BrokerRouter:
             for result in self.routing_history
         )
 
-        failed = len(
-            self.routing_history
-        ) - successful
+        failed = (
+            len(
+                self.routing_history
+            )
+            - successful
+        )
 
         return {
             "api_version":
@@ -696,7 +1038,9 @@ class BrokerRouter:
     # ==================================================================
 
     @property
-    def metadata(self) -> dict:
+    def metadata(
+        self,
+    ) -> dict:
         """
         Return module metadata.
         """
@@ -713,6 +1057,15 @@ class BrokerRouter:
                     self.PUBLIC_METHODS
                 ),
 
+            "raw_routing_fail_closed":
+                True,
+
+            "authorized_routing_required":
+                True,
+
+            "production_routing_boundary":
+                "route_authorized_order",
+
             "summary":
                 self.summary(),
         }
@@ -728,7 +1081,7 @@ class BrokerRouter:
         Validate router and registered broker health.
         """
 
-        if self.API_VERSION != "1.0.0":
+        if self.API_VERSION != "1.1.0":
             raise RuntimeError(
                 "Invalid BrokerRouter API version."
             )
@@ -755,11 +1108,13 @@ class BrokerRouter:
             )
 
             if normalized != name:
+
                 raise RuntimeError(
                     f"Broker registry key mismatch for '{name}'."
                 )
 
             if not broker.health_check():
+
                 raise RuntimeError(
                     f"Broker '{name}' is unhealthy."
                 )
@@ -770,7 +1125,9 @@ class BrokerRouter:
     # TO DICTIONARY
     # ==================================================================
 
-    def to_dict(self) -> dict:
+    def to_dict(
+        self,
+    ) -> dict:
         """
         Serialize router configuration and routing history.
 
@@ -875,7 +1232,9 @@ class _TestBroker(BrokerAdapter):
         self.healthy = True
 
     @property
-    def broker_name(self) -> str:
+    def broker_name(
+        self,
+    ) -> str:
         return self._name
 
     def submit_order(
@@ -941,6 +1300,9 @@ class _TestBroker(BrokerAdapter):
 def test_broker_router():
     """
     Regression tests for BrokerRouter.
+
+    These embedded tests explicitly verify the Phase IV-I-J.12
+    raw-routing containment contract.
     """
 
     # ==============================================================
@@ -951,7 +1313,7 @@ def test_broker_router():
 
     assert (
         router.API_VERSION
-        == "1.0.0"
+        == "1.1.0"
     )
 
     assert router.health_check()
@@ -984,7 +1346,9 @@ def test_broker_router():
     )
 
     assert (
-        router.get_broker("PAPER")
+        router.get_broker(
+            "PAPER"
+        )
         is broker
     )
 
@@ -1002,51 +1366,84 @@ def test_broker_router():
     )
 
     # ==============================================================
-    # ROUTE
+    # J.12 RAW ROUTING CONTAINMENT
     # ==============================================================
 
-    result = router.route_order(
-        order
+    initial_route_count = (
+        router.route_count
     )
 
-    assert isinstance(
-        result,
-        RoutingResult,
+    initial_history_length = len(
+        router.routing_history
     )
 
-    assert result.approved
+    initial_submissions = list(
+        broker.submitted_orders
+    )
+
+    try:
+
+        router.route_order(
+            order
+        )
+
+        raise AssertionError(
+            "Expected RuntimeError"
+        )
+
+    except RuntimeError as exc:
+
+        assert (
+            "Raw Order routing is disabled"
+            in str(exc)
+        )
 
     assert (
-        result.order_id
-        == "ROUTER-000001"
+        router.route_count
+        == initial_route_count
     )
 
     assert (
-        result.broker
-        == "PAPER"
-    )
-
-    assert (
-        result.response["status"]
-        == "SUBMITTED"
+        len(
+            router.routing_history
+        )
+        == initial_history_length
     )
 
     assert (
         broker.submitted_orders
-        == ["ROUTER-000001"]
+        == initial_submissions
     )
 
     # ==============================================================
-    # ROUTE COUNT
+    # J.12 RAW EXPLICIT-BROKER ROUTING CONTAINMENT
     # ==============================================================
+
+    try:
+
+        router.route_order(
+            order,
+            broker_name="PAPER",
+        )
+
+        raise AssertionError(
+            "Expected RuntimeError"
+        )
+
+    except RuntimeError as exc:
+
+        assert (
+            "Raw Order routing is disabled"
+            in str(exc)
+        )
 
     assert (
-        router.route_count
-        == 1
+        broker.submitted_orders
+        == initial_submissions
     )
 
     # ==============================================================
-    # BATCH
+    # J.12 RAW BATCH ROUTING CONTAINMENT
     # ==============================================================
 
     orders = [
@@ -1064,26 +1461,30 @@ def test_broker_router():
         ),
     ]
 
-    results = router.route_batch(
-        orders
-    )
+    try:
 
-    assert len(
-        results
-    ) == 2
+        router.route_batch(
+            orders
+        )
 
-    assert all(
-        result.approved
-        for result in results
-    )
+        raise AssertionError(
+            "Expected RuntimeError"
+        )
+
+    except RuntimeError as exc:
+
+        assert (
+            "Raw Order batch routing is disabled"
+            in str(exc)
+        )
 
     assert (
-        router.route_count
-        == 3
+        broker.submitted_orders
+        == initial_submissions
     )
 
     # ==============================================================
-    # EXPLICIT BROKER
+    # EXPLICIT BROKER REGISTRATION
     # ==============================================================
 
     second_broker = _TestBroker(
@@ -1094,49 +1495,21 @@ def test_broker_router():
         second_broker
     )
 
-    explicit_order = Order(
-        order_id="ROUTER-000004",
-        ticker="GLD",
-        side="BUY",
-        quantity=10,
-    )
-
-    explicit_result = router.route_order(
-        explicit_order,
-        broker_name="SECOND",
-    )
-
     assert (
-        explicit_result.broker
-        == "SECOND"
-    )
-
-    assert (
-        second_broker.submitted_orders
-        == ["ROUTER-000004"]
+        "SECOND"
+        in router.available_brokers()
     )
 
     # ==============================================================
-    # DEFAULT BROKER
+    # EXPLICIT DEFAULT BROKER
     # ==============================================================
 
     router.set_default_broker(
         "SECOND"
     )
 
-    default_order = Order(
-        order_id="ROUTER-000005",
-        ticker="IEF",
-        side="BUY",
-        quantity=20,
-    )
-
-    default_result = router.route_order(
-        default_order
-    )
-
     assert (
-        default_result.broker
+        router.default_broker
         == "SECOND"
     )
 
@@ -1164,7 +1537,9 @@ def test_broker_router():
     try:
 
         router.register_broker(
-            _TestBroker("SECOND")
+            _TestBroker(
+                "SECOND"
+            )
         )
 
         raise AssertionError(
@@ -1214,7 +1589,7 @@ def test_broker_router():
     except RuntimeError as exc:
 
         assert (
-            "No broker"
+            "Raw Order routing is disabled"
             in str(exc)
         )
 
@@ -1236,6 +1611,9 @@ def test_broker_router():
         "UNHEALTHY"
     )
 
+    # Raw routing must fail closed BEFORE broker health or
+    # submission logic is reached.
+
     try:
 
         router.route_order(
@@ -1254,17 +1632,13 @@ def test_broker_router():
     except RuntimeError as exc:
 
         assert (
-            "unhealthy"
-            in str(exc).lower()
+            "Raw Order routing is disabled"
+            in str(exc)
         )
 
     # ==============================================================
     # SERIALIZATION
     # ==============================================================
-
-    router.set_default_broker(
-        "UNHEALTHY"
-    )
 
     exported = router.to_dict()
 
@@ -1315,9 +1689,33 @@ def test_broker_router():
         in metadata["public_methods"]
     )
 
+    assert (
+        "route_authorized_order"
+        in metadata["public_methods"]
+    )
+
+    assert (
+        metadata["raw_routing_fail_closed"]
+        is True
+    )
+
+    assert (
+        metadata["authorized_routing_required"]
+        is True
+    )
+
+    assert (
+        metadata["production_routing_boundary"]
+        == "route_authorized_order"
+    )
+
     # ==============================================================
     # FINAL HEALTH
     # ==============================================================
+
+    unhealthy.healthy = True
+
+    assert router.health_check()
 
     router.unregister_broker(
         "UNHEALTHY"
@@ -1326,7 +1724,8 @@ def test_broker_router():
     assert router.health_check()
 
     print(
-        "BrokerRouter Phase III-B.4 tests passed."
+        "BrokerRouter Phase IV-I-J.12 "
+        "raw routing containment tests passed."
     )
 
 

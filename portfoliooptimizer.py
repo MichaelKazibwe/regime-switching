@@ -277,7 +277,16 @@ class PortfolioOptimizer:
 
         self.risk_budget_engine = risk_budget_engine
         self.constraints = constraints
+
+        # Canonical production dependency name.
+        #
+        # ``vol_target_engine`` is retained for backward compatibility
+        # with the existing optimizer constructor/API. The public
+        # production composition contract uses ``volatility_targeting``.
+        # Both names intentionally reference the same authoritative
+        # VolatilityTargeting instance.
         self.vol_target_engine = vol_target_engine
+        self.volatility_targeting = vol_target_engine
 
         self.forecast_engine = (
             forecast_engine
@@ -1407,7 +1416,7 @@ class PortfolioOptimizer:
 
         try:
             scaled_weights = (
-                self.vol_target_engine.scale_weights(
+                self.volatility_targeting.scale_weights(
                     weights,
                     covariance,
                     target_vol,
@@ -1465,22 +1474,22 @@ class PortfolioOptimizer:
         engine_result = None
 
         if hasattr(
-            self.vol_target_engine,
+            self.volatility_targeting,
             "get_last_result",
         ):
             try:
                 engine_result = (
-                    self.vol_target_engine.get_last_result()
+                    self.volatility_targeting.get_last_result()
                 )
             except Exception:
                 engine_result = None
 
         elif hasattr(
-            self.vol_target_engine,
+            self.volatility_targeting,
             "last_result",
         ):
             engine_result = (
-                self.vol_target_engine.last_result
+                self.volatility_targeting.last_result
             )
 
         return (
@@ -2674,10 +2683,10 @@ class PortfolioOptimizer:
                 ),
 
                 "volatility_targeting": (
-                    self.vol_target_engine
+                    self.volatility_targeting
                     is not None
                     and hasattr(
-                        self.vol_target_engine,
+                        self.volatility_targeting,
                         "scale_weights",
                     )
                 ),
@@ -2785,6 +2794,85 @@ def test_portfolio_optimizer_configuration() -> None:
 
 
 # ======================================================================
+# PRODUCTION VOLATILITY-TARGETING INTERFACE SELF-TEST
+# ======================================================================
+
+
+def test_portfolio_optimizer_exposes_production_volatility_targeting() -> None:
+    """
+    Verify that the authoritative volatility-targeting dependency is
+    exposed through the canonical production interface while preserving
+    the legacy ``vol_target_engine`` reference.
+    """
+
+    class _TestRiskBudgetEngine:
+        def get_target_budgets(self, regime, assets):
+            return {asset: 1.0 for asset in assets}
+
+        def optimize(self, covariance, risk_budget):
+            return np.asarray(risk_budget, dtype=float)
+
+    class _TestConstraints:
+        def enforce(self, weights):
+            weights = np.asarray(weights, dtype=float)
+            return {
+                "weights": weights.copy(),
+                "cash": 0.0,
+            }
+
+    class _TestVolatilityTargeting:
+        def scale_weights(
+            self,
+            weights,
+            covariance,
+            target_vol,
+            max_leverage=None,
+        ):
+            return np.asarray(weights, dtype=float).copy()
+
+    volatility_targeting = _TestVolatilityTargeting()
+
+    optimizer = PortfolioOptimizer(
+        risk_budget_engine=_TestRiskBudgetEngine(),
+        constraints=_TestConstraints(),
+        vol_target_engine=volatility_targeting,
+    )
+
+    if optimizer.volatility_targeting is not volatility_targeting:
+        raise AssertionError(
+            "PortfolioOptimizer.volatility_targeting must reference "
+            "the authoritative volatility-targeting engine."
+        )
+
+    if optimizer.vol_target_engine is not volatility_targeting:
+        raise AssertionError(
+            "Legacy vol_target_engine reference must remain intact."
+        )
+
+    if not hasattr(
+        optimizer.volatility_targeting,
+        "scale_weights",
+    ):
+        raise AssertionError(
+            "Production volatility-targeting dependency must expose "
+            "scale_weights."
+        )
+
+    health = optimizer.health_check()
+
+    if health["healthy"] is not True:
+        raise AssertionError(
+            "PortfolioOptimizer should remain healthy when its "
+            "production volatility-targeting interface is present."
+        )
+
+    if health["checks"]["volatility_targeting"] is not True:
+        raise AssertionError(
+            "Production volatility-targeting health check failed."
+        )
+
+
+# ======================================================================
 # EXPOSURE ACCOUNTING SELF-TEST
 # ======================================================================
 
@@ -2887,6 +2975,7 @@ def test_portfolio_optimizer_exposure_accounting() -> None:
 
 if __name__ == "__main__":
     test_portfolio_optimizer_configuration()
+    test_portfolio_optimizer_exposes_production_volatility_targeting()
     test_portfolio_optimizer_exposure_accounting()
 
     print(

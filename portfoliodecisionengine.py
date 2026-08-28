@@ -390,60 +390,163 @@ class PortfolioDecisionEngine:
         return str(result)
 
     @staticmethod
-    def _looks_like_price_history(data: Any, tickers: list[str]) -> bool:
+    def _looks_like_price_history(
+        data: Any,
+        tickers: list[str],
+    ) -> bool:
         """Return True when data is a valid positive price DataFrame."""
         try:
             import pandas as pd
+
             if not isinstance(data, pd.DataFrame) or data.empty:
                 return False
-            if any((ticker not in data.columns for ticker in tickers)):
+
+            if any(ticker not in data.columns for ticker in tickers):
                 return False
-            values = data.loc[:, tickers].apply(pd.to_numeric, errors='coerce')
-            return bool(values.notna().all().all() and (values > 0.0).all().all())
+
+            values = data.loc[:, tickers].apply(
+                pd.to_numeric,
+                errors="coerce",
+            )
+
+            return bool(
+                values.notna().all().all()
+                and (values > 0.0).all().all()
+            )
         except (TypeError, ValueError, KeyError):
             return False
 
-    def _estimate_expected_returns(self, returns: Any, portfolio: Any, macro_data: Any, regime: Optional[str], tickers: list[str]) -> dict[str, float]:
-        """Estimate expected returns without treating returns as prices."""
-        if not tickers or returns is None:
-            return {ticker: 0.0 for ticker in tickers}
-        if self.expected_return_forecaster is not None and self._looks_like_price_history(returns, tickers):
-            forecast = getattr(self.expected_return_forecaster, 'forecast', None)
-            if callable(forecast):
-                try:
-                    return self._normalize_expected_returns(forecast(returns.loc[:, tickers]), tickers)
-                except (TypeError, ValueError, RuntimeError, KeyError):
-                    pass
-        if self.expected_return_forecaster is not None:
-            forecast = getattr(self.expected_return_forecaster, 'forecast', None)
-            if callable(forecast):
-                try:
-                    import inspect
-                    parameters = inspect.signature(forecast).parameters
-                    if 'tickers' in parameters:
-                        result = forecast(tickers=tickers)
-                        return self._normalize_expected_returns(result, tickers)
-                except (TypeError, ValueError, RuntimeError):
-                    pass
+    def _validate_price_history(
+        self,
+        prices: Any,
+        tickers: list[str],
+    ) -> None:
+        """Validate historical prices before expected-return forecasting."""
+        if prices is None:
+            raise ValueError(
+                "Price history is required for expected-return forecasting."
+            )
+
         try:
             import pandas as pd
-            if isinstance(returns, pd.DataFrame):
-                frame = returns.loc[:, tickers].apply(pd.to_numeric, errors='coerce')
-                values = np.nan_to_num(frame.mean(axis=0, skipna=True).to_numpy(dtype=float) * 252.0, nan=0.0, posinf=0.0, neginf=0.0)
-                return {ticker: float(values[i]) for i, ticker in enumerate(tickers)}
-        except (TypeError, ValueError, KeyError):
-            pass
-        if isinstance(returns, dict):
-            result: dict[str, float] = {}
-            for ticker in tickers:
+
+            if not isinstance(prices, pd.DataFrame):
+                raise TypeError(
+                    "Price history must be a pandas DataFrame."
+                )
+
+            if prices.empty:
+                raise ValueError("Price history cannot be empty.")
+
+            missing = [
+                ticker
+                for ticker in tickers
+                if ticker not in prices.columns
+            ]
+            if missing:
+                raise ValueError(
+                    "Price history is missing ticker columns: "
+                    + ", ".join(missing)
+                    + "."
+                )
+
+            values = prices.loc[:, tickers].apply(
+                pd.to_numeric,
+                errors="coerce",
+            )
+
+            if values.isna().any().any():
+                raise ValueError(
+                    "Price history contains missing or non-numeric values."
+                )
+
+            if (values <= 0.0).any().any():
+                raise ValueError(
+                    "Price history must contain strictly positive values."
+                )
+
+            minimum_history = 252
+            method = getattr(
+                self.expected_return_forecaster,
+                "minimum_history",
+                None,
+            )
+
+            if callable(method):
                 try:
-                    values = np.asarray(returns.get(ticker, []), dtype=float).reshape(-1)
-                    values = values[np.isfinite(values)]
-                    result[ticker] = float(values.mean() * 252.0) if values.size else 0.0
+                    candidate = int(method())
+                    if candidate > 0:
+                        minimum_history = candidate
                 except (TypeError, ValueError):
-                    result[ticker] = 0.0
-            return result
-        return {ticker: 0.0 for ticker in tickers}
+                    pass
+
+            if len(values) < minimum_history:
+                raise ValueError(
+                    "Price history is too short for expected-return "
+                    f"forecasting: received {len(values)} observations; "
+                    f"minimum required is {minimum_history}."
+                )
+
+        except ImportError as exc:
+            raise RuntimeError(
+                "pandas is required to validate price history."
+            ) from exc
+
+    def _estimate_expected_returns(
+        self,
+        prices: Any,
+        portfolio: Any,
+        macro_data: Any,
+        regime: Optional[str],
+        tickers: list[str],
+    ) -> dict[str, float]:
+        """Estimate expected returns using historical asset prices."""
+        if self.expected_return_forecaster is None:
+            raise RuntimeError(
+                "Expected-return forecaster is not configured."
+            )
+
+        self._validate_price_history(
+            prices,
+            tickers,
+        )
+
+        forecast_method = getattr(
+            self.expected_return_forecaster,
+            "forecast",
+            None,
+        )
+
+        if callable(forecast_method):
+            result = forecast_method(prices)
+            return self._normalize_expected_returns(
+                result,
+                tickers,
+            )
+
+        result = self._call(
+            self.expected_return_forecaster,
+            (
+                "estimate",
+                "predict",
+            ),
+            prices=prices,
+            portfolio=portfolio,
+            macro_data=macro_data,
+            regime=regime,
+            tickers=tickers,
+        )
+
+        if result is None:
+            raise RuntimeError(
+                "Expected-return forecaster does not expose "
+                "a compatible forecast, estimate, or predict method."
+            )
+
+        return self._normalize_expected_returns(
+            result,
+            tickers,
+        )
 
     def _estimate_covariance(self, returns: Any, regime: Optional[str], tickers: list[str], regimes: Any=None) -> dict[str, dict[str, float]]:
         """
@@ -535,7 +638,15 @@ class PortfolioDecisionEngine:
             if 'asset_order' in parameter_names:
                 result = optimize_method(covariance=matrix, regime=regime, asset_order=tuple(tickers), prices=prices)
             else:
-                result = optimize_method(tickers=tickers, expected_returns=expected_returns, covariance=covariance, portfolio=portfolio, regime=regime, constraints=constraints)
+                result = optimize_method(
+                    tickers=tickers,
+                    expected_returns=expected_returns,
+                    covariance=covariance,
+                    portfolio=portfolio,
+                    regime=regime,
+                    constraints=constraints,
+                    prices=prices,
+                )
         else:
             result = self._call(self.optimizer, ('allocate', 'solve', 'construct'), expected_returns=expected_returns, covariance=covariance, portfolio=portfolio, regime=regime, tickers=tickers, constraints=constraints)
         weights = self._extract_optimizer_weights(result, tickers)
@@ -730,7 +841,7 @@ class PortfolioDecisionEngine:
             return result
         return {}
 
-    def decide(self, portfolio: Any, returns: Any=None, macro_data: Any=None, views: Any=None, market_weights: Any=None, scenarios: Any=None, expected_returns: Any=None, covariance: Any=None, regimes: Any=None) -> PortfolioDecision:
+    def decide(self, portfolio: Any, returns: Any=None, prices: Any = None, macro_data: Any=None, views: Any=None, market_weights: Any=None, scenarios: Any=None, expected_returns: Any=None, covariance: Any=None, regimes: Any=None) -> PortfolioDecision:
         """
         Execute one complete portfolio decision cycle.
         """
@@ -750,7 +861,7 @@ class PortfolioDecisionEngine:
             if expected_returns is not None:
                 normalized_expected_returns = self._normalize_expected_returns(expected_returns, tickers)
             else:
-                normalized_expected_returns = self._estimate_expected_returns(returns, portfolio, macro_data, regime, tickers)
+                normalized_expected_returns = self._estimate_expected_returns(prices, portfolio, macro_data, regime, tickers)
             if covariance is not None:
                 normalized_covariance = self._normalize_covariance(covariance, tickers)
             else:
@@ -759,7 +870,7 @@ class PortfolioDecisionEngine:
             posterior_returns = self._apply_black_litterman(normalized_expected_returns, normalized_covariance, views, market_weights)
             if views is not None:
                 self._audit('BLACK_LITTERMAN_APPLIED', message='Black-Litterman views incorporated.', component='BlackLittermanModel')
-            optimized_weights = self._optimize(posterior_returns, normalized_covariance, portfolio, regime, tickers, constraints=self.constraints, prices=returns if self._looks_like_price_history(returns, tickers) else None)
+            optimized_weights = self._optimize(posterior_returns, normalized_covariance, portfolio, regime, tickers, constraints=self.constraints, prices=prices)
             optimized_weights = self._normalize_weights(optimized_weights, tickers)
             self._audit('PORTFOLIO_OPTIMIZED', message='Portfolio optimization completed.', component='PortfolioOptimizer', data={'weights': optimized_weights})
             constrained_weights = self._apply_constraints(optimized_weights, tickers)
@@ -924,10 +1035,45 @@ class _TestRegimeModel:
         return 'EXPANSION'
 
 class _TestExpectedReturnForecaster:
-    """Deterministic expected-return model."""
+    """Deterministic expected-return model using historical prices."""
 
-    def forecast(self, tickers: list[str], **kwargs: Any) -> dict[str, float]:
-        return {ticker: 0.05 for ticker in tickers}
+    def __init__(self) -> None:
+        self.received_prices: Any = None
+        self.forecast_calls = 0
+
+    @staticmethod
+    def minimum_history() -> int:
+        return 252
+
+    def forecast(self, prices: Any) -> dict[str, float]:
+        import pandas as pd
+
+        if not isinstance(prices, pd.DataFrame):
+            raise TypeError("Test forecaster received non-price input.")
+
+        values = prices.apply(
+            pd.to_numeric,
+            errors="coerce",
+        )
+
+        if values.isna().any().any():
+            raise ValueError(
+                "Test forecaster received non-numeric prices."
+            )
+
+        if (values <= 0.0).any().any():
+            raise ValueError(
+                "Test forecaster received non-positive prices."
+            )
+
+        self.received_prices = prices.copy()
+        self.forecast_calls += 1
+
+        return {
+            str(ticker): 0.05
+            for ticker in prices.columns
+        }
+
 
 class _TestCovarianceEngine:
     """Deterministic covariance model."""
@@ -955,13 +1101,29 @@ class _TestRegimeCovariance:
         return np.eye(2, dtype=float) * 0.04
 
 class _TestOptimizer:
-    """Deterministic equal-weight optimizer."""
+    """Deterministic equal-weight optimizer with price capture."""
 
-    def optimize(self, tickers: list[str], **kwargs: Any) -> dict[str, float]:
+    def __init__(self) -> None:
+        self.received_prices: Any = None
+
+    def optimize(
+        self,
+        tickers: list[str],
+        prices: Any = None,
+        **kwargs: Any,
+    ) -> dict[str, float]:
+        self.received_prices = prices
+
         if not tickers:
             return {}
+
         weight = 1.0 / len(tickers)
-        return {ticker: weight for ticker in tickers}
+
+        return {
+            ticker: weight
+            for ticker in tickers
+        }
+
 
 class _TestConstraints:
     """Deterministic pass-through constraints."""
@@ -986,6 +1148,59 @@ class _TestScenarioEngine:
         count = len(scenarios) if hasattr(scenarios, '__len__') else 1
         return {'scenario_count': count, 'status': 'COMPLETED'}
 
+def _build_test_prices(
+    tickers: tuple[str, ...] = ("SPY", "TLT"),
+    observations: int = 260,
+) -> Any:
+    """Build deterministic positive price history for regression tests."""
+    import pandas as pd
+
+    if observations < 252:
+        raise ValueError(
+            "Test price history must contain at least 252 observations."
+        )
+
+    index = pd.date_range(
+        "2024-01-01",
+        periods=observations,
+        freq="D",
+    )
+
+    t = np.arange(
+        observations,
+        dtype=float,
+    )
+
+    base_levels = {
+        "SPY": 100.0,
+        "TLT": 90.0,
+    }
+
+    columns: dict[str, np.ndarray] = {}
+
+    for index_number, ticker in enumerate(tickers):
+        base = base_levels.get(
+            ticker,
+            100.0 + 10.0 * index_number,
+        )
+        drift = 0.0004 + 0.00005 * index_number
+        cycle = 0.01 * np.sin(
+            t / 17.0 + index_number
+        )
+
+        columns[ticker] = (
+            base
+            * np.exp(
+                drift * t + cycle
+            )
+        )
+
+    return pd.DataFrame(
+        columns,
+        index=index,
+    )
+
+
 def _build_test_engine() -> PortfolioDecisionEngine:
     """
     Build a completely deterministic engine for regression tests.
@@ -996,8 +1211,9 @@ def test_portfolio_decision_engine() -> None:
     """Test the complete deterministic decision pipeline."""
     engine = _build_test_engine()
     portfolio = {'weights': {'SPY': 0.5, 'TLT': 0.5}}
+    prices = _build_test_prices()
     returns = {'SPY': [0.01, 0.02, -0.01], 'TLT': [0.005, -0.002, 0.004]}
-    decision = engine.decide(portfolio=portfolio, returns=returns, macro_data={'growth': 1.0, 'inflation': 2.0, 'unemployment': 4.0, 'yield_spread': 1.0}, scenarios=['BASE', 'RECESSION'])
+    decision = engine.decide(portfolio=portfolio, prices=prices, returns=returns, macro_data={'growth': 1.0, 'inflation': 2.0, 'unemployment': 4.0, 'yield_spread': 1.0}, scenarios=['BASE', 'RECESSION'])
     assert decision.status == PortfolioDecisionStatus.APPROVED.value
     assert decision.approved
     assert decision.regime == 'EXPANSION'
@@ -1014,6 +1230,8 @@ def test_portfolio_decision_engine() -> None:
     assert len(decision.risk_contributions) == 2
     assert len(decision.risk_contribution_pct) == 2
     assert decision.scenario_results['status'] == 'COMPLETED'
+    assert engine.optimizer.received_prices is not None
+    assert engine.optimizer.received_prices.equals(prices)
     summary = engine.summary()
     assert summary['decision_count'] == 1
     assert summary['approved_count'] == 1
@@ -1036,13 +1254,147 @@ def test_portfolio_decision_engine_regime_covariance() -> None:
     regime_covariance = _TestRegimeCovariance()
     engine = PortfolioDecisionEngine(regime_model=_TestRegimeModel(), expected_return_forecaster=_TestExpectedReturnForecaster(), covariance_engine=_TestCovarianceEngine(), regime_covariance=regime_covariance, ensemble_covariance=None, black_litterman=None, optimizer=_TestOptimizer(), constraints=_TestConstraints(), risk_model=_TestRiskModel(), scenario_engine=_TestScenarioEngine())
     portfolio = {'weights': {'SPY': 0.5, 'TLT': 0.5}}
+    prices = _build_test_prices()
     returns = {'SPY': [0.01, 0.02, -0.01], 'TLT': [0.005, -0.002, 0.004]}
     regimes = ['EXPANSION', 'EXPANSION', 'RECESSION']
-    decision = engine.decide(portfolio=portfolio, returns=returns, regimes=regimes, macro_data={'growth': 1.0, 'inflation': 2.0, 'unemployment': 4.0, 'yield_spread': 1.0})
+    decision = engine.decide(portfolio=portfolio, prices=prices, returns=returns, regimes=regimes, macro_data={'growth': 1.0, 'inflation': 2.0, 'unemployment': 4.0, 'yield_spread': 1.0})
     assert decision.status == PortfolioDecisionStatus.APPROVED.value
     assert regime_covariance.fitted
     assert regime_covariance.last_regimes == regimes
     print('PortfolioDecisionEngine regime covariance tests passed.')
+
+def test_expected_return_forecaster_receives_prices_not_returns() -> None:
+    """Regression: expected-return forecasting receives prices."""
+    forecaster = _TestExpectedReturnForecaster()
+    engine = PortfolioDecisionEngine(
+        regime_model=_TestRegimeModel(),
+        expected_return_forecaster=forecaster,
+        covariance_engine=_TestCovarianceEngine(),
+        regime_covariance=None,
+        ensemble_covariance=None,
+        black_litterman=None,
+        optimizer=_TestOptimizer(),
+        constraints=_TestConstraints(),
+        risk_model=_TestRiskModel(),
+        scenario_engine=None,
+    )
+
+    prices = _build_test_prices()
+
+    decision = engine.decide(
+        portfolio={'weights': {'SPY': 0.5, 'TLT': 0.5}},
+        prices=prices,
+        returns={
+            'SPY': [0.01, 0.02, -0.01],
+            'TLT': [0.005, -0.002, 0.004],
+        },
+        macro_data={
+            'growth': 1.0,
+            'inflation': 2.0,
+            'unemployment': 4.0,
+            'yield_spread': 1.0,
+        },
+    )
+
+    assert decision.approved
+    assert forecaster.forecast_calls == 1
+    assert forecaster.received_prices is not None
+    assert forecaster.received_prices.equals(prices)
+
+
+def test_expected_return_forecasting_rejects_returns_as_prices() -> None:
+    """Regression: return-like data cannot cross the price boundary."""
+    forecaster = _TestExpectedReturnForecaster()
+    engine = PortfolioDecisionEngine(
+        regime_model=_TestRegimeModel(),
+        expected_return_forecaster=forecaster,
+        covariance_engine=_TestCovarianceEngine(),
+        regime_covariance=None,
+        ensemble_covariance=None,
+        black_litterman=None,
+        optimizer=_TestOptimizer(),
+        constraints=_TestConstraints(),
+        risk_model=_TestRiskModel(),
+        scenario_engine=None,
+    )
+
+    import pandas as pd
+
+    return_like_prices = pd.DataFrame({
+        'SPY': np.tile([0.01, 0.02, -0.01, 0.015], 63)[:252],
+        'TLT': np.tile([0.005, -0.002, 0.004, 0.003], 63)[:252],
+    })
+
+    decision = engine.decide(
+        portfolio={'weights': {'SPY': 0.5, 'TLT': 0.5}},
+        prices=return_like_prices,
+        returns={
+            'SPY': [0.01, 0.02, -0.01],
+            'TLT': [0.005, -0.002, 0.004],
+        },
+        macro_data={
+            'growth': 1.0,
+            'inflation': 2.0,
+            'unemployment': 4.0,
+            'yield_spread': 1.0,
+        },
+    )
+
+    assert decision.status == PortfolioDecisionStatus.FAILED.value
+    assert not decision.approved
+    assert any(
+        'strictly positive' in error
+        for error in decision.errors
+    )
+    assert forecaster.forecast_calls == 0
+
+
+def test_expected_return_forecasting_rejects_insufficient_price_history() -> None:
+    """Regression: at least 252 price observations are required."""
+    forecaster = _TestExpectedReturnForecaster()
+    engine = PortfolioDecisionEngine(
+        regime_model=_TestRegimeModel(),
+        expected_return_forecaster=forecaster,
+        covariance_engine=_TestCovarianceEngine(),
+        regime_covariance=None,
+        ensemble_covariance=None,
+        black_litterman=None,
+        optimizer=_TestOptimizer(),
+        constraints=_TestConstraints(),
+        risk_model=_TestRiskModel(),
+        scenario_engine=None,
+    )
+
+    import pandas as pd
+
+    short_prices = pd.DataFrame({
+        'SPY': np.linspace(100.0, 110.0, 251),
+        'TLT': np.linspace(90.0, 95.0, 251),
+    })
+
+    decision = engine.decide(
+        portfolio={'weights': {'SPY': 0.5, 'TLT': 0.5}},
+        prices=short_prices,
+        returns={
+            'SPY': [0.01, 0.02, -0.01],
+            'TLT': [0.005, -0.002, 0.004],
+        },
+        macro_data={
+            'growth': 1.0,
+            'inflation': 2.0,
+            'unemployment': 4.0,
+            'yield_spread': 1.0,
+        },
+    )
+
+    assert decision.status == PortfolioDecisionStatus.FAILED.value
+    assert not decision.approved
+    assert any(
+        'too short' in error
+        for error in decision.errors
+    )
+    assert forecaster.forecast_calls == 0
+
 
 def test_portfolio_decision_engine_weight_validation() -> None:
     """Test portfolio weight validation."""
