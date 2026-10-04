@@ -39,6 +39,8 @@ from operationalevent import (
     OperationalSeverity,
 )
 
+from audittrail import OperationalAuditTrail
+
 
 # ============================================================
 # CONSTANTS
@@ -528,6 +530,7 @@ class AlertEngine:
         policy: AlertPolicy | None = None,
         transport: NotificationTransport | None = None,
         default_recipient: str | None = None,
+        audit_trail: OperationalAuditTrail | None = None,
     ) -> None:
         self.policy = (
             policy
@@ -544,6 +547,16 @@ class AlertEngine:
         self.default_recipient = (
             default_recipient
         )
+
+        self.audit_trail = audit_trail
+
+        if self.audit_trail is not None and not isinstance(
+            self.audit_trail,
+            OperationalAuditTrail,
+        ):
+            raise AlertConfigurationError(
+                "audit_trail must be an OperationalAuditTrail"
+            )
 
         self._processed_event_ids: set[str] = set()
         self._alert_count = 0
@@ -606,6 +619,19 @@ class AlertEngine:
             raise AlertEventError(
                 "OperationalEvent event_id cannot be empty"
             )
+
+    # --------------------------------------------------------
+    # AUDIT TRAIL
+    # --------------------------------------------------------
+
+    def _audit_event(
+        self,
+        event: OperationalEvent,
+    ) -> None:
+        """Append a unique operational event to the audit trail."""
+
+        if self.audit_trail is not None:
+            self.audit_trail.append(event)
 
     # --------------------------------------------------------
     # POLICY
@@ -715,6 +741,8 @@ class AlertEngine:
                 event
             )
 
+        self._audit_event(event)
+
         if not self.should_alert(event):
             self._processed_event_ids.add(
                 event.event_id
@@ -788,6 +816,17 @@ class AlertEngine:
             )
         )
 
+        audit_health = {
+            "configured": self.audit_trail is not None,
+            "healthy": True,
+        }
+
+        if self.audit_trail is not None:
+            audit_health = self.audit_trail.health_check()
+            healthy = healthy and bool(
+                audit_health.get("healthy", False)
+            )
+
         return {
             "api_version": API_VERSION,
             "phase": PHASE,
@@ -800,6 +839,7 @@ class AlertEngine:
                 self.transport is not None
             ),
             "transport_health": transport_health,
+            "audit_trail_health": audit_health,
             "processed_event_count": len(
                 self._processed_event_ids
             ),
@@ -832,11 +872,22 @@ class AlertEngine:
         if callable(metadata_method):
             transport_metadata = metadata_method()
 
+        audit_metadata = {
+            "configured": self.audit_trail is not None,
+            "component": "OperationalAuditTrail",
+        }
+
+        if self.audit_trail is not None:
+            audit_metadata.update(
+                self.audit_trail.metadata()
+            )
+
         return {
             "api_version": API_VERSION,
             "phase": PHASE,
             "component": COMPONENT,
             "production_control": True,
+            "audit_trail": audit_metadata,
             "execution_authority": False,
             "order_creation": False,
             "broker_submission": False,
