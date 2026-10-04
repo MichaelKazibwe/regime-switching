@@ -871,10 +871,42 @@ class PortfolioDecisionEngine:
             if views is not None:
                 self._audit('BLACK_LITTERMAN_APPLIED', message='Black-Litterman views incorporated.', component='BlackLittermanModel')
             optimized_weights = self._optimize(posterior_returns, normalized_covariance, portfolio, regime, tickers, constraints=self.constraints, prices=prices)
-            optimized_weights = self._normalize_weights(optimized_weights, tickers)
+
+            # Preserve an authoritative Risk Governor reduction.
+            # The optimizer has already applied the governance decision;
+            # normalizing here would silently restore exposure removed by
+            # the risk governor.
+            optimizer_risk_diagnostics = getattr(
+                self.optimizer,
+                "last_volatility_diagnostics",
+                None,
+            )
+            governance_action = None
+            if isinstance(optimizer_risk_diagnostics, dict):
+                governance_action = optimizer_risk_diagnostics.get(
+                    "risk_governance_action"
+                )
+
+            risk_governed_output = (
+                str(governance_action).upper() == "REDUCE"
+            )
+
+            if not risk_governed_output:
+                optimized_weights = self._normalize_weights(
+                    optimized_weights,
+                    tickers,
+                )
             self._audit('PORTFOLIO_OPTIMIZED', message='Portfolio optimization completed.', component='PortfolioOptimizer', data={'weights': optimized_weights})
             constrained_weights = self._apply_constraints(optimized_weights, tickers)
-            constrained_weights = self._normalize_weights(constrained_weights, tickers)
+
+            # Preserve the Risk Governor reduction through the constraint
+            # boundary. Constraints may modify individual weights, but the
+            # Decision Engine must not restore deliberately reduced exposure.
+            if not risk_governed_output:
+                constrained_weights = self._normalize_weights(
+                    constrained_weights,
+                    tickers,
+                )
             weight_warnings, weight_errors = self._validate_weights(constrained_weights, tickers)
             warnings.extend(weight_warnings)
             errors.extend(weight_errors)
