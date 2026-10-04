@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import logging
-from typing import Iterable
+from datetime import datetime, timedelta, timezone
+from typing import Callable, Iterable
+from tradingcalendar import TradingCalendar
 
 import pandas as pd
 import yfinance as yf
@@ -43,6 +45,8 @@ class MarketDataLoader:
         *,
         auto_adjust: bool = True,
         max_retries: int = 2,
+        max_data_age: timedelta | None = None,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
 
         requested_assets = (
@@ -75,11 +79,62 @@ class MarketDataLoader:
             int(max_retries),
         )
 
+        if max_data_age is not None:
+            if not isinstance(max_data_age, timedelta):
+                raise TypeError(
+                    "max_data_age must be a datetime.timedelta or None"
+                )
+
+            if max_data_age <= timedelta(0):
+                raise ValueError(
+                    "max_data_age must be positive"
+                )
+
+        self.max_data_age = max_data_age
+
+        self._clock = clock or (
+            lambda: datetime.now(timezone.utc)
+        )
+
+        initial_clock = self._clock()
+
+        if (
+            initial_clock.tzinfo is None
+            or initial_clock.utcoffset() is None
+        ):
+            raise ValueError(
+                "clock must return a timezone-aware datetime"
+            )
+
+        self._calendar = TradingCalendar()
+
         self.last_downloaded_assets: tuple[str, ...] = ()
         self.last_failed_assets: tuple[str, ...] = ()
         self.last_recovered_assets: tuple[str, ...] = ()
         self.last_batch_error: str | None = None
         self.last_incomplete_assets: tuple[str, ...] = ()
+
+        # --------------------------------------------------------------
+        # STALE-DATA / FRESHNESS STATE
+        # --------------------------------------------------------------
+
+        self.last_stale_assets: tuple[str, ...] = ()
+
+        self.last_observation_timestamps: dict[
+            str,
+            str | None,
+        ] = {}
+
+        self.last_freshness_age_seconds: dict[
+            str,
+            float | None,
+        ] = {}
+
+        self.last_freshness_status = (
+            "DISABLED"
+            if self.max_data_age is None
+            else "NOT_EVALUATED"
+        )
 
     # ========================================================
     # NORMALIZATION
@@ -756,6 +811,97 @@ class MarketDataLoader:
     # PUBLIC PRICE API
     # ========================================================
 
+    def _assess_freshness(
+        self,
+        prices: pd.DataFrame,
+    ) -> None:
+        """Assess latest valid observations against max_data_age."""
+
+        self.last_stale_assets = ()
+        self.last_observation_timestamps = {}
+        self.last_freshness_age_seconds = {}
+
+        if self.max_data_age is None:
+            self.last_freshness_status = "DISABLED"
+            return
+
+        now = self._clock()
+
+        if now.tzinfo is None or now.utcoffset() is None:
+            raise ValueError(
+                "clock must return a timezone-aware datetime"
+            )
+
+        now_utc = now.astimezone(timezone.utc)
+
+        latest_session = self._calendar.latest_completed_session(
+            now_utc
+        )
+
+        reference_time = min(
+            latest_session,
+            now_utc,
+        )
+
+        stale_assets: list[str] = []
+
+        for asset in self.assets:
+
+            if asset not in prices.columns:
+                self.last_observation_timestamps[asset] = None
+                self.last_freshness_age_seconds[asset] = None
+                stale_assets.append(asset)
+                continue
+
+            series = prices[asset].dropna()
+
+            if series.empty:
+                self.last_observation_timestamps[asset] = None
+                self.last_freshness_age_seconds[asset] = None
+                stale_assets.append(asset)
+                continue
+
+            observation = series.index[-1]
+
+            if not isinstance(observation, pd.Timestamp):
+                observation = pd.Timestamp(observation)
+
+            if (
+                observation.tzinfo is None
+                or observation.utcoffset() is None
+            ):
+                observation_utc = observation.tz_localize("UTC")
+            else:
+                observation_utc = observation.tz_convert("UTC")
+
+            age_seconds = max(
+                0.0,
+                (
+                    reference_time - observation_utc
+                ).total_seconds(),
+            )
+
+            self.last_observation_timestamps[asset] = (
+                observation_utc.isoformat()
+            )
+
+            self.last_freshness_age_seconds[asset] = (
+                age_seconds
+            )
+
+            if age_seconds > self.max_data_age.total_seconds():
+                stale_assets.append(asset)
+
+        self.last_stale_assets = tuple(
+            sorted(set(stale_assets))
+        )
+
+        self.last_freshness_status = (
+            "STALE"
+            if self.last_stale_assets
+            else "FRESH"
+        )
+
     def load_prices(
         self,
         validate: bool = True,
@@ -768,6 +914,10 @@ class MarketDataLoader:
         )
 
         prices = self._finalize(
+            prices
+        )
+
+        self._assess_freshness(
             prices
         )
 
@@ -842,8 +992,9 @@ class MarketDataLoader:
         return {
             "api_version": self.API_VERSION,
             "component": "MarketDataLoader",
-            "healthy": not bool(
-                self.last_failed_assets
+            "healthy": (
+                not bool(self.last_failed_assets)
+                and not bool(self.last_stale_assets)
             ),
             "asset_count": len(
                 self.assets
@@ -865,6 +1016,21 @@ class MarketDataLoader:
             ),
             "batch_error": self.last_batch_error,
             "period": self.period,
+            "max_data_age_seconds": (
+                self.max_data_age.total_seconds()
+                if self.max_data_age is not None
+                else None
+            ),
+            "stale_assets": list(
+                self.last_stale_assets
+            ),
+            "observation_timestamps": dict(
+                self.last_observation_timestamps
+            ),
+            "freshness_age_seconds": dict(
+                self.last_freshness_age_seconds
+            ),
+            "freshness_status": self.last_freshness_status,
         }
 
 
