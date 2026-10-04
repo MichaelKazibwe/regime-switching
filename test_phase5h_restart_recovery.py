@@ -303,3 +303,121 @@ def test_failed_recovery_does_not_commit_component_state() -> None:
     # overall recovery attempt fails.
     assert recovery.components["example"].value == 11
     assert recovery.components["failing"].value == 22
+
+
+def test_successful_recovery_is_written_to_audit_trail(tmp_path) -> None:
+    from audittrail import OperationalAuditTrail
+    from operationalevent import OperationalEventType
+
+    trail = OperationalAuditTrail(tmp_path / "restart_recovery.jsonl")
+
+    recovery = RestartRecovery(
+        components={"example": _SerializableComponent()},
+        audit_trail=trail,
+    )
+
+    result = recovery.restore(
+        {"example": _SerializableComponent(value=42).to_dict()}
+    )
+
+    assert result.status == RecoveryStatus.RECOVERED
+
+    records = trail.read()
+
+    assert len(records) == 2
+    assert records[0].event["event_type"] == OperationalEventType.SYSTEM_RESTART
+    assert records[1].event["event_type"] == OperationalEventType.SYSTEM_RECOVERY
+    assert records[0].event["metadata"]["status"] == "STARTED"
+    assert records[1].event["metadata"]["status"] == "RECOVERED"
+
+    assert trail.verify()["healthy"] is True
+
+
+def test_failed_recovery_is_written_to_audit_trail(tmp_path) -> None:
+    from audittrail import OperationalAuditTrail
+    from operationalevent import OperationalEventType
+
+    trail = OperationalAuditTrail(tmp_path / "restart_recovery.jsonl")
+
+    recovery = RestartRecovery(
+        components={"example": _SerializableComponent()},
+        audit_trail=trail,
+    )
+
+    result = recovery.restore(
+        {
+            "example": {
+                "api_version": "999.0.0",
+                "state": {"value": 42},
+            }
+        }
+    )
+
+    assert result.status == RecoveryStatus.FAILED
+
+    records = trail.read()
+
+    assert len(records) == 2
+    assert records[0].event["event_type"] == OperationalEventType.SYSTEM_RESTART
+    assert records[1].event["event_type"] == OperationalEventType.SYSTEM_RECOVERY
+    assert records[0].event["metadata"]["status"] == "STARTED"
+    assert records[1].event["metadata"]["status"] == "FAILED"
+
+    assert trail.verify()["healthy"] is True
+
+
+def test_recovery_without_audit_trail_remains_supported() -> None:
+    recovery = RestartRecovery(
+        components={"example": _SerializableComponent()},
+    )
+
+    result = recovery.restore(
+        {"example": _SerializableComponent(value=42).to_dict()}
+    )
+
+    assert result.status == RecoveryStatus.RECOVERED
+    assert recovery.event_history
+
+
+def test_recovery_audit_failure_fails_closed(tmp_path) -> None:
+    from audittrail import OperationalAuditTrail
+
+    trail = OperationalAuditTrail(tmp_path / "restart_recovery.jsonl")
+
+    recovery = RestartRecovery(
+        components={"example": _SerializableComponent(value=11)},
+        audit_trail=trail,
+    )
+
+    def failing_append(event):
+        raise RuntimeError("AUDIT_WRITE_FAILURE")
+
+    trail.append = failing_append
+
+    with pytest.raises(RuntimeError, match="AUDIT_WRITE_FAILURE"):
+        recovery.restore(
+            {"example": _SerializableComponent(value=99).to_dict()}
+        )
+
+    assert recovery.components["example"].value == 11
+
+
+def test_recovery_audit_configuration_is_reported(tmp_path) -> None:
+    from audittrail import OperationalAuditTrail
+
+    trail = OperationalAuditTrail(tmp_path / "restart_recovery.jsonl")
+
+    recovery = RestartRecovery(
+        components={"example": _SerializableComponent()},
+        audit_trail=trail,
+    )
+
+    health = recovery.health_check()
+
+    assert health["audit_trail_configured"] is True
+
+    metadata = recovery.metadata()
+
+    assert metadata["audit_trail"]["configured"] is True
+    assert metadata["audit_trail"]["api_version"] == "1.0.0"
+    assert metadata["audit_trail"]["module"] == "audittrail"

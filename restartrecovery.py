@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from audittrail import OperationalAuditTrail
 from operationalevent import (
     OperationalEvent,
     OperationalEventType,
@@ -76,11 +77,22 @@ class RestartRecovery:
     PHASE = "5H"
     COMPONENT = "RestartRecovery"
 
-    def __init__(self, components: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        components: dict[str, Any],
+        audit_trail: OperationalAuditTrail | None = None,
+    ) -> None:
         if not isinstance(components, dict):
             raise TypeError("components must be a dictionary")
 
+        if audit_trail is not None and not isinstance(
+            audit_trail,
+            OperationalAuditTrail,
+        ):
+            raise TypeError("audit_trail must be an OperationalAuditTrail")
+
         self.components: dict[str, Any] = dict(components)
+        self.audit_trail = audit_trail
         self._last_result: RecoveryResult | None = None
         self.event_history: list[OperationalEvent] = []
 
@@ -124,6 +136,10 @@ class RestartRecovery:
             metadata=metadata or {},
         )
         self._record_event(event)
+
+        if self.audit_trail is not None:
+            self.audit_trail.append(event)
+
         return event
 
     def restore(
@@ -296,16 +312,27 @@ class RestartRecovery:
             "execution_authorized": False,
             "broker_submission_authorized": False,
             "decision_mutation_authorized": False,
+            "audit_trail_configured": self.audit_trail is not None,
         }
 
     def metadata(self) -> dict[str, Any]:
         """Return explicit operational safety metadata."""
 
-        return {
+        metadata = {
             "api_version": self.API_VERSION,
             "phase": self.PHASE,
             "component": self.COMPONENT,
             "execution_authorized": False,
             "broker_submission_authorized": False,
             "decision_mutation_authorized": False,
+            "audit_trail": {
+                "configured": self.audit_trail is not None,
+            },
         }
+
+        if self.audit_trail is not None:
+            metadata["audit_trail"].update(
+                self.audit_trail.metadata()
+            )
+
+        return metadata
