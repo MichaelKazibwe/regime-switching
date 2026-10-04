@@ -757,11 +757,26 @@ class AlertEngine:
             event
         )
 
-        result = self.transport.send(
-            notification_id=notification_id,
-            event=event,
-            recipient=self.default_recipient,
-        )
+        try:
+            result = self.transport.send(
+                notification_id=notification_id,
+                event=event,
+                recipient=self.default_recipient,
+            )
+        except Exception as exc:
+            result = NotificationResult(
+                notification_id=notification_id,
+                event_id=event.event_id,
+                status=AlertStatus.FAILED,
+                channel=self.transport.channel,
+                attempted=True,
+                delivered=False,
+                recipient=self.default_recipient,
+                error=(
+                    f"NOTIFICATION_DELIVERY_ERROR: "
+                    f"{type(exc).__name__}"
+                ),
+            )
 
         self._processed_event_ids.add(
             event.event_id
