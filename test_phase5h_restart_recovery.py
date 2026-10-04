@@ -421,3 +421,114 @@ def test_recovery_audit_configuration_is_reported(tmp_path) -> None:
     assert metadata["audit_trail"]["configured"] is True
     assert metadata["audit_trail"]["api_version"] == "1.0.0"
     assert metadata["audit_trail"]["module"] == "audittrail"
+
+
+def test_restart_recovery_can_be_registered_with_health_aggregator() -> None:
+    from operationalhealth import OperationalHealthAggregator
+
+    recovery = RestartRecovery(
+        components={"example": _SerializableComponent()},
+    )
+
+    aggregator = OperationalHealthAggregator(
+        components={
+            "restart_recovery": recovery,
+        }
+    )
+
+    result = aggregator.health_check()
+
+    assert result["healthy"] is False
+    assert "restart_recovery" in result["components"]
+    assert result["components"]["restart_recovery"]["healthy"] is False
+
+
+def test_successful_recovery_makes_recovery_health_healthy() -> None:
+    from operationalhealth import OperationalHealthAggregator
+
+    recovery = RestartRecovery(
+        components={"example": _SerializableComponent()},
+    )
+
+    recovery.restore(
+        {"example": _SerializableComponent(value=42).to_dict()}
+    )
+
+    aggregator = OperationalHealthAggregator(
+        components={
+            "restart_recovery": recovery,
+        }
+    )
+
+    result = aggregator.health_check()
+
+    assert result["healthy"] is True
+    assert result["components"]["restart_recovery"]["healthy"] is True
+    assert result["components"]["restart_recovery"]["last_status"] == "RECOVERED"
+
+
+def test_failed_recovery_keeps_aggregated_health_unhealthy() -> None:
+    from operationalhealth import OperationalHealthAggregator
+
+    recovery = RestartRecovery(
+        components={"example": _SerializableComponent()},
+    )
+
+    recovery.restore(
+        {
+            "example": {
+                "api_version": "999.0.0",
+                "state": {"value": 42},
+            }
+        }
+    )
+
+    aggregator = OperationalHealthAggregator(
+        components={
+            "restart_recovery": recovery,
+        }
+    )
+
+    result = aggregator.health_check()
+
+    assert result["healthy"] is False
+    assert result["components"]["restart_recovery"]["healthy"] is False
+    assert result["components"]["restart_recovery"]["last_status"] == "FAILED"
+
+
+def test_recovery_health_does_not_grant_execution_authority() -> None:
+    from operationalhealth import OperationalHealthAggregator
+
+    recovery = RestartRecovery(
+        components={"example": _SerializableComponent()},
+    )
+
+    recovery.restore(
+        {"example": _SerializableComponent(value=42).to_dict()}
+    )
+
+    aggregator = OperationalHealthAggregator(
+        components={
+            "restart_recovery": recovery,
+        }
+    )
+
+    health = aggregator.health_check()
+    metadata = aggregator.metadata()
+
+    assert health["healthy"] is True
+
+    assert metadata["execution_authority"] is False
+    assert metadata["order_creation"] is False
+    assert metadata["broker_submission"] is False
+    assert metadata["decision_mutation"] is False
+
+    assert health["components"]["restart_recovery"][
+        "execution_authorized"
+    ] is False
+    assert health["components"]["restart_recovery"][
+        "broker_submission_authorized"
+    ] is False
+    assert health["components"]["restart_recovery"][
+        "decision_mutation_authorized"
+    ] is False
