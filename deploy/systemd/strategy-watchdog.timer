@@ -1,0 +1,10 @@
+[Unit]
+Description=Monitor shadow validation receipts every five minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+Unit=strategy-watchdog.service
+
+[Install]
+WantedBy=timers.target

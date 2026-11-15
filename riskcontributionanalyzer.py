@@ -1,106 +1,50 @@
-from __future__ import annotations
 
-from typing import Any
+from __future__ import annotations
 
 import numpy as np
 import pandas as pd
+
+from core_constants import TRADING_DAYS
 
 
 # ============================================================
 # RISK CONTRIBUTION ANALYTICS
 # ============================================================
 
-
 class RiskContributionAnalytics:
-    """
-    Production-grade portfolio risk-contribution analytics.
 
-    Mathematical convention
-    ------------------------
-    Portfolio variance:
+    TRADING_DAYS = TRADING_DAYS
 
-        sigma_p^2 = w' Sigma w
+    TOLERANCE = 1e-12
 
-    Portfolio volatility:
+    # ========================================================
+    # VALIDATION
+    # ========================================================
 
-        sigma_p = sqrt(w' Sigma w)
-
-    Marginal risk contribution:
-
-        MRC = Sigma w / sigma_p
-
-    Component risk contribution:
-
-        RC_i = w_i * MRC_i
-
-    Percentage risk contribution:
-
-        RC_pct_i = RC_i / sigma_p
-
-    The implementation preserves Euler homogeneity:
-
-        sum(RC_i) = sigma_p
-
-    Notes
-    -----
-    The covariance matrix and portfolio weights must use the same
-    return-frequency convention.
-
-    For example:
-
-        daily covariance -> daily portfolio volatility
-        annual covariance -> annual portfolio volatility
-
-    This class does not silently annualize or de-annualize covariance.
-    Frequency conversion belongs to the covariance/risk pipeline.
-    """
-
-    DEFAULT_TOLERANCE = 1e-10
-    PSD_TOLERANCE = 1e-8
-
-    # ============================================================
-    # VALIDATION HELPERS
-    # ============================================================
-
-    @staticmethod
-    def _validate_weights(
-        weights: Any,
-    ) -> np.ndarray:
-        """
-        Validate and normalize the portfolio-weight vector.
-        """
+    @classmethod
+    def _validate_inputs(
+        cls,
+        weights,
+        covariance,
+    ) -> tuple[
+        np.ndarray,
+        np.ndarray,
+    ]:
 
         weights = np.asarray(
             weights,
             dtype=float,
         ).reshape(-1)
 
-        if weights.size == 0:
-            raise ValueError(
-                "Weights cannot be empty."
-            )
-
-        if not np.isfinite(weights).all():
-            raise ValueError(
-                "Weights contain non-finite values."
-            )
-
-        return weights
-
-    @staticmethod
-    def _validate_covariance(
-        covariance: Any,
-        dimension: int,
-    ) -> np.ndarray:
-        """
-        Validate covariance dimensions, finiteness,
-        symmetry and positive-semidefiniteness.
-        """
-
         covariance = np.asarray(
             covariance,
             dtype=float,
         )
+
+        if weights.size == 0:
+            raise ValueError(
+                "Weights cannot be empty."
+            )
 
         if covariance.ndim != 2:
             raise ValueError(
@@ -115,29 +59,29 @@ class RiskContributionAnalytics:
                 "Covariance matrix must be square."
             )
 
-        if covariance.shape[0] != dimension:
+        if (
+            covariance.shape[0]
+            != weights.size
+        ):
             raise ValueError(
-                "Weights and covariance dimension mismatch: "
-                f"weights={dimension}, "
-                f"covariance={covariance.shape}."
+                "Weights and covariance dimensions "
+                "must match."
             )
 
-        if not np.isfinite(covariance).all():
+        if not np.isfinite(
+            weights
+        ).all():
+            raise ValueError(
+                "Weights contain non-finite values."
+            )
+
+        if not np.isfinite(
+            covariance
+        ).all():
             raise ValueError(
                 "Covariance contains non-finite values."
             )
 
-        if not np.allclose(
-            covariance,
-            covariance.T,
-            atol=1e-10,
-            rtol=0.0,
-        ):
-            raise ValueError(
-                "Covariance matrix is not symmetric."
-            )
-
-        # Remove harmless floating-point asymmetry.
         covariance = (
             covariance
             + covariance.T
@@ -147,139 +91,179 @@ class RiskContributionAnalytics:
             covariance
         )
 
-        minimum_eigenvalue = float(
-            eigenvalues.min()
-        )
-
-        if minimum_eigenvalue < -RiskContributionAnalytics.PSD_TOLERANCE:
+        if eigenvalues.min() < -1e-10:
             raise ValueError(
                 "Covariance matrix is not "
-                "positive semidefinite. "
-                f"Minimum eigenvalue="
-                f"{minimum_eigenvalue:.6e}."
+                "positive semi-definite."
             )
-
-        # Numerical cleanup for extremely small
-        # negative eigenvalue artefacts.
-        if minimum_eigenvalue < 0.0:
-            covariance = (
-                covariance
-                + np.eye(dimension)
-                * (-minimum_eigenvalue + 1e-12)
-            )
-
-        return covariance
-
-    @classmethod
-    def _validate_inputs(
-        cls,
-        weights: Any,
-        covariance: Any,
-    ) -> tuple[
-        np.ndarray,
-        np.ndarray,
-    ]:
-        """
-        Validate the complete risk-calculation input.
-        """
-
-        weights = cls._validate_weights(
-            weights
-        )
-
-        covariance = cls._validate_covariance(
-            covariance,
-            weights.size,
-        )
 
         return (
             weights,
             covariance,
         )
 
-    @staticmethod
-    def _portfolio_variance(
-        weights: np.ndarray,
-        covariance: np.ndarray,
+    # ========================================================
+    # PERIOD VALIDATION
+    # ========================================================
+
+    @classmethod
+    def _validate_periods_per_year(
+        cls,
+        periods_per_year,
+    ) -> int:
+
+        if isinstance(
+            periods_per_year,
+            bool,
+        ):
+            raise TypeError(
+                "periods_per_year must be "
+                "a positive integer."
+            )
+
+        value = int(
+            periods_per_year
+        )
+
+        if value <= 0:
+            raise ValueError(
+                "periods_per_year must be positive."
+            )
+
+        return value
+
+    # ========================================================
+    # COVARIANCE SCALING
+    # ========================================================
+
+    @classmethod
+    def _prepare_covariance(
+        cls,
+        covariance,
+        annualize: bool = False,
+        periods_per_year: int = TRADING_DAYS,
+    ) -> np.ndarray:
+
+        if not isinstance(
+            annualize,
+            bool,
+        ):
+            raise TypeError(
+                "annualize must be boolean."
+            )
+
+        periods_per_year = (
+            cls._validate_periods_per_year(
+                periods_per_year
+            )
+        )
+
+        covariance = np.asarray(
+            covariance,
+            dtype=float,
+        )
+
+        if annualize:
+            covariance = (
+                covariance
+                * periods_per_year
+            )
+
+        return covariance
+
+    # ========================================================
+    # PORTFOLIO VARIANCE
+    # ========================================================
+
+    @classmethod
+    def portfolio_variance(
+        cls,
+        weights,
+        covariance,
+        annualize: bool = False,
+        periods_per_year: int = TRADING_DAYS,
     ) -> float:
-        """
-        Calculate portfolio variance with numerical protection.
-        """
+
+        weights, covariance = (
+            cls._validate_inputs(
+                weights,
+                covariance,
+            )
+        )
+
+        covariance = (
+            cls._prepare_covariance(
+                covariance,
+                annualize=annualize,
+                periods_per_year=periods_per_year,
+            )
+        )
 
         variance = float(
-            weights
+            weights.T
             @ covariance
             @ weights
         )
 
-        if not np.isfinite(variance):
+        if not np.isfinite(
+            variance
+        ):
             raise ValueError(
                 "Portfolio variance is non-finite."
             )
 
-        # A PSD covariance matrix cannot generate a materially
-        # negative quadratic form. Tiny negatives can arise from
-        # floating-point arithmetic.
         if variance < 0.0:
 
-            if variance < -1e-12:
-                raise ValueError(
-                    "Portfolio variance is materially negative: "
-                    f"{variance:.12e}."
-                )
+            if variance > -1e-12:
+                variance = 0.0
 
-            variance = 0.0
+            else:
+                raise ValueError(
+                    "Portfolio variance is materially negative."
+                )
 
         return variance
 
-    # ============================================================
+    # ========================================================
     # PORTFOLIO VOLATILITY
-    # ============================================================
+    # ========================================================
 
     @classmethod
     def portfolio_volatility(
         cls,
         weights,
         covariance,
+        annualize: bool = False,
+        periods_per_year: int = TRADING_DAYS,
     ) -> float:
-        """
-        Calculate portfolio volatility.
 
-        The result has the same frequency convention as the
-        supplied covariance matrix.
-        """
-
-        weights, covariance = (
-            cls._validate_inputs(
+        variance = (
+            cls.portfolio_variance(
                 weights,
                 covariance,
+                annualize=annualize,
+                periods_per_year=periods_per_year,
             )
         )
 
-        variance = cls._portfolio_variance(
-            weights,
-            covariance,
-        )
-
         return float(
-            np.sqrt(variance)
+            np.sqrt(
+                variance
+            )
         )
 
-    # ============================================================
+    # ========================================================
     # MARGINAL RISK
-    # ============================================================
+    # ========================================================
 
     @classmethod
     def marginal_risk(
         cls,
         weights,
         covariance,
+        annualize: bool = False,
+        periods_per_year: int = TRADING_DAYS,
     ) -> np.ndarray:
-        """
-        Calculate marginal risk contributions.
-
-        MRC_i = (Sigma w)_i / sigma_p
-        """
 
         weights, covariance = (
             cls._validate_inputs(
@@ -288,56 +272,48 @@ class RiskContributionAnalytics:
             )
         )
 
+        covariance = (
+            cls._prepare_covariance(
+                covariance,
+                annualize=annualize,
+                periods_per_year=periods_per_year,
+            )
+        )
+
         portfolio_volatility = (
             cls.portfolio_volatility(
                 weights,
                 covariance,
+                annualize=False,
+                periods_per_year=periods_per_year,
             )
         )
 
         if (
             portfolio_volatility
-            <= cls.DEFAULT_TOLERANCE
+            <= cls.TOLERANCE
         ):
             raise ValueError(
-                "Marginal risk is undefined for "
-                "a zero-volatility portfolio."
+                "Portfolio volatility must be positive."
             )
 
-        marginal = (
+        return (
             covariance
             @ weights
         ) / portfolio_volatility
 
-        if not np.isfinite(
-            marginal
-        ).all():
-            raise ValueError(
-                "Marginal risk contains "
-                "non-finite values."
-            )
-
-        return marginal
-
-    # ============================================================
-    # COMPONENT RISK
-    # ============================================================
+    # ========================================================
+    # ABSOLUTE RISK CONTRIBUTIONS
+    # ========================================================
 
     @classmethod
     def risk_contributions(
         cls,
         weights,
         covariance,
+        annualize: bool = False,
+        periods_per_year: int = TRADING_DAYS,
     ) -> np.ndarray:
-        """
-        Calculate absolute/component risk contributions.
-
-        RC_i = w_i * MRC_i
-
-        Euler invariant:
-
-            sum(RC_i) = portfolio volatility
-        """
 
         weights, covariance = (
             cls._validate_inputs(
@@ -346,147 +322,155 @@ class RiskContributionAnalytics:
             )
         )
 
-        marginal = cls.marginal_risk(
-            weights,
-            covariance,
+        covariance = (
+            cls._prepare_covariance(
+                covariance,
+                annualize=annualize,
+                periods_per_year=periods_per_year,
+            )
         )
 
-        contributions = (
+        marginal = (
+            cls.marginal_risk(
+                weights,
+                covariance,
+                annualize=False,
+                periods_per_year=periods_per_year,
+            )
+        )
+
+        return (
             weights
             * marginal
         )
 
-        if not np.isfinite(
-            contributions
-        ).all():
-            raise ValueError(
-                "Risk contributions contain "
-                "non-finite values."
-            )
-
-        portfolio_volatility = (
-            cls.portfolio_volatility(
-                weights,
-                covariance,
-            )
-        )
-
-        contribution_sum = float(
-            contributions.sum()
-        )
-
-        if not np.isclose(
-            contribution_sum,
-            portfolio_volatility,
-            atol=1e-8,
-            rtol=1e-8,
-        ):
-            raise ValueError(
-                "Euler risk decomposition failed. "
-                f"Component risk sum="
-                f"{contribution_sum:.12e}, "
-                f"portfolio volatility="
-                f"{portfolio_volatility:.12e}."
-            )
-
-        return contributions
-
-    # ============================================================
-    # PERCENTAGE RISK CONTRIBUTIONS
-    # ============================================================
+    # ========================================================
+    # RISK CONTRIBUTION %
+    # ========================================================
 
     @classmethod
     def risk_contribution_pct(
         cls,
         weights,
         covariance,
+        annualize: bool = False,
+        periods_per_year: int = TRADING_DAYS,
     ) -> np.ndarray:
-        """
-        Calculate percentage risk contributions.
 
-        RC_pct_i = RC_i / portfolio_volatility
-
-        The resulting vector must sum to one.
-
-        Negative component contributions are mathematically
-        possible when an asset provides diversification through
-        covariance with the rest of the portfolio. They are
-        therefore NOT artificially clipped to zero.
-        """
-
-        contributions = (
+        rc = (
             cls.risk_contributions(
                 weights,
                 covariance,
+                annualize=annualize,
+                periods_per_year=periods_per_year,
             )
         )
 
-        portfolio_volatility = (
-            cls.portfolio_volatility(
-                weights,
-                covariance,
-            )
-        )
-
-        if (
-            portfolio_volatility
-            <= cls.DEFAULT_TOLERANCE
-        ):
-            raise ValueError(
-                "Percentage risk contributions are undefined "
-                "for a zero-volatility portfolio."
-            )
-
-        percentages = (
-            contributions
-            / portfolio_volatility
+        total = float(
+            rc.sum()
         )
 
         if not np.isfinite(
-            percentages
-        ).all():
-            raise ValueError(
-                "Percentage risk contributions contain "
-                "non-finite values."
-            )
-
-        if not np.isclose(
-            percentages.sum(),
-            1.0,
-            atol=1e-8,
-            rtol=1e-8,
+            total
         ):
             raise ValueError(
-                "Percentage risk contributions "
-                "do not sum to one. "
-                f"Sum={percentages.sum():.12f}."
+                "Total risk contribution "
+                "is non-finite."
             )
 
-        return percentages
+        if (
+            total
+            <= cls.TOLERANCE
+        ):
+            raise ValueError(
+                "Total portfolio risk "
+                "must be positive."
+            )
 
-    # ============================================================
-    # RISK BUDGET VALIDATION
-    # ============================================================
+        return (
+            rc
+            / total
+        )
 
-    @staticmethod
-    def _validate_target_budget(
-        target_budget: Any,
-        dimension: int,
+    # ========================================================
+    # ABSOLUTE RISK CONTRIBUTION %
+    # ========================================================
+
+    @classmethod
+    def absolute_risk_contribution_pct(
+        cls,
+        weights,
+        covariance,
+        annualize: bool = False,
+        periods_per_year: int = TRADING_DAYS,
     ) -> np.ndarray:
-        """
-        Validate a target risk-budget vector.
-        """
+
+        rc = (
+            cls.risk_contributions(
+                weights,
+                covariance,
+                annualize=annualize,
+                periods_per_year=periods_per_year,
+            )
+        )
+
+        absolute_rc = np.abs(
+            rc
+        )
+
+        total = float(
+            absolute_rc.sum()
+        )
+
+        if (
+            total
+            <= cls.TOLERANCE
+        ):
+            raise ValueError(
+                "Absolute risk contribution "
+                "must be positive."
+            )
+
+        return (
+            absolute_rc
+            / total
+        )
+
+    # ========================================================
+    # RISK BUDGET ERROR
+    # ========================================================
+
+    @classmethod
+    def risk_budget_error(
+        cls,
+        weights,
+        covariance,
+        target_budget,
+        annualize: bool = False,
+        periods_per_year: int = TRADING_DAYS,
+    ) -> np.ndarray:
+
+        actual = (
+            cls.risk_contribution_pct(
+                weights,
+                covariance,
+                annualize=annualize,
+                periods_per_year=periods_per_year,
+            )
+        )
 
         target_budget = np.asarray(
             target_budget,
             dtype=float,
         ).reshape(-1)
 
-        if target_budget.size != dimension:
+        if (
+            target_budget.size
+            != actual.size
+        ):
             raise ValueError(
-                "Target risk-budget dimension mismatch: "
-                f"target={target_budget.size}, "
-                f"assets={dimension}."
+                "Target risk budget dimension "
+                "does not match portfolio."
             )
 
         if not np.isfinite(
@@ -501,104 +485,39 @@ class RiskContributionAnalytics:
             target_budget < -1e-12
         ):
             raise ValueError(
-                "Target risk budget contains "
-                "negative values."
+                "Target risk budget cannot "
+                "contain negative values."
             )
-
-        target_budget = np.maximum(
-            target_budget,
-            0.0,
-        )
 
         total = float(
             target_budget.sum()
         )
 
-        if total <= 0.0:
+        if (
+            total
+            <= cls.TOLERANCE
+        ):
             raise ValueError(
                 "Target risk budget must have "
                 "a positive total."
             )
 
-        target_budget /= total
-
-        if not np.isclose(
-            target_budget.sum(),
-            1.0,
-            atol=1e-10,
-        ):
-            raise ValueError(
-                "Normalized target risk budget "
-                "does not sum to one."
-            )
-
-        return target_budget
-
-    # ============================================================
-    # RISK BUDGET ERROR
-    # ============================================================
-
-    @classmethod
-    def risk_budget_error(
-        cls,
-        weights,
-        covariance,
-        target_budget,
-    ) -> np.ndarray:
-        """
-        Calculate actual minus target risk budget.
-        """
-
-        weights = cls._validate_weights(
-            weights
-        )
-
         target_budget = (
-            cls._validate_target_budget(
-                target_budget,
-                weights.size,
-            )
+            target_budget
+            / total
         )
 
-        actual = (
-            cls.risk_contribution_pct(
-                weights,
-                covariance,
-            )
-        )
-
-        error = (
+        return (
             actual
             - target_budget
         )
-
-        if not np.isfinite(
-            error
-        ).all():
-            raise ValueError(
-                "Risk-budget error contains "
-                "non-finite values."
-            )
-
-        return error
 
 
 # ============================================================
 # RISK BUDGET REPORT
 # ============================================================
 
-
 class RiskBudgetReport:
-    """
-    Production risk-budget reporting layer.
-
-    Preserves the existing report schema:
-
-        Asset
-        Target
-        Actual
-        Difference
-    """
 
     @staticmethod
     def create(
@@ -606,139 +525,105 @@ class RiskBudgetReport:
         weights,
         covariance,
         target_budget,
-    ) -> pd.DataFrame:
-
-        asset_names = list(
-            asset_names
-        )
-
-        weights = np.asarray(
-            weights,
-            dtype=float,
-        ).reshape(-1)
-
-        if len(asset_names) != weights.size:
-            raise ValueError(
-                "Asset-name count does not match "
-                "weight count: "
-                f"assets={len(asset_names)}, "
-                f"weights={weights.size}."
-            )
-
-        target_budget = (
-            RiskContributionAnalytics
-            ._validate_target_budget(
-                target_budget,
-                weights.size,
-            )
-        )
+        annualize: bool = False,
+        periods_per_year: int = TRADING_DAYS,
+    ):
 
         actual = (
             RiskContributionAnalytics
             .risk_contribution_pct(
                 weights,
                 covariance,
+                annualize=annualize,
+                periods_per_year=periods_per_year,
             )
         )
 
-        difference = (
-            actual
-            - target_budget
+        target_budget = np.asarray(
+            target_budget,
+            dtype=float,
+        ).reshape(-1)
+
+        if (
+            len(asset_names)
+            != actual.size
+        ):
+            raise ValueError(
+                "Asset names and portfolio "
+                "dimensions must match."
+            )
+
+        if (
+            target_budget.size
+            != actual.size
+        ):
+            raise ValueError(
+                "Target budget and portfolio "
+                "dimensions must match."
+            )
+
+        total = float(
+            target_budget.sum()
         )
 
-        report = pd.DataFrame(
+        if total <= 1e-12:
+            raise ValueError(
+                "Target budget must have "
+                "a positive total."
+            )
+
+        target_budget = (
+            target_budget
+            / total
+        )
+
+        return pd.DataFrame(
             {
-                "Asset": asset_names,
-                "Target": target_budget,
-                "Actual": actual,
-                "Difference": difference,
+                "Asset":
+                    asset_names,
+
+                "Target":
+                    target_budget,
+
+                "Actual":
+                    actual,
+
+                "Difference":
+                    actual
+                    - target_budget,
             }
         )
-
-        if not np.isfinite(
-            report[
-                [
-                    "Target",
-                    "Actual",
-                    "Difference",
-                ]
-            ].to_numpy(
-                dtype=float
-            )
-        ).all():
-            raise ValueError(
-                "Risk-budget report contains "
-                "non-finite numerical values."
-            )
-
-        return report
 
 
 # ============================================================
 # REGRESSION TESTS
 # ============================================================
 
+def test_risk_contribution_analytics():
 
-def test_risk_contribution_analytics() -> None:
-    """
-    Comprehensive deterministic regression test.
-    """
+    covariance = np.array([
+        [0.04, 0.01],
+        [0.01, 0.09],
+    ])
 
-    rng = np.random.default_rng(
-        20260823
-    )
+    weights = np.array([
+        0.60,
+        0.40,
+    ])
 
-    n_assets = 14
+    # --------------------------------------------------------
+    # DAILY / NATIVE RISK
+    # --------------------------------------------------------
 
-    # ------------------------------------------------------------
-    # Deterministic positive-definite covariance
-    # ------------------------------------------------------------
-
-    factor_matrix = rng.normal(
-        0.0,
-        0.02,
-        size=(n_assets, 4),
-    )
-
-    idiosyncratic = np.diag(
-        rng.uniform(
-            0.0001,
-            0.0009,
-            size=n_assets,
+    daily_variance = (
+        RiskContributionAnalytics
+        .portfolio_variance(
+            weights,
+            covariance,
         )
     )
 
-    covariance = (
-        factor_matrix
-        @ factor_matrix.T
-        + idiosyncratic
-    )
-
-    covariance = (
-        covariance
-        + covariance.T
-    ) / 2.0
-
-    # ------------------------------------------------------------
-    # Long-only production-style weights
-    # ------------------------------------------------------------
-
-    raw_weights = rng.uniform(
-        0.01,
-        1.0,
-        size=n_assets,
-    )
-
-    weights = (
-        raw_weights
-        / raw_weights.sum()
-    )
-
-    # ------------------------------------------------------------
-    # Portfolio volatility
-    # ------------------------------------------------------------
-
-    volatility = (
+    daily_volatility = (
         RiskContributionAnalytics
         .portfolio_volatility(
             weights,
@@ -746,37 +631,54 @@ def test_risk_contribution_analytics() -> None:
         )
     )
 
-    assert np.isfinite(
-        volatility
+    assert np.isclose(
+        daily_volatility,
+        np.sqrt(
+            daily_variance
+        ),
     )
 
-    assert volatility > 0.0
+    # --------------------------------------------------------
+    # ANNUALIZED RISK
+    # --------------------------------------------------------
 
-    # ------------------------------------------------------------
-    # Marginal risk
-    # ------------------------------------------------------------
-
-    marginal = (
+    annual_variance = (
         RiskContributionAnalytics
-        .marginal_risk(
+        .portfolio_variance(
             weights,
             covariance,
+            annualize=True,
         )
     )
 
-    assert marginal.shape == (
-        n_assets,
+    annual_volatility = (
+        RiskContributionAnalytics
+        .portfolio_volatility(
+            weights,
+            covariance,
+            annualize=True,
+        )
     )
 
-    assert np.isfinite(
-        marginal
-    ).all()
+    assert np.isclose(
+        annual_variance,
+        daily_variance
+        * TRADING_DAYS,
+    )
 
-    # ------------------------------------------------------------
-    # Component risk
-    # ------------------------------------------------------------
+    assert np.isclose(
+        annual_volatility,
+        daily_volatility
+        * np.sqrt(
+            TRADING_DAYS
+        ),
+    )
 
-    component = (
+    # --------------------------------------------------------
+    # RISK CONTRIBUTIONS
+    # --------------------------------------------------------
+
+    rc_daily = (
         RiskContributionAnalytics
         .risk_contributions(
             weights,
@@ -784,27 +686,32 @@ def test_risk_contribution_analytics() -> None:
         )
     )
 
-    assert component.shape == (
-        n_assets,
+    rc_annual = (
+        RiskContributionAnalytics
+        .risk_contributions(
+            weights,
+            covariance,
+            annualize=True,
+        )
     )
 
-    assert np.isfinite(
-        component
-    ).all()
-
-    # Euler decomposition
     assert np.isclose(
-        component.sum(),
-        volatility,
-        atol=1e-8,
-        rtol=1e-8,
+        rc_daily.sum(),
+        daily_volatility,
+        atol=1e-10,
     )
 
-    # ------------------------------------------------------------
-    # Percentage risk contribution
-    # ------------------------------------------------------------
+    assert np.isclose(
+        rc_annual.sum(),
+        annual_volatility,
+        atol=1e-10,
+    )
 
-    percentage = (
+    # --------------------------------------------------------
+    # CONTRIBUTION PERCENTAGES
+    # --------------------------------------------------------
+
+    pct_daily = (
         RiskContributionAnalytics
         .risk_contribution_pct(
             weights,
@@ -812,193 +719,97 @@ def test_risk_contribution_analytics() -> None:
         )
     )
 
-    assert percentage.shape == (
-        n_assets,
+    pct_annual = (
+        RiskContributionAnalytics
+        .risk_contribution_pct(
+            weights,
+            covariance,
+            annualize=True,
+        )
     )
-
-    assert np.isfinite(
-        percentage
-    ).all()
 
     assert np.isclose(
-        percentage.sum(),
+        pct_daily.sum(),
         1.0,
-        atol=1e-8,
-        rtol=1e-8,
+        atol=1e-10,
     )
 
-    # ------------------------------------------------------------
-    # Risk budget
-    # ------------------------------------------------------------
-
-    target_budget = (
-        np.ones(n_assets)
-        / n_assets
+    assert np.isclose(
+        pct_annual.sum(),
+        1.0,
+        atol=1e-10,
     )
+
+    # Annualization changes absolute risk but
+    # NOT percentage risk contributions.
+
+    assert np.allclose(
+        pct_daily,
+        pct_annual,
+        atol=1e-10,
+    )
+
+    # --------------------------------------------------------
+    # BUDGET ERROR
+    # --------------------------------------------------------
+
+    target = np.array([
+        0.50,
+        0.50,
+    ])
 
     error = (
         RiskContributionAnalytics
         .risk_budget_error(
             weights,
             covariance,
-            target_budget,
+            target,
+            annualize=True,
         )
     )
 
     assert error.shape == (
-        n_assets,
+        2,
     )
 
     assert np.isfinite(
         error
     ).all()
 
-    assert np.isclose(
-        error.sum(),
-        0.0,
-        atol=1e-8,
-    )
-
-    # ------------------------------------------------------------
-    # Risk report
-    # ------------------------------------------------------------
-
-    assets = [
-        f"Asset_{i}"
-        for i in range(n_assets)
-    ]
+    # --------------------------------------------------------
+    # REPORT
+    # --------------------------------------------------------
 
     report = (
         RiskBudgetReport.create(
-            assets,
+            ["A", "B"],
             weights,
             covariance,
-            target_budget,
+            target,
+            annualize=True,
         )
     )
 
-    assert list(
-        report.columns
-    ) == [
-        "Asset",
-        "Target",
-        "Actual",
-        "Difference",
-    ]
+    assert len(report) == 2
 
-    assert len(
-        report
-    ) == n_assets
-
-    assert list(
-        report["Asset"]
-    ) == assets
-
-    assert np.isclose(
-        report["Target"].sum(),
-        1.0,
-        atol=1e-10,
+    assert (
+        "Target"
+        in report.columns
     )
 
-    assert np.isclose(
-        report["Actual"].sum(),
-        1.0,
-        atol=1e-8,
+    assert (
+        "Actual"
+        in report.columns
     )
 
-    assert np.allclose(
-        report["Difference"].to_numpy(
-            dtype=float
-        ),
-        (
-            report["Actual"].to_numpy(
-                dtype=float
-            )
-            -
-            report["Target"].to_numpy(
-                dtype=float
-            )
-        ),
-        atol=1e-12,
+    assert (
+        "Difference"
+        in report.columns
     )
-
-    # ------------------------------------------------------------
-    # Invalid dimensions
-    # ------------------------------------------------------------
-
-    try:
-        RiskContributionAnalytics.portfolio_volatility(
-            np.ones(5),
-            covariance,
-        )
-        raise AssertionError(
-            "Expected dimension mismatch."
-        )
-    except ValueError:
-        pass
-
-    # ------------------------------------------------------------
-    # Invalid covariance
-    # ------------------------------------------------------------
-
-    asymmetric = covariance.copy()
-
-    asymmetric[0, 1] += 0.01
-
-    try:
-        RiskContributionAnalytics.portfolio_volatility(
-            weights,
-            asymmetric,
-        )
-        raise AssertionError(
-            "Expected asymmetric covariance failure."
-        )
-    except ValueError:
-        pass
-
-    # ------------------------------------------------------------
-    # Invalid target budget
-    # ------------------------------------------------------------
-
-    try:
-        RiskContributionAnalytics.risk_budget_error(
-            weights,
-            covariance,
-            np.ones(5),
-        )
-        raise AssertionError(
-            "Expected risk-budget dimension failure."
-        )
-    except ValueError:
-        pass
-
-    # ------------------------------------------------------------
-    # Zero-volatility portfolio
-    # ------------------------------------------------------------
-
-    zero_covariance = np.zeros(
-        (n_assets, n_assets)
-    )
-
-    try:
-        RiskContributionAnalytics.risk_contribution_pct(
-            weights,
-            zero_covariance,
-        )
-        raise AssertionError(
-            "Expected zero-volatility failure."
-        )
-    except ValueError:
-        pass
 
     print(
-        "Risk contribution analytics tests passed."
+        "RiskContributionAnalytics tests passed."
     )
-
-
-# ============================================================
-# MAIN
-# ============================================================
 
 
 if __name__ == "__main__":

@@ -1,0 +1,131 @@
+{
+  "schema_version": 1,
+  "mode": "RESEARCH_ONLY",
+  "production_activation": false,
+  "minimum_history": 252,
+  "covariance_window": 252,
+  "minimum_macro_months": 16,
+  "monthly_macro_maximum_age_days": 90,
+  "daily_macro_maximum_age_days": 14,
+  "probability_smoothing": 0.2,
+  "switch_confidence": 0.55,
+  "switch_advantage": 0.08,
+  "switch_confirmation_sessions": 3,
+  "minimum_residence_sessions": 10,
+  "maximum_asset_weight": 0.25,
+  "maximum_asset_risk_share": 0.25,
+  "risk_budget_tolerance": 1e-06,
+  "normal_exposure_ceiling": 0.95,
+  "neutral_exposure_ceiling": 0.75,
+  "defensive_exposure_ceiling": 0.5,
+  "stress_exposure_ceiling": 0.4,
+  "stress_volatility_ceiling": 0.05,
+  "neutral_volatility_ceiling": 0.08,
+  "defensive_volatility_ceiling": 0.06,
+  "daily_expected_shortfall_ceiling": 0.02,
+  "stress_daily_expected_shortfall_ceiling": 0.01,
+  "soft_account_drawdown": null,
+  "hard_account_drawdown": null,
+  "minimum_trade_notional": 0.03,
+  "rebalance_sessions": 5,
+  "training_sessions": 756,
+  "selection_interval_sessions": 252,
+  "selection_objective": "CAGR - 2*absolute maximum drawdown - 0.15*nonoverlapping 63-session loss frequency; doubled costs and zero cash return",
+  "candidate_grid": {
+    "growth_volatility_ceiling": [
+      0.1,
+      0.12
+    ],
+    "momentum_risk_tilt": [
+      0.0,
+      0.3
+    ],
+    "tip_risk_preference": [
+      0.4,
+      0.1
+    ]
+  },
+  "economic_group_budgets": {
+    "disinflationary_growth": {
+      "equities": 0.75,
+      "nominal_bonds": 0.1,
+      "inflation_sensitive": 0.1,
+      "credit": 0.05
+    },
+    "inflationary_growth": {
+      "equities": 0.55,
+      "nominal_bonds": 0.05,
+      "inflation_sensitive": 0.35,
+      "credit": 0.05
+    },
+    "stagflation": {
+      "equities": 0.1,
+      "nominal_bonds": 0.2,
+      "inflation_sensitive": 0.65,
+      "credit": 0.05
+    },
+    "deflationary_slowdown": {
+      "equities": 0.25,
+      "nominal_bonds": 0.5,
+      "inflation_sensitive": 0.2,
+      "credit": 0.05
+    },
+    "crisis": {
+      "equities": 0.1,
+      "nominal_bonds": 0.4,
+      "inflation_sensitive": 0.45,
+      "credit": 0.05
+    }
+  },
+  "risk_groups": {
+    "equities": [
+      "SPY",
+      "QQQ",
+      "IWM",
+      "VEA",
+      "VWO",
+      "VNQ",
+      "XLF",
+      "XLP",
+      "XLE",
+      "XLU",
+      "XLI",
+      "KIE",
+      "ITB",
+      "EWJ",
+      "XLY"
+    ],
+    "nominal_bonds": [
+      "TLT",
+      "IEF",
+      "IGOV"
+    ],
+    "inflation_sensitive": [
+      "GLD",
+      "DBC",
+      "TIP"
+    ],
+    "credit": [
+      "LQD",
+      "HYG"
+    ]
+  },
+  "core_equity_risk_weights": {
+    "SPY": 0.45,
+    "QQQ": 0.1,
+    "IWM": 0.05,
+    "VEA": 0.2,
+    "VWO": 0.1,
+    "VNQ": 0.05,
+    "EWJ": 0.05
+  },
+  "excluded_from_risk_budget": [
+    "SHY",
+    "SGOV",
+    "SLV"
+  ],
+  "cash_return_assumption": 0.0,
+  "research_revision": 3,
+  "drawdown_control_window": 126,
+  "objective_policy": "GROWTH_RESILIENCE_NO_FIXED_RETURN_OR_DRAWDOWN_TARGET"
+}

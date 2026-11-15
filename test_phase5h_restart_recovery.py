@@ -71,6 +71,31 @@ def test_recovery_requires_explicit_component_registration() -> None:
     assert "unregistered" in result.failed_components
 
 
+def test_non_dictionary_persisted_state_fails_closed() -> None:
+    from operationalevent import OperationalEventType
+
+    recovery = RestartRecovery(
+        components={"example": _SerializableComponent()},
+    )
+
+    result = recovery.restore(None)  # type: ignore[arg-type]
+
+    assert result.status == RecoveryStatus.FAILED
+    assert result.healthy is False
+    assert result.failed_components == ["example"]
+    assert result.errors == {
+        "example": "persisted state must be a dictionary"
+    }
+
+    events = recovery.event_history
+    assert len(events) == 2
+    assert events[0].event_type == OperationalEventType.SYSTEM_RESTART
+    assert events[1].event_type == OperationalEventType.SYSTEM_RECOVERY
+    assert events[1].metadata["status"] == "FAILED"
+    assert events[1].metadata["failed_components"] == ["example"]
+    assert events[1].metadata["errors"] == result.errors
+
+
 def test_corrupted_component_state_fails_closed() -> None:
     recovery = RestartRecovery(
         components={"example": _SerializableComponent()},

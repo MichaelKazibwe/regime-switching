@@ -1,0 +1,93 @@
+FROM python:3.12.16-slim-bookworm
+
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 XDG_CACHE_HOME=/tmp/strategy-cache
+WORKDIR /app
+COPY requirements-paper.hashed.lock ./
+RUN python -m pip install --no-cache-dir --require-hashes -r requirements-paper.hashed.lock && python -m pip check
+COPY assetroles.py ./
+COPY assetuniverse.py ./
+COPY basecomponent.py ./
+COPY basecovariancemodel.py ./
+COPY blacklitterman.py ./
+COPY compare_portfolio_models.py ./
+COPY constraints.py ./
+COPY core_constants.py ./
+COPY covarianceengine.py ./
+COPY diversifiedregimepolicy.py ./
+COPY drawdownrisk.py ./
+COPY ensemblecovariance.py ./
+COPY expectedreturnforecaster.py ./
+COPY fetch_strategy_macro.py ./
+COPY forecastmodels.py ./
+COPY fourregimestrategies.py ./
+COPY fourstrategysimulation.py ./
+COPY goalportfolio.py ./
+COPY portfolio_objectives.py ./
+COPY portfolio_contract.py ./
+COPY institutional_return_engines.py ./
+COPY evaluate_institutional_engines.py ./
+COPY assess_return_engine_robustness.py ./
+COPY return_engine_shadow.py ./
+COPY publish_return_engine_preview.py ./
+COPY run_return_engine_cycle.py ./
+COPY dashboard_publication.py dynamic_preview.py evaluate_dynamic_portfolio.py ./
+COPY live_observation_cycle.py dynamic_forward.py dynamic_portfolio.py ./
+COPY resilient_candidate.py run_p1_refinement.py forecast_calibration.py market_quality.py portfolio_risk_envelope.py observation_watchdog.py scheduled_p1_research.py ./
+COPY strategy_monthly_report.py ./
+COPY monthlyreport.py ./
+COPY paperstore.py ./
+COPY integrated_strategy_comparison.py ./
+COPY economic_design_assessment.py ./
+COPY shadow_bundle_backup.py ./
+COPY integrated_release_readiness.py ./
+COPY economic_evidence.py ./
+COPY growth_resilience.py ./
+COPY capture_growth_inputs.py ./
+COPY market_news.py ./
+COPY institutionalportfolio.py ./
+COPY investmentcatalog.py ./
+COPY investor_analytics.py ./
+COPY investor_dashboard.py ./
+COPY investor_macro_feed.py ./
+COPY investor_pdf.py ./
+COPY live_strategy_training.py ./
+COPY macro_allocation_lab.py ./
+COPY macro_lab_pdf.py ./
+COPY macroregime.py ./
+COPY macrovintage.py ./
+COPY portfolio.py ./
+COPY portfoliodecisionengine.py ./
+COPY portfoliooptimizer.py ./
+COPY positionsizing.py ./
+COPY productioncomposition.py ./
+COPY productreport.py ./
+COPY refresh_strategy_dashboard.py ./
+COPY regimecovariance.py ./
+COPY riskbudgetengine.py ./
+COPY riskcontributionanalyzer.py ./
+COPY riskgovernor.py ./
+COPY riskmodel.py ./
+COPY scenarioengine.py ./
+COPY scheduled_strategy_validation.py observation_recovery.py observation_process.py ./
+COPY smartregimeportfolio.py ./
+COPY strategy_dashboard_server.py dashboard_runtime.py ./
+COPY live_p1_runner.py live_p1_service.py operational_metrics.py operational_escalation.py operational_recovery.py operational_model_review.py managed_disaster_recovery.py strategy_degradation.py execution_degradation.py risk_forecast_registry.py executionanalytics.py ./
+COPY strategy_operations.py ./
+COPY strategy_integrity.py ./
+COPY strategy_receipts.py ./
+COPY prospective_strategy_ledger.py ./
+COPY forward_cohort.py ./
+COPY strategy_healthcheck.py ./
+COPY strategy_report.py ./
+COPY strategy_training_data.py ./
+COPY tradingcalendar.py ./
+COPY training_macro.py ./
+COPY macro_feature_contract.py ./
+COPY volatilitytargeting.py ./
+COPY alertengine.py audittrail.py emailtransport.py operationalevent.py ./
+COPY research/*.json ./research/
+COPY dashboard/investor.html dashboard/investor.css dashboard/investor.js ./dashboard/
+RUN mkdir -p /app/var /app/output && chown -R 10001:10001 /app
+USER 10001:10001
+ENTRYPOINT ["python", "live_observation_cycle.py"]
+CMD ["--help"]

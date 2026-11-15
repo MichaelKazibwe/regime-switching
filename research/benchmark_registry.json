@@ -1,0 +1,1 @@
+{"benchmarks":[{"evidence_pointer":"var/cycle-benchmark/latest.json","key":"Cycle_Balanced_Research_V1","live_client_allocation":false,"name":"Cycle balanced research reference","objective":"Balanced return, diversification and drawdown control","source":"cycle_benchmark.py","status":"RESEARCH_REFERENCE"}],"schema_version":1}

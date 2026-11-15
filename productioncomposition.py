@@ -276,6 +276,7 @@ class ProductionComposition:
     def __init__(
         self,
         *,
+        bl_tilt_strength: float = 0.0,
         risk_budget_engine_factory: (
             Callable[[], Any]
             | None
@@ -285,6 +286,11 @@ class ProductionComposition:
             | None
         ) = None,
     ) -> None:
+
+        bl_tilt_strength = float(bl_tilt_strength)
+        if not 0.0 <= bl_tilt_strength <= 1.0:
+            raise ValueError("bl_tilt_strength must be between 0 and 1.")
+        self.bl_tilt_strength = bl_tilt_strength
 
         self.risk_budget_engine_factory = (
             risk_budget_engine_factory
@@ -788,6 +794,11 @@ class ProductionComposition:
                 kwargs[
                     parameter.name
                 ] = dependency
+
+        if "bl_tilt_strength" in {
+            parameter.name for parameter in parameters
+        }:
+            kwargs["bl_tilt_strength"] = self.bl_tilt_strength
 
         try:
 

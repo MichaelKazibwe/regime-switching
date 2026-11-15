@@ -1,0 +1,16 @@
+FROM python:3.12.16-slim-bookworm
+
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 XDG_CACHE_HOME=/tmp/product-cache
+WORKDIR /app
+COPY requirements-paper.hashed.lock ./
+RUN python -m pip install --no-cache-dir --require-hashes -r requirements-paper.hashed.lock \
+    && python -m pip check
+# Build only from the allowlisted product_build.py staging context.
+COPY *.py ./
+COPY release-manifest.json Dockerfile.recommendations ./
+COPY dashboard/investor.html dashboard/investor.css dashboard/investor.js ./dashboard/
+RUN mkdir -p /app/var && chown -R 10001:10001 /app
+USER 10001:10001
+# A private batch recommendation/report job. No port or order worker is started.
+ENTRYPOINT ["python", "-m", "investment_product"]
+CMD ["--help"]

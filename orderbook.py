@@ -30,6 +30,8 @@ class OrderBook(BaseObject):
     It does NOT execute orders.
     """
 
+    API_VERSION = "1.0.0"
+
     # ==========================================================
     # Constructor
     # ==========================================================
@@ -232,6 +234,40 @@ class OrderBook(BaseObject):
         self.order_history.clear()
 
         self.last_order = None
+
+    def to_dict(self) -> dict:
+        """Serialize all order states for durable paper recovery."""
+        return {
+            "api_version": self.API_VERSION,
+            "active_orders": {key: value.to_dict() for key, value in self.active_orders.items()},
+            "completed_orders": {key: value.to_dict() for key, value in self.completed_orders.items()},
+            "cancelled_orders": {key: value.to_dict() for key, value in self.cancelled_orders.items()},
+            "rejected_orders": {key: value.to_dict() for key, value in self.rejected_orders.items()},
+            "order_history": list(self.order_history),
+            "last_order_id": None if self.last_order is None else self.last_order.order_id,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "OrderBook":
+        """Restore every canonical order into exactly one lifecycle bucket."""
+        if not isinstance(data, dict):
+            raise TypeError("OrderBook data must be a dictionary.")
+        book = cls()
+        for bucket_name in ("active_orders", "completed_orders", "cancelled_orders", "rejected_orders"):
+            bucket_data = data.get(bucket_name, {})
+            if not isinstance(bucket_data, dict):
+                raise TypeError(f"{bucket_name} must be a dictionary.")
+            bucket = getattr(book, bucket_name)
+            for order_id, order_data in bucket_data.items():
+                order = Order.from_dict(order_data)
+                if order.order_id != order_id or book.has_order(order_id):
+                    raise ValueError("OrderBook contains a duplicate or mismatched order ID.")
+                bucket[order_id] = order
+        book.order_history = list(data.get("order_history", []))
+        last_order_id = data.get("last_order_id")
+        if last_order_id is not None:
+            book.last_order = book.get_order(last_order_id)
+        return book
 
     # ==========================================================
     # Internal State Transition

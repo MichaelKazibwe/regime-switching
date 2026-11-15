@@ -1,0 +1,36 @@
+# Local Linux VM only. No public proxy, market credentials or default users.
+services:
+  pilot:
+    image: ${PILOT_LOCAL_IMAGE:?Set the locally built immutable image ID}
+    init: true
+    restart: unless-stopped
+    network_mode: host
+    read_only: true
+    user: "10001:10001"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 2g
+    cpus: 2
+    environment:
+      PILOT_PUBLIC_ORIGIN: http://127.0.0.1:8782
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8782/healthz', timeout=4).read()"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+    entrypoint: [python, pilot_server.py]
+    command: [--snapshot, var/pilot-input/launch.json, --state, var/pilot, --bind, 127.0.0.1, --port, "8782", --origin, "http://127.0.0.1:8782", --insecure-local, --benchmark, var/pilot-input/benchmark.json]
+    volumes:
+      - inputs:/app/var:ro
+      - state:/app/var/pilot:rw
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+volumes:
+  inputs:
+    name: regime-pilot-local-inputs
+    external: true
+  state:
+    name: regime-pilot-local-state
+    external: true

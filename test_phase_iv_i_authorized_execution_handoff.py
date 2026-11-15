@@ -177,7 +177,7 @@ def test_handoff_does_not_route():
 
 
 def test_live_trading_enabled_is_hard_stop():
-    authorization = _make_authorization()
+    _make_authorization()
 
     # Existing authorization artifacts are immutable.
     # Reaching this state must therefore be tested through

@@ -7,8 +7,24 @@ __pycache__/
 
 # Environment
 .env
+.env.*
+.secrets/
+!.env.paper.example
+!.env.product.example
 .venv/
 venv/
+
+# Runtime state and generated output
+var/
+*.sqlite3
+*.sqlite3-*
+*.jsonl
+paper-reports/
+paper-dashboard.html
+output/
+tmp/pdfs/
+.pytest_cache/
+.ruff_cache/
 
 # IDE
 .vscode/
@@ -16,4 +32,15 @@ venv/
 # Reports
 ruff_report.txt
 print_inventory.txt
+
+# Local downloads and obsolete recovery snapshots
+*.dmg
+*.zip
+*.py.backup
+*.py.bak_*
+*.py.pre_*
+*.py.before_*
+*.py.phase*backup*
+pre_rewrite_backup_*/
+.stamp=*
 

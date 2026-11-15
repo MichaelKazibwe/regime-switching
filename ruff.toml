@@ -3,5 +3,6 @@ target-version = "py311"
 
 exclude = [
     "archive",
+    "pre_rewrite_backup_*",
     "__pycache__",
 ]

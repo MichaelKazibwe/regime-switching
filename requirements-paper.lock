@@ -1,0 +1,50 @@
+# Exact paper runtime pins, with dependency closure verified by a clean
+# Linux Python 3.12 resolver on 2026-11-14. Original numerical pins are retained.
+# Install the generated requirements-paper.hashed.lock companion with
+# --require-hashes; verify compatibility on Python 3.12 in hosted CI.
+annotated-types==0.7.0
+beautifulsoup4==4.14.3
+certifi==2026.10.18
+cffi==2.0.0
+charset-normalizer==3.4.7
+curl_cffi==0.15.0
+exchange_calendars==4.13.2
+fredapi==0.5.2
+frozendict==2.4.7
+idna==3.11
+joblib==1.5.3
+korean-lunar-calendar==0.3.1
+markdown-it-py==4.0.0
+mdurl==0.1.2
+multitasking==0.0.12
+numpy==2.4.4
+pandas==3.0.2
+pandas_market_calendars==5.4.0
+peewee==4.0.4
+platformdirs==4.9.4
+pillow==13.0.0
+protobuf==7.34.1
+pycparser==3.0
+pydantic==2.13.4
+pydantic-settings==2.14.1
+pydantic_core==2.46.4
+pyluach==2.3.0
+Pygments==2.20.0
+python-dateutil==2.9.0.post0
+python-dotenv==1.2.2
+pytz==2026.1.post1
+requests==2.33.1
+reportlab==4.5.1
+rich==14.3.3
+scikit-learn==1.8.0
+scipy==1.17.1
+six==1.17.0
+soupsieve==4.1.1
+threadpoolctl==3.6.0
+toolz==1.1.0
+typing-inspection==0.4.2
+typing_extensions==4.15.0
+tzdata==2026.2
+urllib3==2.8.0
+websockets==16.0
+yfinance==1.2.1

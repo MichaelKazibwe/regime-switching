@@ -498,6 +498,11 @@ class PostTradeExecutionMonitor:
             str
         ] = set()
 
+        # Event-level identities are authoritative. A broker order can
+        # legitimately produce multiple partial fills.
+        self._execution_ids: set[str] = set()
+        self._fill_ids: set[str] = set()
+
     # ==================================================================
     # TIMESTAMP
     # ==================================================================
@@ -611,11 +616,6 @@ class PostTradeExecutionMonitor:
                 "order cannot be None."
             )
 
-        if execution is None:
-            raise TypeError(
-                "execution cannot be None."
-            )
-
         order_id = cls._order_id(
             order
         )
@@ -656,21 +656,30 @@ class PostTradeExecutionMonitor:
             )
         )
 
-        executed_quantity = float(
-            self._get(
-                execution,
-                "quantity",
+        cumulative_quantity = self._get(
+            execution,
+            "cumulative_filled_quantity",
+            None,
+        )
+
+        if cumulative_quantity is not None:
+            executed_quantity = float(cumulative_quantity)
+        else:
+            executed_quantity = float(
                 self._get(
                     execution,
-                    "executed_quantity",
+                    "quantity",
                     self._get(
                         execution,
-                        "filled_quantity",
-                        0.0,
+                        "executed_quantity",
+                        self._get(
+                            execution,
+                            "filled_quantity",
+                            0.0,
+                        ),
                     ),
-                ),
+                )
             )
-        )
 
         if ordered_quantity <= 0:
             raise ValueError(
@@ -871,31 +880,35 @@ class PostTradeExecutionMonitor:
         order: Any,
         execution: Any,
     ) -> bool:
-        """
-        Return True if the execution has already been processed.
-        """
+        """Return True when the exact execution event was processed."""
 
-        order_id = self._order_id(
-            order
-        )
-
-        broker_order_id = (
-            self._broker_order_id(
-                execution
-            )
-        )
-
-        execution_key = (
-            broker_order_id
-            or order_id
-        )
-
-        if execution_key is None:
+        if execution is None:
             return False
 
-        return execution_key in (
-            self._execution_keys
-        )
+        execution_id = self._get(execution, "execution_id", None)
+        fill_id = self._get(execution, "fill_id", None)
+
+        if execution_id and str(execution_id) in self._execution_ids:
+            return True
+        if fill_id and str(fill_id) in self._fill_ids:
+            return True
+
+        # Legacy records have no event identity. Use a composite fallback;
+        # broker_order_id alone is invalid because one order can have many fills.
+        if not execution_id and not fill_id:
+            order_id = self._order_id(order)
+            broker_order_id = self._broker_order_id(execution)
+            quantity = self._get(
+                execution,
+                "quantity",
+                self._get(execution, "executed_quantity", 0.0),
+            )
+            price = self._get(execution, "execution_price", 0.0)
+            timestamp = self._get(execution, "timestamp", "")
+            key = f"LEGACY|{broker_order_id or order_id}|{quantity}|{price}|{timestamp}"
+            return key in self._execution_keys
+
+        return False
 
     # ==================================================================
     # EXECUTION QUALITY
@@ -1306,6 +1319,20 @@ class PostTradeExecutionMonitor:
         )
 
         # --------------------------------------------------------------
+        # STATUS / QUANTITY CONSISTENCY
+        # --------------------------------------------------------------
+
+        state_ok = True
+        if status_ok:
+            if execution_status in {"FILLED", "CONFIRMED", "EXECUTED"}:
+                state_ok = executed_quantity >= ordered_quantity - self.quantity_tolerance
+            elif execution_status == "PARTIALLY_FILLED":
+                state_ok = (
+                    executed_quantity > self.quantity_tolerance
+                    and executed_quantity < ordered_quantity - self.quantity_tolerance
+                )
+
+        # --------------------------------------------------------------
         # ZERO-FILL BROKER STATE
         # --------------------------------------------------------------
         #
@@ -1326,8 +1353,15 @@ class PostTradeExecutionMonitor:
         # the execution is None branch above.
         # --------------------------------------------------------------
 
+        raw_cumulative_quantity = self._get(
+            execution,
+            "cumulative_filled_quantity",
+            None,
+        )
         raw_executed_quantity = float(
-            self._get(
+            raw_cumulative_quantity
+            if raw_cumulative_quantity is not None
+            else self._get(
                 execution,
                 "quantity",
                 self._get(
@@ -1482,6 +1516,15 @@ class PostTradeExecutionMonitor:
                 .STATUS_MISMATCH
             )
 
+        elif not state_ok:
+            status = (
+                PostTradeStatus.DISCREPANCY
+            )
+            reason = (
+                ExecutionDiscrepancy
+                .STATUS_MISMATCH
+            )
+
         elif executed_quantity == 0:
             status = (
                 PostTradeStatus.PENDING
@@ -1526,20 +1569,26 @@ class PostTradeExecutionMonitor:
         # REGISTER EXECUTION
         # --------------------------------------------------------------
 
-        broker_order_id = (
-            self._broker_order_id(
-                execution
+        execution_id = self._get(execution, "execution_id", None)
+        fill_id = self._get(execution, "fill_id", None)
+
+        if execution_id:
+            self._execution_ids.add(str(execution_id))
+        if fill_id:
+            self._fill_ids.add(str(fill_id))
+
+        if not execution_id and not fill_id:
+            broker_order_id = self._broker_order_id(execution)
+            order_id = self._order_id(order)
+            quantity = self._get(
+                execution,
+                "quantity",
+                self._get(execution, "executed_quantity", 0.0),
             )
-        )
-
-        execution_key = (
-            broker_order_id
-            or self._order_id(order)
-        )
-
-        if execution_key is not None:
+            price = self._get(execution, "execution_price", 0.0)
+            timestamp = self._get(execution, "timestamp", "")
             self._execution_keys.add(
-                execution_key
+                f"LEGACY|{broker_order_id or order_id}|{quantity}|{price}|{timestamp}"
             )
 
         return decision
@@ -1713,6 +1762,15 @@ class PostTradeExecutionMonitor:
                 "monitor count."
             )
 
+        if not all(isinstance(value, str) and value for value in self._execution_ids):
+            raise RuntimeError("Invalid execution identity registry.")
+
+        if not all(isinstance(value, str) and value for value in self._fill_ids):
+            raise RuntimeError("Invalid fill identity registry.")
+
+        if not all(isinstance(value, str) and value for value in self._execution_keys):
+            raise RuntimeError("Invalid legacy execution registry.")
+
         return True
 
     # ==================================================================
@@ -1781,6 +1839,16 @@ class PostTradeExecutionMonitor:
             "execution_keys":
                 sorted(
                     self._execution_keys
+                ),
+
+            "execution_ids":
+                sorted(
+                    self._execution_ids
+                ),
+
+            "fill_ids":
+                sorted(
+                    self._fill_ids
                 ),
         }
 
@@ -1906,6 +1974,22 @@ class PostTradeExecutionMonitor:
                 [],
             )
         )
+
+        monitor._execution_ids = set(
+            data.get(
+                "execution_ids",
+                [],
+            )
+        )
+
+        monitor._fill_ids = set(
+            data.get(
+                "fill_ids",
+                [],
+            )
+        )
+
+        monitor.health_check()
 
         return monitor
 
@@ -2508,12 +2592,12 @@ def test_post_trade_execution_monitor():
     # INVALID QUANTITY
     # ==============================================================
 
-    invalid_quantity_order = Order(
-        order_id="POST-INVALID",
-        ticker="SPY",
-        side="BUY",
-        quantity=0,
-    )
+    invalid_quantity_order = {
+        "order_id": "POST-INVALID",
+        "ticker": "SPY",
+        "side": "BUY",
+        "quantity": 0,
+    }
 
     try:
         monitor.check_quantity(

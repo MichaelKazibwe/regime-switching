@@ -1,0 +1,61 @@
+services:
+  pilot:
+    image: ${PILOT_IMAGE:?Set the reviewed immutable pilot image digest}
+    init: true
+    restart: unless-stopped
+    read_only: true
+    user: "10001:10001"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 2g
+    cpus: 2
+    environment:
+      PILOT_PUBLIC_ORIGIN: ${PILOT_PUBLIC_ORIGIN:?Set the HTTPS pilot origin}
+      PILOT_TRUSTED_PROXY: proxy
+    volumes:
+      - ./runtime:/app/var:ro
+      - ./runtime/pilot:/app/var/pilot:rw
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    networks: [pilot]
+  proxy:
+    image: ${PILOT_PROXY_IMAGE:?Set the reviewed immutable Caddy image digest}
+    restart: unless-stopped
+    environment:
+      PILOT_DOMAIN: ${PILOT_DOMAIN:?Set the pilot DNS hostname}
+      ACME_EMAIL: ${ACME_EMAIL:?Set the certificate operator email}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/pilot/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [pilot]
+  validation:
+    image: ${PILOT_IMAGE:?Set the reviewed immutable pilot image digest}
+    profiles: [jobs]
+    init: true
+    read_only: true
+    user: "10001:10001"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 4g
+    cpus: 2
+    env_file:
+      - ./.secrets/market.env
+    entrypoint: [python, pilot_collect.py]
+    volumes:
+      - ./runtime:/app/var
+      - ./output:/app/output
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    networks: [pilot]
+    restart: "no"
+networks:
+  pilot:
+volumes:
+  caddy-data:
+  caddy-config:

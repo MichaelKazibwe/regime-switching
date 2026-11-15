@@ -1936,8 +1936,20 @@ class FullSystemRegression:
                     "is non-finite."
                 )
 
-                volatility_error = (
+                # PortfolioOptimizer preserves the native covariance
+                # frequency for ``final_volatility``. Regime targets are
+                # annual, so the independent regression calculation must
+                # annualize the returned portfolio volatility before
+                # comparing it with the configured target.
+                annualization_factor = np.sqrt(252.0)
+                final_volatility_annualized = (
                     final_volatility
+                    *
+                    annualization_factor
+                )
+
+                volatility_error = (
+                    final_volatility_annualized
                     -
                     target_vol
                 )
@@ -1946,7 +1958,7 @@ class FullSystemRegression:
                     0.0,
                     target_vol
                     -
-                    final_volatility,
+                    final_volatility_annualized,
                 )
 
                 print(
@@ -2102,6 +2114,17 @@ class FullSystemRegression:
                     "original_volatility",
                     "target_volatility",
                     "final_volatility",
+                    "final_volatility_frequency",
+                    "final_volatility_annualized",
+                    "portfolio_variance_native",
+                    "portfolio_variance_annualized",
+                    "portfolio_volatility_native",
+                    "portfolio_volatility_annualized",
+                    "target_volatility_frequency",
+                    "risk_frequency",
+                    "covariance_frequency",
+                    "periods_per_year",
+                    "annualization_method",
                     "volatility_error",
                     "volatility_shortfall",
                     "target_achieved",
@@ -2135,6 +2158,12 @@ class FullSystemRegression:
                 diagnostic_final = float(
                     volatility_diagnostics[
                         "final_volatility"
+                    ]
+                )
+
+                diagnostic_final_annualized = float(
+                    volatility_diagnostics[
+                        "final_volatility_annualized"
                     ]
                 )
 
@@ -2177,6 +2206,10 @@ class FullSystemRegression:
                 )
 
                 assert np.isfinite(
+                    diagnostic_final_annualized
+                )
+
+                assert np.isfinite(
                     diagnostic_error
                 )
 
@@ -2212,6 +2245,16 @@ class FullSystemRegression:
                     atol=1e-10,
                 ), (
                     f"{regime}: diagnostic final "
+                    "volatility disagrees with "
+                    "independent calculation."
+                )
+
+                assert np.isclose(
+                    diagnostic_final_annualized,
+                    final_volatility_annualized,
+                    atol=1e-10,
+                ), (
+                    f"{regime}: diagnostic annualized "
                     "volatility disagrees with "
                     "independent calculation."
                 )
@@ -2263,9 +2306,13 @@ class FullSystemRegression:
                     "not match returned cash."
                 )
 
+                # PortfolioOptimizer preserves the native covariance
+                # frequency for ``final_volatility``. Regime volatility
+                # targets are annual, so target achievement must be
+                # evaluated using the independently annualized volatility.
                 calculated_target_achieved = (
                     abs(
-                        final_volatility
+                        final_volatility_annualized
                         -
                         target_vol
                     )
@@ -2593,15 +2640,29 @@ class FullSystemRegression:
                     # --------------------------------------------------
                     # Engine → independently calculated portfolio
                     # --------------------------------------------------
+                    #
+                    # The production optimizer passes annualize=True to
+                    # VolatilityTargeting. Therefore the engine result
+                    # reports final_volatility in annualized units, while
+                    # the independent covariance calculation above is in
+                    # the native covariance frequency (daily).
+                    #
+                    # Reconcile like-for-like units: engine annualized
+                    # volatility must equal the independently calculated
+                    # native volatility annualized with sqrt(252).
+                    # --------------------------------------------------
 
                     assert np.isclose(
                         engine_final_volatility,
-                        final_volatility,
+                        final_volatility_annualized,
+                        rtol=1e-6,
                         atol=1e-10,
                     ), (
-                        f"{regime}: engine final volatility "
-                        "does not match independent "
-                        "portfolio calculation."
+                        f"{regime}: engine annualized final volatility "
+                        "does not match independently calculated "
+                        "annualized portfolio volatility. "
+                        f"Engine={engine_final_volatility:.12f}, "
+                        f"Independent={final_volatility_annualized:.12f}."
                     )
 
                     assert np.isclose(
@@ -2617,6 +2678,9 @@ class FullSystemRegression:
                     # Engine shortfall
                     # --------------------------------------------------
 
+                    # Engine volatility is annualized in the production
+                    # path, so its shortfall is measured against the
+                    # annual regime target in the same units.
                     expected_engine_shortfall = max(
                         0.0,
                         target_vol
@@ -3279,8 +3343,14 @@ class FullSystemRegression:
 
             feasible_max_leverage = 2.0
 
-            feasible_target_volatility = (
+            feasible_original_volatility_annualized = (
                 feasible_original_volatility
+                *
+                np.sqrt(252.0)
+            )
+
+            feasible_target_volatility = (
+                feasible_original_volatility_annualized
                 *
                 2.0
             )
@@ -3288,7 +3358,7 @@ class FullSystemRegression:
             required_scale = (
                 feasible_target_volatility
                 /
-                feasible_original_volatility
+                feasible_original_volatility_annualized
             )
 
             required_gross = (
@@ -3371,6 +3441,8 @@ class FullSystemRegression:
                     max_leverage=(
                         feasible_max_leverage
                     ),
+                    annualize=True,
+                    periods_per_year=252,
                 )
             )
 
@@ -3489,8 +3561,14 @@ class FullSystemRegression:
                 "is non-finite."
             )
 
-            feasible_volatility_error = (
+            feasible_final_volatility_annualized = (
                 feasible_final_volatility
+                *
+                np.sqrt(252.0)
+            )
+
+            feasible_volatility_error = (
+                feasible_final_volatility_annualized
                 -
                 feasible_target_volatility
             )
@@ -3520,15 +3598,15 @@ class FullSystemRegression:
             # ==========================================================
 
             assert np.isclose(
-                feasible_final_volatility,
+                feasible_final_volatility_annualized,
                 feasible_target_volatility,
                 rtol=1e-5,
                 atol=1e-7,
             ), (
                 "Feasible volatility target was "
                 "not achieved. "
-                f"Final="
-                f"{feasible_final_volatility:.12f}, "
+                f"Final annualized="
+                f"{feasible_final_volatility_annualized:.12f}, "
                 f"Target="
                 f"{feasible_target_volatility:.12f}."
             )

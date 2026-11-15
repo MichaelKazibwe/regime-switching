@@ -1,0 +1,14 @@
+[Unit]
+Description=Generate and email monthly paper portfolio PDF reports
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/regime-switching
+EnvironmentFile=/opt/regime-switching/.env.image
+UMask=0077
+ExecStart=/usr/bin/docker compose -f /opt/regime-switching/compose.paper.yaml run --rm --no-deps --volume /opt/regime-switching/.env.monthly-recipients.json:/app/.env.monthly-recipients.json:ro paper-worker python -m monthlydelivery run --send
+TimeoutStartSec=30min
+Restart=no

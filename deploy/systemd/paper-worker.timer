@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the paper portfolio worker after the U.S. market close
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 17:15:00 America/New_York
+Persistent=true
+AccuracySec=1min
+Unit=paper-worker.service
+
+[Install]
+WantedBy=timers.target

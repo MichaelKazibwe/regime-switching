@@ -149,6 +149,9 @@ class PaperOrderRecord:
     timestamp: str = ""
 
     last_update: str = ""
+    decision_id: str | None = None
+    fill_ids: tuple[str, ...] = ()
+    execution_ids: tuple[str, ...] = ()
 
     def to_dict(self) -> dict:
         """
@@ -197,6 +200,9 @@ class PaperOrderRecord:
 
             "last_update":
                 self.last_update,
+            "decision_id": self.decision_id,
+            "fill_ids": list(self.fill_ids),
+            "execution_ids": list(self.execution_ids),
         }
 
     @classmethod
@@ -281,6 +287,9 @@ class PaperOrderRecord:
                 "last_update",
                 "",
             ),
+            decision_id=data.get("decision_id", None),
+            fill_ids=tuple(data.get("fill_ids", [])),
+            execution_ids=tuple(data.get("execution_ids", [])),
         )
 
 
@@ -312,6 +321,11 @@ class PaperExecutionReceipt:
     timestamp: str
 
     broker: str = "PAPER"
+    execution_id: str = ""
+    fill_id: str = ""
+    decision_id: str | None = None
+    cumulative_filled_quantity: float = 0.0
+    remaining_quantity: float = 0.0
 
     def to_dict(self) -> dict:
         """
@@ -343,8 +357,12 @@ class PaperExecutionReceipt:
             "timestamp":
                 self.timestamp,
 
-            "broker":
-                self.broker,
+            "broker": self.broker,
+            "execution_id": self.execution_id,
+            "fill_id": self.fill_id,
+            "decision_id": self.decision_id,
+            "cumulative_filled_quantity": self.cumulative_filled_quantity,
+            "remaining_quantity": self.remaining_quantity,
         }
 
 
@@ -450,6 +468,8 @@ class PaperBroker(BrokerAdapter):
         self._healthy = True
 
         self._sequence = 0
+        self._execution_sequence = 0
+        self._fill_sequence = 0
 
         self.orders: dict[
             str,
@@ -489,6 +509,18 @@ class PaperBroker(BrokerAdapter):
         """
 
         return self._broker_name
+
+    # ==================================================================
+    # EXECUTION / FILL IDENTITY
+    # ==================================================================
+
+    def _next_execution_id(self) -> str:
+        self._execution_sequence += 1
+        return f"PEXEC-{self._execution_sequence:012d}"
+
+    def _next_fill_id(self) -> str:
+        self._fill_sequence += 1
+        return f"PFILL-{self._fill_sequence:012d}"
 
     # ==================================================================
     # TIMESTAMP
@@ -689,6 +721,7 @@ class PaperBroker(BrokerAdapter):
             timestamp=timestamp,
 
             last_update=timestamp,
+            decision_id=getattr(order, "decision_id", None),
         )
 
         self.orders[
@@ -1000,6 +1033,11 @@ class PaperBroker(BrokerAdapter):
 
         record.last_update = timestamp
 
+        execution_id = self._next_execution_id()
+        fill_id = self._next_fill_id()
+        record.execution_ids = tuple(record.execution_ids) + (execution_id,)
+        record.fill_ids = tuple(record.fill_ids) + (fill_id,)
+
         receipt = PaperExecutionReceipt(
             broker_order_id=(
                 record.broker_order_id
@@ -1024,6 +1062,11 @@ class PaperBroker(BrokerAdapter):
             timestamp=timestamp,
 
             broker=self.broker_name,
+            execution_id=execution_id,
+            fill_id=fill_id,
+            decision_id=record.decision_id,
+            cumulative_filled_quantity=float(record.filled_quantity),
+            remaining_quantity=float(record.remaining_quantity),
         )
 
         self.execution_history.append(
@@ -1327,6 +1370,12 @@ class PaperBroker(BrokerAdapter):
             "sequence":
                 self._sequence,
 
+            "execution_sequence":
+                self._execution_sequence,
+
+            "fill_sequence":
+                self._fill_sequence,
+
             "submission_count":
                 self.submission_count,
 
@@ -1373,6 +1422,11 @@ class PaperBroker(BrokerAdapter):
         ):
             raise TypeError(
                 "data must be a dictionary."
+            )
+
+        if data.get("api_version", cls.API_VERSION) != cls.API_VERSION:
+            raise ValueError(
+                "Unsupported PaperBroker API version."
             )
 
         broker = cls(
@@ -1434,6 +1488,40 @@ class PaperBroker(BrokerAdapter):
             ).items()
         }
 
+        broker._execution_sequence = int(
+            data.get(
+                "execution_sequence",
+                max(
+                    [
+                        0,
+                        *(
+                            int(str(value.execution_ids[-1]).split("-")[-1])
+                            for value in broker.orders.values()
+                            if value.execution_ids
+                            and str(value.execution_ids[-1]).split("-")[-1].isdigit()
+                        ),
+                    ],
+                ),
+            )
+        )
+
+        broker._fill_sequence = int(
+            data.get(
+                "fill_sequence",
+                max(
+                    [
+                        0,
+                        *(
+                            int(str(value.fill_ids[-1]).split("-")[-1])
+                            for value in broker.orders.values()
+                            if value.fill_ids
+                            and str(value.fill_ids[-1]).split("-")[-1].isdigit()
+                        ),
+                    ],
+                ),
+            )
+        )
+
         broker.execution_history = list(
             data.get(
                 "execution_history",
@@ -1465,6 +1553,13 @@ class PaperBroker(BrokerAdapter):
                     ]
                 )
             )
+
+        if broker.submission_count < 0 or broker.fill_count < 0 or broker.cancel_count < 0:
+            raise ValueError(
+                "PaperBroker lifecycle counters cannot be negative."
+            )
+
+        broker.health_check()
 
         return broker
 

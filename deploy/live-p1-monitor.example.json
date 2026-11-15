@@ -1,0 +1,21 @@
+{
+  "delivery_enabled": false,
+  "delivery_authorized": false,
+  "recipients": ["primary@example.invalid", "escalation@example.invalid"],
+  "smtp_host": "smtp.example.invalid",
+  "smtp_port": 587,
+  "sender": "monitor@example.invalid",
+  "smtp_username": "CONFIGURE_PRIVATELY",
+  "smtp_password_environment": "REGIME_SMTP_PASSWORD",
+  "broker_evidence": null,
+  "slo": {
+    "post_close_max_seconds": 7200,
+    "heartbeat_max_seconds": 7200,
+    "ack_p95_seconds": 5,
+    "callback_p95_seconds": 5,
+    "shortfall_excess_bps": 10,
+    "rto_seconds": 900,
+    "escalate_seconds": 900,
+    "realized_to_modeled_volatility": 1.5
+  }
+}

@@ -1,42 +1,176 @@
+"""
+======================================================================
+MARKET DATA LOADER
+======================================================================
+
+Production-grade historical market-data loading boundary.
+
+Purpose
+-------
+This module provides the controlled market-data ingestion boundary for
+the regime-switching portfolio system.
+
+The loader is responsible for:
+
+    1. Downloading historical market prices from Yahoo Finance.
+    2. Attempting a batched download before individual recovery.
+    3. Normalizing Yahoo Finance output.
+    4. Preserving the requested production asset universe.
+    5. Recovering genuinely missing assets individually.
+    6. Never interpolating historical observations.
+    7. Never forward-filling historical observations.
+    8. Never backward-filling historical observations.
+    9. Never fabricating historical observations.
+   10. Preserving partial missing observations exactly as received.
+   11. Validating final price and return matrices.
+   12. Exposing deterministic loader health state.
+
+Critical Data-Recovery Contract
+--------------------------------
+The distinction between a missing asset and a partially missing
+historical series is intentional.
+
+A missing asset means:
+
+    * the asset column does not exist, or
+    * the asset column exists but contains no valid observations.
+
+Such an asset may be downloaded individually.
+
+A partially missing asset means:
+
+    * the asset column exists, and
+    * at least one valid historical observation exists, and
+    * at least one historical observation is NaN.
+
+Such an asset MUST NOT be downloaded again merely to fill the gaps.
+
+The loader therefore does NOT:
+
+    * interpolate,
+    * forward-fill,
+    * backward-fill,
+    * synthesize,
+    * estimate,
+    * overwrite valid observations,
+    * or fill partial historical gaps from a second download.
+
+This preserves the integrity of the observed historical dataset.
+
+Author
+------
+Portfolio System Engineering
+
+Version
+-------
+3.0.0
+
+Phase
+-----
+Production Hardening
+======================================================================
+"""
+
+
 from __future__ import annotations
+
+
+# ======================================================================
+# SECTION 1
+# IMPORTS
+# ======================================================================
+
 
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Iterable
 from tradingcalendar import TradingCalendar
 
+
 import pandas as pd
 import yfinance as yf
+
 
 from core_constants import DEFAULT_ASSETS, settings
 from exceptions import DataValidationError
 from validators import DataValidator
 
 
+# ======================================================================
+# SECTION 2
+# MODULE LOGGER
+# ======================================================================
+
+
 logger = logging.getLogger(__name__)
 
 
-# ============================================================
+# ======================================================================
+# SECTION 3
 # MARKET DATA LOADER
-# ============================================================
+# ======================================================================
 
 
 class MarketDataLoader:
     """
     Production-grade historical market-data loader.
 
-    Design principles
-    -----------------
-    1. Attempt a batched Yahoo Finance download first.
-    2. Normalize Yahoo Finance MultiIndex output.
-    3. Detect missing/empty assets explicitly.
-    4. Retry failed assets individually.
-    5. Never silently fabricate prices.
-    6. Preserve the requested asset universe.
-    7. Validate the final price matrix before returning it.
+    The loader provides a controlled boundary between external market
+    data and the portfolio/risk system.
+
+    Core guarantees
+    ---------------
+
+    1. Batched Yahoo Finance download is attempted first.
+
+    2. Yahoo Finance MultiIndex output is normalized.
+
+    3. Missing asset columns are detected explicitly.
+
+    4. Completely empty asset columns may be recovered individually.
+
+    5. Partially missing asset columns are preserved exactly.
+
+    6. Historical prices are never interpolated.
+
+    7. Historical prices are never forward-filled.
+
+    8. Historical prices are never backward-filled.
+
+    9. Historical prices are never fabricated.
+
+   10. Requested asset ordering is preserved.
+
+   11. Final price data can be passed through DataValidator.
+
+   12. Loader health state remains deterministic.
+
+    Recovery policy
+    ---------------
+
+    An asset is eligible for individual recovery only when:
+
+        * the asset column is absent, or
+        * the asset column contains no valid observations.
+
+    An asset with some valid observations and some NaNs is NOT
+    considered a missing asset and therefore is NOT recovered.
     """
 
     API_VERSION = "2.0.0"
+
+    COMPONENT = "MarketDataLoader"
+
+    PUBLIC_METHODS = (
+        "load_prices",
+        "load_returns",
+        "health_check",
+    )
+
+    # ==================================================================
+    # SECTION 3.1
+    # CONSTRUCTOR
+    # ==================================================================
 
     def __init__(
         self,
@@ -48,6 +182,33 @@ class MarketDataLoader:
         max_data_age: timedelta | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
+        """
+        Initialize the market-data loader.
+
+        Parameters
+        ----------
+        assets:
+            Requested asset universe.
+
+        period:
+            Yahoo Finance historical period. If omitted, the configured
+            settings.yahoo_period value is used.
+
+        auto_adjust:
+            Whether Yahoo Finance adjusted prices should be requested.
+
+        max_retries:
+            Number of retries after the initial download attempt.
+
+        max_data_age:
+            Optional maximum permitted age of the latest valid
+            observation for each asset. If omitted, stale-data
+            protection is disabled.
+
+        clock:
+            Optional timezone-aware clock used for deterministic
+            freshness evaluation and testing.
+        """
 
         requested_assets = (
             list(assets)
@@ -108,10 +269,18 @@ class MarketDataLoader:
 
         self._calendar = TradingCalendar()
 
+        # --------------------------------------------------------------
+        # DOWNLOAD STATE
+        # --------------------------------------------------------------
+
         self.last_downloaded_assets: tuple[str, ...] = ()
+
         self.last_failed_assets: tuple[str, ...] = ()
+
         self.last_recovered_assets: tuple[str, ...] = ()
+
         self.last_batch_error: str | None = None
+
         self.last_incomplete_assets: tuple[str, ...] = ()
 
         # --------------------------------------------------------------
@@ -136,37 +305,64 @@ class MarketDataLoader:
             else "NOT_EVALUATED"
         )
 
-    # ========================================================
-    # NORMALIZATION
-    # ========================================================
+    # ==================================================================
+    # SECTION 4
+    # ASSET NORMALIZATION
+    # ==================================================================
 
     @staticmethod
     def _normalize_assets(
         assets: Iterable[str],
     ) -> list[str]:
+        """
+        Normalize the requested asset universe.
+
+        Rules
+        -----
+        Tickers are:
+
+            * converted to strings;
+            * stripped;
+            * upper-cased;
+            * deduplicated;
+            * preserved in first-seen order.
+        """
 
         normalized: list[str] = []
 
         for asset in assets:
 
-            ticker = str(asset).strip().upper()
+            ticker = (
+                str(asset)
+                .strip()
+                .upper()
+            )
 
             if not ticker:
                 continue
 
             if ticker not in normalized:
-                normalized.append(ticker)
+
+                normalized.append(
+                    ticker
+                )
 
         return normalized
 
-    # ========================================================
-    # DOWNLOAD HELPERS
-    # ========================================================
+    # ==================================================================
+    # SECTION 5
+    # YAHOO FINANCE DOWNLOAD BOUNDARY
+    # ==================================================================
 
     def _download(
         self,
         ticker_or_tickers,
     ) -> pd.DataFrame:
+        """
+        Execute the Yahoo Finance download boundary.
+
+        No transformation or recovery is performed here.
+        """
 
         return yf.download(
             ticker_or_tickers,
@@ -176,26 +372,48 @@ class MarketDataLoader:
             threads=False,
         )
 
-    # ========================================================
+    # ==================================================================
+    # SECTION 6
     # MULTIINDEX NORMALIZATION
-    # ========================================================
+    # ==================================================================
 
     @staticmethod
     def _extract_close(
         data: pd.DataFrame,
     ) -> pd.DataFrame:
+        """
+        Extract Close prices from Yahoo Finance output.
+
+        Supported layouts
+        -----------------
+        Price / Ticker:
+
+            ('Close', 'SPY')
+            ('Close', 'EFA')
+
+        Ticker / Price:
+
+            ('SPY', 'Close')
+            ('EFA', 'Close')
+
+        Single-ticker responses containing a normal ``Close`` column are
+        also supported.
+        """
 
         if data is None:
+
             return pd.DataFrame()
 
         if data.empty:
+
             return pd.DataFrame()
 
         frame = data.copy()
 
-        # ----------------------------------------------------
-        # Standard single-ticker response
-        # ----------------------------------------------------
+        # ------------------------------------------------------------------
+        # SECTION 6.1
+        # SINGLE-TICKER RESPONSE
+        # ------------------------------------------------------------------
 
         if not isinstance(
             frame.columns,
@@ -216,15 +434,10 @@ class MarketDataLoader:
 
             return frame
 
-        # ----------------------------------------------------
-        # MultiIndex response
-        #
-        # Depending on yfinance version, Yahoo can return:
-        #
-        # Price / Ticker
-        # or
-        # Ticker / Price
-        # ----------------------------------------------------
+        # ------------------------------------------------------------------
+        # SECTION 6.2
+        # MULTIINDEX LEVELS
+        # ------------------------------------------------------------------
 
         level0 = list(
             frame.columns.get_level_values(0)
@@ -234,11 +447,10 @@ class MarketDataLoader:
             frame.columns.get_level_values(1)
         )
 
-        # Price-first:
-        #
-        # ('Close', 'SPY')
-        # ('Close', 'EFA')
-        #
+        # ------------------------------------------------------------------
+        # SECTION 6.3
+        # PRICE-FIRST LAYOUT
+        # ------------------------------------------------------------------
 
         if "Close" in level0:
 
@@ -250,15 +462,15 @@ class MarketDataLoader:
                 close,
                 pd.Series,
             ):
+
                 close = close.to_frame()
 
             return close
 
-        # Ticker-first:
-        #
-        # ('SPY', 'Close')
-        # ('EFA', 'Close')
-        #
+        # ------------------------------------------------------------------
+        # SECTION 6.4
+        # TICKER-FIRST LAYOUT
+        # ------------------------------------------------------------------
 
         if "Close" in level1:
 
@@ -269,6 +481,7 @@ class MarketDataLoader:
             ]
 
             if not close_columns:
+
                 return pd.DataFrame()
 
             close = frame[
@@ -284,14 +497,25 @@ class MarketDataLoader:
 
         return pd.DataFrame()
 
-    # ========================================================
-    # SINGLE-TICKER EXTRACTION
-    # ========================================================
+    # ==================================================================
+    # SECTION 7
+    # SINGLE-TICKER DOWNLOAD
+    # ==================================================================
 
     def _download_single(
         self,
         ticker: str,
     ) -> pd.Series | None:
+        """
+        Download and extract one ticker.
+
+        Retries are performed up to ``max_retries``.
+
+        A successful result must contain at least one valid observation.
+
+        Missing observations within an otherwise valid series are NOT
+        fabricated or repaired here.
+        """
 
         for attempt in range(
             self.max_retries + 1
@@ -320,17 +544,18 @@ class MarketDataLoader:
 
                     continue
 
-                close = (
-                    self._extract_close(
-                        raw
-                    )
+                close = self._extract_close(
+                    raw
                 )
 
                 if close.empty:
+
                     continue
 
-                # Single ticker may still have
-                # UNKNOWN as the column name.
+                # ----------------------------------------------------------
+                # IDENTIFY SINGLE-TICKER SERIES
+                # ----------------------------------------------------------
+
                 if ticker in close.columns:
 
                     series = close[
@@ -343,10 +568,13 @@ class MarketDataLoader:
                         "UNKNOWN"
                     ].copy()
 
-                elif len(close.columns) == 1:
+                elif len(
+                    close.columns
+                ) == 1:
 
                     series = close.iloc[
-                        :, 0
+                        :,
+                        0,
                     ].copy()
 
                 else:
@@ -374,10 +602,18 @@ class MarketDataLoader:
                     )
                 ]
 
-                # Do NOT fill missing prices.
-                #
-                # Missing prices must remain visible
-                # and be rejected later.
+                # ----------------------------------------------------------
+                # NUMERIC NORMALIZATION
+                # ----------------------------------------------------------
+
+                series = pd.to_numeric(
+                    series,
+                    errors="coerce",
+                )
+
+                # ----------------------------------------------------------
+                # NO FABRICATION
+                # ----------------------------------------------------------
 
                 if series.dropna().empty:
 
@@ -402,13 +638,20 @@ class MarketDataLoader:
 
         return None
 
-    # ========================================================
+    # ==================================================================
+    # SECTION 8
     # BATCH DOWNLOAD
-    # ========================================================
+    # ==================================================================
 
     def _download_batch(
         self,
     ) -> pd.DataFrame:
+        """
+        Download the complete requested universe in one batch.
+
+        A batch failure is recorded and converted to an empty frame so
+        that individual recovery can subsequently be attempted.
+        """
 
         self.last_batch_error = None
 
@@ -455,9 +698,10 @@ class MarketDataLoader:
                 )
             ]
 
-            # Normalize column names.
             prices.columns = [
-                str(column).strip().upper()
+                str(column)
+                .strip()
+                .upper()
                 for column in prices.columns
             ]
 
@@ -476,15 +720,94 @@ class MarketDataLoader:
 
             return pd.DataFrame()
 
+    # ==================================================================
+    # SECTION 9
+    # RECOVERY POLICY
+    # ==================================================================
 
-    # ========================================================
-    # RECOVERY
-    # ========================================================
+    @staticmethod
+    def _asset_requires_recovery(
+        frame: pd.DataFrame,
+        ticker: str,
+    ) -> bool:
+        """
+        Determine whether an asset genuinely requires recovery.
+
+        Recovery is required only when:
+
+            1. the asset column is absent; or
+            2. the asset column contains zero valid observations.
+
+        A partially missing asset does NOT require recovery.
+
+        This distinction is critical.
+
+        Example
+        -------
+        Given:
+
+            SPY
+            ---
+            100
+            NaN
+            102
+            NaN
+            104
+
+        SPY is a valid, partially observed historical series.
+
+        It must remain:
+
+            100
+            NaN
+            102
+            NaN
+            104
+
+        It must NOT be downloaded again and merged over the missing
+        observations.
+        """
+
+        if ticker not in frame.columns:
+
+            return True
+
+        series = frame[ticker]
+
+        if series.dropna().empty:
+
+            return True
+
+        return False
+
+    # ==================================================================
+    # SECTION 10
+    # RECOVER MISSING ASSETS
+    # ==================================================================
 
     def _recover_missing_assets(
         self,
         prices: pd.DataFrame,
     ) -> pd.DataFrame:
+        """
+        Recover genuinely missing assets individually.
+
+        Recovery contract
+        -----------------
+        The method recovers only:
+
+            * completely absent asset columns;
+            * completely empty / all-NaN asset columns.
+
+        It does NOT recover:
+
+            * individual missing observations;
+            * partially missing series;
+            * isolated historical gaps.
+
+        No interpolation, forward-fill, backward-fill, or synthetic
+        observation generation is permitted.
+        """
 
         frame = (
             prices.copy()
@@ -492,14 +815,17 @@ class MarketDataLoader:
             else pd.DataFrame()
         )
 
-        # ----------------------------------------------------
+        # ------------------------------------------------------------------
+        # SECTION 10.1
         # NORMALIZE INPUT FRAME
-        # ----------------------------------------------------
+        # ------------------------------------------------------------------
 
         if not frame.empty:
 
             frame.columns = [
-                str(column).strip().upper()
+                str(column)
+                .strip()
+                .upper()
                 for column in frame.columns
             ]
 
@@ -515,50 +841,28 @@ class MarketDataLoader:
                 )
             ]
 
-        # ----------------------------------------------------
-        # IDENTIFY ASSETS REQUIRING RECOVERY
-        # ----------------------------------------------------
+        # ------------------------------------------------------------------
+        # SECTION 10.2
+        # IDENTIFY GENUINELY MISSING ASSETS
+        # ------------------------------------------------------------------
 
         recovery_required: list[str] = []
 
         for ticker in self.assets:
 
-            # Completely missing column.
-            if ticker not in frame.columns:
+            if self._asset_requires_recovery(
+                frame,
+                ticker,
+            ):
 
                 recovery_required.append(
                     ticker
                 )
 
-                continue
-
-            series = frame[ticker]
-
-            # Completely unusable series.
-            if series.dropna().empty:
-
-                recovery_required.append(
-                    ticker
-                )
-
-                continue
-
-            # Partially missing series.
-            #
-            # We attempt a fresh Yahoo download.
-            #
-            # IMPORTANT:
-            # We do NOT interpolate, forward-fill,
-            # backward-fill, or manufacture prices.
-            if series.isna().any():
-
-                recovery_required.append(
-                    ticker
-                )
-
-        # ----------------------------------------------------
+        # ------------------------------------------------------------------
+        # SECTION 10.3
         # NOTHING TO RECOVER
-        # ----------------------------------------------------
+        # ------------------------------------------------------------------
 
         if not recovery_required:
 
@@ -573,9 +877,10 @@ class MarketDataLoader:
 
         recovered: list[str] = []
 
-        # ----------------------------------------------------
+        # ------------------------------------------------------------------
+        # SECTION 10.4
         # INDIVIDUAL RECOVERY
-        # ----------------------------------------------------
+        # ------------------------------------------------------------------
 
         for ticker in recovery_required:
 
@@ -594,7 +899,6 @@ class MarketDataLoader:
 
             series = series.copy()
 
-            # Normalize recovered series.
             series.index = pd.to_datetime(
                 series.index
             )
@@ -614,9 +918,9 @@ class MarketDataLoader:
 
             series.name = ticker
 
-            # ------------------------------------------------
+            # --------------------------------------------------------------
             # COMPLETELY MISSING ASSET
-            # ------------------------------------------------
+            # --------------------------------------------------------------
 
             if ticker not in frame.columns:
 
@@ -625,60 +929,50 @@ class MarketDataLoader:
                     how="outer",
                 )
 
-                recovered.append(
-                    ticker
-                )
+                if not frame[ticker].dropna().empty:
+
+                    recovered.append(
+                        ticker
+                    )
 
                 continue
 
-            # ------------------------------------------------
-            # PARTIALLY MISSING ASSET
-            # ------------------------------------------------
-            #
-            # Preserve the original batch observations.
-            #
-            # Only genuinely missing observations are allowed
-            # to be supplied by the individual download.
-            #
-            # No interpolation.
-            # No forward-fill.
-            # No backward-fill.
-            # No synthetic observations.
+            # --------------------------------------------------------------
+            # ALL-NA ASSET
+            # --------------------------------------------------------------
 
-            original = frame[ticker].copy()
+            original = frame[
+                ticker
+            ].copy()
 
-            merged = original.combine_first(
-                series
+            if original.dropna().empty:
+
+                frame[ticker] = series
+
+                if not frame[ticker].dropna().empty:
+
+                    recovered.append(
+                        ticker
+                    )
+
+                continue
+
+            # --------------------------------------------------------------
+            # DEFENSIVE BRANCH
+            #
+            # This branch should not normally be reached because
+            # _asset_requires_recovery() excludes partially missing
+            # assets.
+            #
+            # It is deliberately fail-preserving rather than filling
+            # observations.
+            # --------------------------------------------------------------
+
+            logger.warning(
+                "Skipping recovery merge for %s because "
+                "valid observations already exist.",
+                ticker,
             )
-
-            frame[ticker] = merged
-
-            # ------------------------------------------------
-            # DETERMINE WHETHER RECOVERY ACTUALLY WORKED
-            # ------------------------------------------------
-
-            remaining_missing = (
-                frame[ticker].isna().any()
-            )
-
-            if remaining_missing:
-
-                logger.warning(
-                    "Recovery download for %s "
-                    "did not eliminate all missing "
-                    "observations.",
-                    ticker,
-                )
-
-            else:
-
-                recovered.append(
-                    ticker
-                )
-
-        # ----------------------------------------------------
-        # FINAL RECOVERY STATE
-        # ----------------------------------------------------
 
         self.last_recovered_assets = tuple(
             recovered
@@ -686,14 +980,20 @@ class MarketDataLoader:
 
         return frame
 
-    # ========================================================
+    # ==================================================================
+    # SECTION 11
     # FINAL NORMALIZATION
-    # ========================================================
+    # ==================================================================
 
     def _finalize(
         self,
         prices: pd.DataFrame,
     ) -> pd.DataFrame:
+        """
+        Normalize the final price matrix and update loader state.
+
+        No imputation occurs during finalization.
+        """
 
         if prices is None or prices.empty:
 
@@ -703,17 +1003,19 @@ class MarketDataLoader:
 
         frame = prices.copy()
 
-        # ----------------------------------------------------
-        # KEEP ONLY REQUESTED UNIVERSE
-        # ----------------------------------------------------
+        # ------------------------------------------------------------------
+        # SECTION 11.1
+        # REQUESTED UNIVERSE
+        # ------------------------------------------------------------------
 
         frame = frame.reindex(
             columns=self.assets
         )
 
-        # ----------------------------------------------------
-        # NORMALIZE INDEX
-        # ----------------------------------------------------
+        # ------------------------------------------------------------------
+        # SECTION 11.2
+        # INDEX NORMALIZATION
+        # ------------------------------------------------------------------
 
         frame.index = pd.to_datetime(
             frame.index
@@ -727,9 +1029,10 @@ class MarketDataLoader:
             )
         ]
 
-        # ----------------------------------------------------
+        # ------------------------------------------------------------------
+        # SECTION 11.3
         # NUMERIC CONVERSION
-        # ----------------------------------------------------
+        # ------------------------------------------------------------------
 
         for ticker in self.assets:
 
@@ -738,24 +1041,22 @@ class MarketDataLoader:
                 errors="coerce",
             )
 
-        # ----------------------------------------------------
-        # IMPORTANT:
+        # ------------------------------------------------------------------
+        # SECTION 11.4
+        # NO IMPUTATION
         #
-        # DO NOT:
-        #   - forward-fill
-        #   - backward-fill
-        #   - interpolate
-        #   - fabricate prices
+        # Explicitly prohibited:
         #
-        # Genuine Yahoo Finance gaps must remain visible.
-        # Strict validation will reject them when requested.
-        # Historical research callers can explicitly request
-        # validate=False and handle incomplete observations.
-        # ----------------------------------------------------
+        #   * forward-fill
+        #   * backward-fill
+        #   * interpolation
+        #   * synthetic values
+        # ------------------------------------------------------------------
 
-        # ----------------------------------------------------
-        # DATASET COMPLETENESS STATE
-        # ----------------------------------------------------
+        # ------------------------------------------------------------------
+        # SECTION 11.5
+        # COMPLETENESS STATE
+        # ------------------------------------------------------------------
 
         incomplete: list[str] = []
 
@@ -779,9 +1080,10 @@ class MarketDataLoader:
             incomplete
         )
 
-        # ----------------------------------------------------
+        # ------------------------------------------------------------------
+        # SECTION 11.6
         # DOWNLOADED ASSETS
-        # ----------------------------------------------------
+        # ------------------------------------------------------------------
 
         self.last_downloaded_assets = tuple(
             ticker
@@ -790,26 +1092,28 @@ class MarketDataLoader:
             and not frame[ticker].dropna().empty
         )
 
-        # ----------------------------------------------------
+        # ------------------------------------------------------------------
+        # SECTION 11.7
         # FAILED ASSETS
-        #
-        # An asset is considered failed if:
-        #   1. it has no usable observations, OR
-        #   2. it contains unresolved missing observations.
-        # ----------------------------------------------------
+        # ------------------------------------------------------------------
 
         self.last_failed_assets = tuple(
             ticker
             for ticker in self.assets
-            if ticker not in self.last_downloaded_assets
-            or ticker in self.last_incomplete_assets
+            if (
+                ticker
+                not in self.last_downloaded_assets
+                or ticker
+                in self.last_incomplete_assets
+            )
         )
 
         return frame
 
-    # ========================================================
+    # ==================================================================
+    # SECTION 12
     # PUBLIC PRICE API
-    # ========================================================
+    # ==================================================================
 
     def _assess_freshness(
         self,
@@ -870,6 +1174,9 @@ class MarketDataLoader:
                 observation.tzinfo is None
                 or observation.utcoffset() is None
             ):
+                # Historical loader output may contain naive timestamps.
+                # Treat them as UTC rather than silently mixing timezone
+                # semantics during freshness evaluation.
                 observation_utc = observation.tz_localize("UTC")
             else:
                 observation_utc = observation.tz_convert("UTC")
@@ -906,6 +1213,23 @@ class MarketDataLoader:
         self,
         validate: bool = True,
     ) -> pd.DataFrame:
+        """
+        Load historical prices.
+
+        Parameters
+        ----------
+        validate:
+            When True, the final matrix is passed through
+            DataValidator.
+
+            When False, incomplete observations remain visible for
+            explicit research handling.
+
+        Returns
+        -------
+        pandas.DataFrame
+            Historical price matrix in requested asset order.
+        """
 
         prices = self._download_batch()
 
@@ -929,13 +1253,20 @@ class MarketDataLoader:
 
         return prices
 
-    # ========================================================
+    # ==================================================================
+    # SECTION 13
     # PUBLIC RETURNS API
-    # ========================================================
+    # ==================================================================
 
     def load_returns(
         self,
     ) -> pd.DataFrame:
+        """
+        Load validated historical percentage returns.
+
+        No missing-price imputation is performed before calculating
+        returns.
+        """
 
         try:
 
@@ -981,17 +1312,24 @@ class MarketDataLoader:
                 str(exc)
             ) from exc
 
-    # ========================================================
+    # ==================================================================
+    # SECTION 14
     # HEALTH CHECK
-    # ========================================================
+    # ==================================================================
 
     def health_check(
         self,
     ) -> dict:
+        """
+        Return deterministic loader health information.
+
+        ``healthy`` is false whenever any requested asset has failed
+        recovery or remains incomplete.
+        """
 
         return {
             "api_version": self.API_VERSION,
-            "component": "MarketDataLoader",
+            "component": self.COMPONENT,
             "healthy": (
                 not bool(self.last_failed_assets)
                 and not bool(self.last_stale_assets)
@@ -1034,12 +1372,19 @@ class MarketDataLoader:
         }
 
 
-# ============================================================
-# REGRESSION TEST
-# ============================================================
+# ======================================================================
+# SECTION 15
+# MODULE-LEVEL REGRESSION TEST
+# ======================================================================
 
 
 def test_market_data_exception() -> None:
+    """
+    Minimal module-level regression test.
+
+    Full production regression coverage belongs in
+    ``test_marketdataloader.py``.
+    """
 
     class BrokenLoader(
         MarketDataLoader
@@ -1073,9 +1418,10 @@ def test_market_data_exception() -> None:
     )
 
 
-# ============================================================
+# ======================================================================
+# SECTION 16
 # MODULE EXECUTION
-# ============================================================
+# ======================================================================
 
 
 if __name__ == "__main__":

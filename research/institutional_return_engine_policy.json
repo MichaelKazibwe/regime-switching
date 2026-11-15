@@ -1,0 +1,136 @@
+{
+  "kind": "GENERATED_FROZEN_CHALLENGER_DESIGN_NOT_ACTIVE_INCUMBENT_POLICY",
+  "protocol": {
+    "version": "INSTITUTIONAL_RETURN_ENGINES_V1",
+    "lookbacks": [
+      63,
+      126,
+      252
+    ],
+    "risk_history": 252,
+    "rebalance_sessions": 21,
+    "asset_cap": 0.25,
+    "positive_euler_cap": 0.25,
+    "minimum_cash": 0.05,
+    "degraded_exposure_cap": 0.65,
+    "degraded_volatility": 0.07,
+    "macro_tilt_cap": 0.2,
+    "discretionary_trade_band": 0.04,
+    "partial_rebalance": 0.5,
+    "return_target": null,
+    "account_drawdown_ceiling": null,
+    "shorting": false,
+    "leverage": false,
+    "automatic_promotion": false,
+    "reserve": "Observed SGOV only after 252 returns; otherwise observed SHY. Unavailable reserves remain cash.",
+    "missing_macro": "Explicit market-only degraded candidate. No invented macro value; legacy strict policy unchanged."
+  },
+  "anchors": {
+    "economic_balance": {
+      "SPY": 0.12,
+      "VEA": 0.1,
+      "VWO": 0.06,
+      "EWJ": 0.02,
+      "XLP": 0.03,
+      "XLI": 0.02,
+      "IEF": 0.15,
+      "TLT": 0.05,
+      "TIP": 0.12,
+      "IGOV": 0.05,
+      "SHY": 0.03,
+      "GLD": 0.12,
+      "DBC": 0.05,
+      "SLV": 0.01,
+      "DBMF": 0.02
+    },
+    "defensive_growth": {
+      "SPY": 0.18,
+      "VEA": 0.12,
+      "VWO": 0.08,
+      "QQQ": 0.06,
+      "IWM": 0.03,
+      "XLP": 0.04,
+      "XLU": 0.02,
+      "KIE": 0.02,
+      "EWJ": 0.02,
+      "XLI": 0.03,
+      "XLF": 0.01,
+      "XLE": 0.01,
+      "VNQ": 0.01,
+      "ITB": 0.01,
+      "XLY": 0.01,
+      "IEF": 0.08,
+      "TIP": 0.05,
+      "GLD": 0.08,
+      "DBC": 0.02,
+      "DBMF": 0.04,
+      "SGOV": 0.03
+    },
+    "inflation_resilience": {
+      "SPY": 0.12,
+      "VEA": 0.08,
+      "VWO": 0.06,
+      "XLE": 0.04,
+      "XLI": 0.03,
+      "KIE": 0.02,
+      "TIP": 0.18,
+      "SHY": 0.08,
+      "IEF": 0.04,
+      "GLD": 0.15,
+      "DBC": 0.08,
+      "SLV": 0.02,
+      "DBMF": 0.05
+    },
+    "tail_aware_ensemble": {
+      "ITB": 0.0026666666666666666,
+      "XLI": 0.021333333333333333,
+      "SHY": 0.029333333333333336,
+      "SGOV": 0.008,
+      "VNQ": 0.0026666666666666666,
+      "KIE": 0.010666666666666666,
+      "SLV": 0.008,
+      "DBC": 0.04,
+      "GLD": 0.1433333333333333,
+      "DBMF": 0.12933333333333336,
+      "XLU": 0.005333333333333333,
+      "QQQ": 0.016,
+      "TLT": 0.013333333333333336,
+      "IEF": 0.07200000000000001,
+      "VEA": 0.08,
+      "XLF": 0.0026666666666666666,
+      "XLY": 0.0026666666666666666,
+      "TIP": 0.09333333333333332,
+      "XLE": 0.013333333333333336,
+      "EWJ": 0.010666666666666666,
+      "VWO": 0.053333333333333344,
+      "IWM": 0.008,
+      "SPY": 0.112,
+      "IGOV": 0.013333333333333336,
+      "XLP": 0.018666666666666668
+    }
+  },
+  "settings": {
+    "economic_balance": {
+      "volatility": 0.08,
+      "equity_cap": 0.6,
+      "trend_floor": 0.65
+    },
+    "defensive_growth": {
+      "volatility": 0.12,
+      "equity_cap": 0.75,
+      "trend_floor": 0.25
+    },
+    "inflation_resilience": {
+      "volatility": 0.1,
+      "equity_cap": 0.5,
+      "trend_floor": 0.4
+    },
+    "tail_aware_ensemble": {
+      "volatility": 0.1,
+      "equity_cap": 0.65,
+      "trend_floor": 0.35
+    }
+  },
+  "source": "institutional_return_engines.py",
+  "promotion_enabled": false
+}

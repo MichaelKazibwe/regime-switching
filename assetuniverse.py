@@ -30,22 +30,33 @@ UNIVERSE MODES
    This is the authoritative production investment universe used by
    the production portfolio decision pipeline.
 
-CANONICAL PRODUCTION ASSETS
----------------------------
-    SPY
-    QQQ
-    IWM
-    VEA
-    VWO
-    TLT
-    IEF
-    SHY
-    LQD
-    HYG
-    GLD
-    SLV
-    DBC
-    VNQ
+3. AssetUniverse.diversified()
+
+   Expanded research universe for the Bridgewater/Berkshire approach.
+   Its eligibility is for research; production authorization is separate.
+
+EXPANDED DIVERSIFIED ASSETS — 26 ETFs
+-----------------------------------
+    US and international equities: SPY, QQQ, IWM, VEA, VWO
+    US government bonds:           TLT, IEF, SHY
+    Corporate credit:              LQD, HYG
+    Metals and commodities:        GLD, SLV, DBC
+    Real estate:                   VNQ
+    Inflation-linked bonds:        TIP
+    International sovereign bonds: IGOV
+    Treasury bills:                SGOV
+    Financial services:            XLF
+    Consumer staples:              XLP
+    Energy producers:              XLE
+    Utilities:                     XLU
+    Industrials:                   XLI
+    Insurance:                     KIE
+    Home construction:             ITB
+    Japan equities:                EWJ
+    Consumer discretionary:        XLY
+
+DIVERSIFIED_ASSETS below is the explicit ordered research list.
+PRODUCTION_ASSETS is the existing 14-ETF paper execution profile.
 
 IMPORTANT
 ---------
@@ -59,7 +70,7 @@ lists.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from typing import Any, Dict, Iterable
+from typing import Any, Dict
 
 
 # ======================================================================
@@ -93,13 +104,58 @@ class Asset:
 
 # ======================================================================
 # SECTION 2
-# CANONICAL PRODUCTION UNIVERSE
+# ORDERED ASSET PROFILES
 # ======================================================================
 
 
 # ----------------------------------------------------------------------
-# 2.1 PRODUCTION TICKERS
+# 2.1 EXPANDED DIVERSIFIED TICKERS — 26-ASSET RESEARCH PROFILE
 # ----------------------------------------------------------------------
+
+
+DIVERSIFIED_ASSETS = (
+    # US and international equities
+    "SPY",
+    "QQQ",
+    "IWM",
+    "VEA",
+    "VWO",
+    # US government bonds
+    "TLT",
+    "IEF",
+    "SHY",
+    # Corporate credit
+    "LQD",
+    "HYG",
+    # Metals and commodities
+    "GLD",
+    "SLV",
+    "DBC",
+    # Real estate
+    "VNQ",
+    # Inflation-linked bonds, international sovereigns and Treasury bills
+    "TIP",
+    "IGOV",
+    "SGOV",
+    # Business-sector and Japan exposure
+    "XLF",
+    "XLP",
+    "XLE",
+    "XLU",
+    "XLI",
+    "KIE",
+    "ITB",
+    "EWJ",
+    "XLY",
+)
+
+DIVERSIFIED_ASSET_COUNT = len(DIVERSIFIED_ASSETS)
+
+
+# ----------------------------------------------------------------------
+# 2.2 EXISTING PRODUCTION TICKERS — 14-ASSET PAPER EXECUTION PROFILE
+# ----------------------------------------------------------------------
+
 
 PRODUCTION_ASSETS = [
     "SPY",
@@ -119,14 +175,10 @@ PRODUCTION_ASSETS = [
 ]
 
 
-# Immutable reference representation.
-
 PRODUCTION_ASSET_TUPLE = tuple(
     PRODUCTION_ASSETS
 )
 
-
-# Explicit production universe size.
 
 PRODUCTION_ASSET_COUNT = len(
     PRODUCTION_ASSETS
@@ -134,16 +186,9 @@ PRODUCTION_ASSET_COUNT = len(
 
 
 # ----------------------------------------------------------------------
-# 2.2 PRODUCTION ASSET DEFINITIONS
+# 2.3 PRODUCTION ASSET DEFINITIONS
 # ----------------------------------------------------------------------
-#
-# These definitions are the canonical metadata associated with the
-# production universe.
-#
-# The ticker list above remains the canonical ordering supplied to
-# production components.
-#
-# ----------------------------------------------------------------------
+
 
 PRODUCTION_ASSET_DEFINITIONS = (
     {
@@ -193,7 +238,10 @@ PRODUCTION_ASSET_DEFINITIONS = (
         "sector": "Emerging Markets",
         "country": "Emerging Markets",
         "currency": "USD",
-        "benchmark": "FTSE Emerging Markets All Cap China A Inclusion",
+        "benchmark": (
+            "FTSE Emerging Markets All Cap "
+            "China A Inclusion"
+        ),
         "active": True,
     },
     {
@@ -228,22 +276,33 @@ PRODUCTION_ASSET_DEFINITIONS = (
     },
     {
         "ticker": "LQD",
-        "name": "iShares iBoxx Investment Grade Corporate Bond ETF",
+        "name": (
+            "iShares iBoxx Investment Grade "
+            "Corporate Bond ETF"
+        ),
         "asset_class": "Bond",
         "sector": "Investment Grade Corporate",
         "country": "USA",
         "currency": "USD",
-        "benchmark": "Markit iBoxx USD Liquid Investment Grade",
+        "benchmark": (
+            "Markit iBoxx USD Liquid "
+            "Investment Grade"
+        ),
         "active": True,
     },
     {
         "ticker": "HYG",
-        "name": "iShares iBoxx High Yield Corporate Bond ETF",
+        "name": (
+            "iShares iBoxx High Yield "
+            "Corporate Bond ETF"
+        ),
         "asset_class": "Bond",
         "sector": "High Yield Corporate",
         "country": "USA",
         "currency": "USD",
-        "benchmark": "Markit iBoxx USD Liquid High Yield",
+        "benchmark": (
+            "Markit iBoxx USD Liquid High Yield"
+        ),
         "active": True,
     },
     {
@@ -268,12 +327,18 @@ PRODUCTION_ASSET_DEFINITIONS = (
     },
     {
         "ticker": "DBC",
-        "name": "Invesco DB Commodity Index Tracking Fund",
+        "name": (
+            "Invesco DB Commodity Index "
+            "Tracking Fund"
+        ),
         "asset_class": "Commodity",
         "sector": "Broad Commodities",
         "country": "USA",
         "currency": "USD",
-        "benchmark": "DBIQ Optimum Yield Diversified Commodity Index",
+        "benchmark": (
+            "DBIQ Optimum Yield Diversified "
+            "Commodity Index"
+        ),
         "active": True,
     },
     {
@@ -283,10 +348,61 @@ PRODUCTION_ASSET_DEFINITIONS = (
         "sector": "Real Estate",
         "country": "USA",
         "currency": "USD",
-        "benchmark": "MSCI US Investable Market Real Estate 25/50",
+        "benchmark": (
+            "MSCI US Investable Market "
+            "Real Estate 25/50"
+        ),
         "active": True,
     },
 )
+
+
+# Research extensions preserve the production order as a prefix. They are
+# ordinary unlevered ETF instruments; USD listing does not remove FX risk.
+DIVERSIFIED_EXTENSION_DEFINITIONS = (
+    {"ticker":"TIP", "name":"iShares TIPS Bond ETF", "asset_class":"Bond",
+     "sector":"Inflation Linked Government", "country":"USA", "currency":"USD",
+     "benchmark":"ICE US Treasury Inflation Linked Bond Index", "active":True},
+    {"ticker":"IGOV", "name":"iShares International Treasury Bond ETF", "asset_class":"Bond",
+     "sector":"International Government", "country":"International", "currency":"USD",
+     "benchmark":"FTSE World Government Bond Index - Developed Markets Capped Select Index", "active":True},
+    {"ticker":"SGOV", "name":"iShares 0-3 Month Treasury Bond ETF", "asset_class":"Bond",
+     "sector":"Treasury Bills", "country":"USA", "currency":"USD",
+     "benchmark":"ICE 0-3 Month US Treasury Securities Index", "active":True},
+    {"ticker":"XLF", "name":"Financial Select Sector SPDR ETF", "asset_class":"Equity",
+     "sector":"Financial Services", "country":"USA", "currency":"USD",
+     "benchmark":"Financial Select Sector Index", "active":True},
+    {"ticker":"XLP", "name":"Consumer Staples Select Sector SPDR ETF", "asset_class":"Equity",
+     "sector":"Consumer Staples", "country":"USA", "currency":"USD",
+     "benchmark":"Consumer Staples Select Sector Index", "active":True},
+    {"ticker":"XLE", "name":"Energy Select Sector SPDR ETF", "asset_class":"Equity",
+     "sector":"Energy Producers", "country":"USA", "currency":"USD",
+     "benchmark":"Energy Select Sector Index", "active":True},
+    {"ticker":"XLU", "name":"Utilities Select Sector SPDR ETF", "asset_class":"Equity",
+     "sector":"Utilities", "country":"USA", "currency":"USD",
+     "benchmark":"Utilities Select Sector Index", "active":True},
+    {"ticker":"XLI", "name":"Industrial Select Sector SPDR ETF", "asset_class":"Equity",
+     "sector":"Industrials", "country":"USA", "currency":"USD",
+     "benchmark":"Industrial Select Sector Index", "active":True},
+    {"ticker":"KIE", "name":"SPDR S&P Insurance ETF", "asset_class":"Equity",
+     "sector":"Insurance", "country":"USA", "currency":"USD",
+     "benchmark":"S&P Insurance Select Industry Index", "active":True},
+    {"ticker":"ITB", "name":"iShares US Home Construction ETF", "asset_class":"Equity",
+     "sector":"Home Construction", "country":"USA", "currency":"USD",
+     "benchmark":"Dow Jones US Select Home Construction Index", "active":True},
+    {"ticker":"EWJ", "name":"iShares MSCI Japan ETF", "asset_class":"Equity",
+     "sector":"Japan Broad Equity", "country":"Japan", "currency":"USD",
+     "benchmark":"MSCI Japan Index", "active":True},
+    {"ticker":"XLY", "name":"Consumer Discretionary Select Sector SPDR ETF", "asset_class":"Equity",
+     "sector":"Consumer Discretionary", "country":"USA", "currency":"USD",
+     "benchmark":"Consumer Discretionary Select Sector Index", "active":True},
+)
+
+DIVERSIFIED_ASSET_DEFINITIONS = PRODUCTION_ASSET_DEFINITIONS + DIVERSIFIED_EXTENSION_DEFINITIONS
+
+if (len(set(DIVERSIFIED_ASSETS)) != DIVERSIFIED_ASSET_COUNT
+        or tuple(item["ticker"] for item in DIVERSIFIED_ASSET_DEFINITIONS) != DIVERSIFIED_ASSETS):
+    raise RuntimeError("Expanded asset list and metadata must match exactly in canonical order")
 
 
 # ======================================================================
@@ -299,11 +415,12 @@ def _validate_production_definitions() -> None:
     """
     Validate the static canonical production universe.
 
-    This function executes at module load time so a malformed production
+    This executes at module import time so a malformed production
     universe cannot silently enter the dependency graph.
     """
 
     if len(PRODUCTION_ASSETS) != 14:
+
         raise RuntimeError(
             (
                 "Canonical production universe must contain exactly "
@@ -314,6 +431,7 @@ def _validate_production_definitions() -> None:
     if len(
         set(PRODUCTION_ASSETS)
     ) != len(PRODUCTION_ASSETS):
+
         raise RuntimeError(
             "Canonical production universe contains duplicate tickers."
         )
@@ -324,6 +442,7 @@ def _validate_production_definitions() -> None:
     ]
 
     if len(definition_tickers) != 14:
+
         raise RuntimeError(
             (
                 "Canonical production asset definitions must contain "
@@ -334,6 +453,7 @@ def _validate_production_definitions() -> None:
     if len(
         set(definition_tickers)
     ) != len(definition_tickers):
+
         raise RuntimeError(
             "Canonical production asset definitions contain duplicates."
         )
@@ -341,6 +461,7 @@ def _validate_production_definitions() -> None:
     if set(definition_tickers) != set(
         PRODUCTION_ASSETS
     ):
+
         raise RuntimeError(
             (
                 "Production ticker list and production asset "
@@ -348,18 +469,18 @@ def _validate_production_definitions() -> None:
             )
         )
 
-    for definition in PRODUCTION_ASSET_DEFINITIONS:
+    required_fields = {
+        "ticker",
+        "name",
+        "asset_class",
+        "sector",
+        "country",
+        "currency",
+        "benchmark",
+        "active",
+    }
 
-        required_fields = {
-            "ticker",
-            "name",
-            "asset_class",
-            "sector",
-            "country",
-            "currency",
-            "benchmark",
-            "active",
-        }
+    for definition in PRODUCTION_ASSET_DEFINITIONS:
 
         missing_fields = (
             required_fields
@@ -367,6 +488,7 @@ def _validate_production_definitions() -> None:
         )
 
         if missing_fields:
+
             raise RuntimeError(
                 (
                     "Production asset definition for "
@@ -444,15 +566,6 @@ class AssetUniverse:
     ) -> "AssetUniverse":
         """
         Construct the canonical 14-asset production universe.
-
-        The production universe is generated exclusively from the
-        canonical PRODUCTION_ASSET_DEFINITIONS.
-
-        Returns
-        -------
-        AssetUniverse
-            A fully populated and validated 14-asset production
-            universe.
         """
 
         universe = cls()
@@ -468,6 +581,28 @@ class AssetUniverse:
         universe._validate_production_universe()
 
         return universe
+
+    @classmethod
+    def diversified(cls) -> "AssetUniverse":
+        """Build the expanded research universe without granting paper eligibility."""
+        universe = cls()
+        for definition in DIVERSIFIED_ASSET_DEFINITIONS:
+            universe.add_asset(Asset(**definition))
+        if (universe.size != DIVERSIFIED_ASSET_COUNT
+                or DIVERSIFIED_ASSETS[:PRODUCTION_ASSET_COUNT] != PRODUCTION_ASSET_TUPLE
+                or not universe.health_check()):
+            raise RuntimeError("Expanded research universe failed validation")
+        return universe
+
+    @staticmethod
+    def product_menu():
+        """28-instrument recommendation menu, separate from paper authorization.
+
+        Includes DBMF and the benchmark-only ALLW. Jurisdiction access and
+        public recommendation qualification are assessed by the product service.
+        """
+        from investmentcatalog import catalogue_payload
+        return catalogue_payload()
 
     # ==================================================================
     # PRODUCTION VALIDATION
@@ -535,7 +670,7 @@ class AssetUniverse:
             )
 
     # ==================================================================
-    # ADD
+    # ADD ASSET
     # ==================================================================
 
     def add_asset(
@@ -550,6 +685,7 @@ class AssetUniverse:
             asset,
             Asset,
         ):
+
             raise TypeError(
                 "asset must be an Asset instance."
             )
@@ -561,11 +697,13 @@ class AssetUniverse:
         )
 
         if not ticker:
+
             raise ValueError(
                 "Asset ticker cannot be empty."
             )
 
         if ticker != asset.ticker:
+
             raise ValueError(
                 (
                     "Asset ticker must be normalized to uppercase "
@@ -574,6 +712,7 @@ class AssetUniverse:
             )
 
         if ticker in self._assets:
+
             raise ValueError(
                 f"Duplicate ticker '{ticker}'."
             )
@@ -581,7 +720,7 @@ class AssetUniverse:
         self._assets[ticker] = asset
 
     # ==================================================================
-    # REMOVE
+    # REMOVE ASSET
     # ==================================================================
 
     def remove_asset(
@@ -599,6 +738,7 @@ class AssetUniverse:
         )
 
         if normalized_ticker not in self._assets:
+
             raise KeyError(
                 f"{normalized_ticker} not found."
             )
@@ -608,7 +748,7 @@ class AssetUniverse:
         ]
 
     # ==================================================================
-    # GET
+    # GET ASSET
     # ==================================================================
 
     def get_asset(
@@ -626,6 +766,7 @@ class AssetUniverse:
         )
 
         if normalized_ticker not in self._assets:
+
             raise KeyError(
                 f"{normalized_ticker} not found."
             )
@@ -651,7 +792,7 @@ class AssetUniverse:
         )
 
     # ==================================================================
-    # COUNT
+    # SIZE
     # ==================================================================
 
     @property
@@ -729,6 +870,7 @@ class AssetUniverse:
         """
 
         if self.size != PRODUCTION_ASSET_COUNT:
+
             return False
 
         return set(
@@ -775,9 +917,7 @@ class AssetUniverse:
             if field not in valid_fields:
 
                 raise AttributeError(
-                    (
-                        f"Asset has no field '{field}'."
-                    )
+                    f"Asset has no field '{field}'."
                 )
 
             results = [
@@ -792,7 +932,7 @@ class AssetUniverse:
         return results
 
     # ==================================================================
-    # COMMON FILTERS
+    # EQUITIES
     # ==================================================================
 
     def equities(
@@ -806,6 +946,10 @@ class AssetUniverse:
             asset_class="Equity"
         )
 
+    # ==================================================================
+    # BONDS
+    # ==================================================================
+
     def bonds(
         self,
     ) -> list[Asset]:
@@ -816,6 +960,10 @@ class AssetUniverse:
         return self.filter(
             asset_class="Bond"
         )
+
+    # ==================================================================
+    # COMMODITIES
+    # ==================================================================
 
     def commodities(
         self,
@@ -828,6 +976,10 @@ class AssetUniverse:
             asset_class="Commodity"
         )
 
+    # ==================================================================
+    # REITS
+    # ==================================================================
+
     def reits(
         self,
     ) -> list[Asset]:
@@ -838,6 +990,10 @@ class AssetUniverse:
         return self.filter(
             asset_class="REIT"
         )
+
+    # ==================================================================
+    # CASH
+    # ==================================================================
 
     def cash(
         self,
@@ -851,7 +1007,7 @@ class AssetUniverse:
         )
 
     # ==================================================================
-    # ACTIVE
+    # ACTIVE ASSETS
     # ==================================================================
 
     @property
@@ -868,6 +1024,10 @@ class AssetUniverse:
             if asset.active
         ]
 
+    # ==================================================================
+    # INACTIVE ASSETS
+    # ==================================================================
+
     @property
     def inactive_assets(
         self,
@@ -883,7 +1043,7 @@ class AssetUniverse:
         ]
 
     # ==================================================================
-    # UNIQUE VALUES
+    # ASSET CLASSES
     # ==================================================================
 
     @property
@@ -901,6 +1061,10 @@ class AssetUniverse:
             }
         )
 
+    # ==================================================================
+    # SECTORS
+    # ==================================================================
+
     @property
     def sectors(
         self,
@@ -915,6 +1079,10 @@ class AssetUniverse:
                 for asset in self.assets
             }
         )
+
+    # ==================================================================
+    # COUNTRIES
+    # ==================================================================
 
     @property
     def countries(
@@ -931,6 +1099,10 @@ class AssetUniverse:
             }
         )
 
+    # ==================================================================
+    # CURRENCIES
+    # ==================================================================
+
     @property
     def currencies(
         self,
@@ -945,6 +1117,10 @@ class AssetUniverse:
                 for asset in self.assets
             }
         )
+
+    # ==================================================================
+    # BENCHMARKS
+    # ==================================================================
 
     @property
     def benchmarks(
@@ -962,7 +1138,7 @@ class AssetUniverse:
         )
 
     # ==================================================================
-    # EXISTS
+    # CONTAINS
     # ==================================================================
 
     def contains(
@@ -1003,6 +1179,7 @@ class AssetUniverse:
                 asset,
                 Asset,
             ):
+
                 raise RuntimeError(
                     "Universe contains a non-Asset object."
                 )
@@ -1010,6 +1187,7 @@ class AssetUniverse:
             ticker = asset.ticker
 
             if ticker in tickers:
+
                 raise RuntimeError(
                     f"Duplicate ticker '{ticker}'."
                 )
@@ -1019,11 +1197,13 @@ class AssetUniverse:
             )
 
             if not ticker:
+
                 raise RuntimeError(
                     "Empty ticker."
                 )
 
             if ticker != ticker.strip():
+
                 raise RuntimeError(
                     (
                         f"{ticker!r}: ticker contains "
@@ -1032,6 +1212,7 @@ class AssetUniverse:
                 )
 
             if ticker != ticker.upper():
+
                 raise RuntimeError(
                     (
                         f"{ticker}: ticker must be uppercase."
@@ -1039,31 +1220,37 @@ class AssetUniverse:
                 )
 
             if not asset.name:
+
                 raise RuntimeError(
                     f"{ticker}: missing asset name."
                 )
 
             if not asset.asset_class:
+
                 raise RuntimeError(
                     f"{ticker}: missing asset class."
                 )
 
             if not asset.sector:
+
                 raise RuntimeError(
                     f"{ticker}: missing sector."
                 )
 
             if not asset.country:
+
                 raise RuntimeError(
                     f"{ticker}: missing country."
                 )
 
             if not asset.currency:
+
                 raise RuntimeError(
                     f"{ticker}: missing currency."
                 )
 
             if not asset.benchmark:
+
                 raise RuntimeError(
                     f"{ticker}: missing benchmark."
                 )
@@ -1072,11 +1259,13 @@ class AssetUniverse:
                 asset.active,
                 bool,
             ):
+
                 raise RuntimeError(
                     f"{ticker}: active must be boolean."
                 )
 
         if len(tickers) != self.size:
+
             raise RuntimeError(
                 "Universe ticker integrity check failed."
             )
@@ -1084,7 +1273,7 @@ class AssetUniverse:
         return True
 
     # ==================================================================
-    # TO DICTIONARY
+    # SERIALIZATION
     # ==================================================================
 
     def to_dict(
@@ -1102,7 +1291,7 @@ class AssetUniverse:
         }
 
     # ==================================================================
-    # FROM DICTIONARY
+    # DESERIALIZATION
     # ==================================================================
 
     @classmethod
@@ -1118,6 +1307,7 @@ class AssetUniverse:
             data,
             dict,
         ):
+
             raise TypeError(
                 "data must be a dictionary."
             )
@@ -1130,6 +1320,7 @@ class AssetUniverse:
                 values,
                 dict,
             ):
+
                 raise TypeError(
                     "Each asset definition must be a dictionary."
                 )
@@ -1145,7 +1336,7 @@ class AssetUniverse:
         return universe
 
     # ==================================================================
-    # EXPORT
+    # DATAFRAME EXPORT
     # ==================================================================
 
     def to_dataframe(
@@ -1167,780 +1358,65 @@ class AssetUniverse:
 
 # ======================================================================
 # SECTION 5
-# REGRESSION TESTS — GENERIC UNIVERSE
-# ======================================================================
-
-
-def test_asset_universe() -> None:
-    """
-    Verify generic AssetUniverse behaviour.
-
-    This test intentionally remains a five-asset custom universe and
-    therefore does not depend on the production universe.
-    """
-
-    universe = AssetUniverse()
-
-    # ==================================================================
-    # ADD ASSETS
-    # ==================================================================
-
-    universe.add_asset(
-        Asset(
-            ticker="SPY",
-            name="SPDR S&P 500 ETF",
-            asset_class="Equity",
-            sector="Large Cap",
-            country="USA",
-            currency="USD",
-            benchmark="SP500",
-        )
-    )
-
-    universe.add_asset(
-        Asset(
-            ticker="TLT",
-            name="20+ Year Treasury",
-            asset_class="Bond",
-            sector="Government",
-            country="USA",
-            currency="USD",
-            benchmark="Bloomberg Treasury",
-        )
-    )
-
-    universe.add_asset(
-        Asset(
-            ticker="GLD",
-            name="Gold ETF",
-            asset_class="Commodity",
-            sector="Precious Metals",
-            country="USA",
-            currency="USD",
-            benchmark="Gold",
-        )
-    )
-
-    universe.add_asset(
-        Asset(
-            ticker="VNQ",
-            name="US REIT",
-            asset_class="REIT",
-            sector="Real Estate",
-            country="USA",
-            currency="USD",
-            benchmark="US REIT",
-        )
-    )
-
-    universe.add_asset(
-        Asset(
-            ticker="CASH",
-            name="Cash",
-            asset_class="Cash",
-            sector="Cash",
-            country="USA",
-            currency="USD",
-            benchmark="Cash",
-            active=False,
-        )
-    )
-
-    # ==================================================================
-    # SIZE
-    # ==================================================================
-
-    assert universe.size == 5
-
-    assert len(
-        universe.assets
-    ) == 5
-
-    # ==================================================================
-    # LOOKUP
-    # ==================================================================
-
-    spy = universe.get_asset(
-        "SPY"
-    )
-
-    assert spy.name == (
-        "SPDR S&P 500 ETF"
-    )
-
-    # ==================================================================
-    # TICKERS
-    # ==================================================================
-
-    assert universe.tickers == [
-        "CASH",
-        "GLD",
-        "SPY",
-        "TLT",
-        "VNQ",
-    ]
-
-    # ==================================================================
-    # FILTERS
-    # ==================================================================
-
-    assert len(
-        universe.equities()
-    ) == 1
-
-    assert len(
-        universe.bonds()
-    ) == 1
-
-    assert len(
-        universe.commodities()
-    ) == 1
-
-    assert len(
-        universe.reits()
-    ) == 1
-
-    assert len(
-        universe.cash()
-    ) == 1
-
-    # ==================================================================
-    # ACTIVE
-    # ==================================================================
-
-    assert len(
-        universe.active_assets
-    ) == 4
-
-    assert len(
-        universe.inactive_assets
-    ) == 1
-
-    # ==================================================================
-    # UNIQUE VALUES
-    # ==================================================================
-
-    assert "Equity" in (
-        universe.asset_classes
-    )
-
-    assert "Bond" in (
-        universe.asset_classes
-    )
-
-    assert "Commodity" in (
-        universe.asset_classes
-    )
-
-    assert "REIT" in (
-        universe.asset_classes
-    )
-
-    assert "Cash" in (
-        universe.asset_classes
-    )
-
-    assert "USA" in (
-        universe.countries
-    )
-
-    assert "USD" in (
-        universe.currencies
-    )
-
-    # ==================================================================
-    # CONTAINS
-    # ==================================================================
-
-    assert universe.contains(
-        "SPY"
-    )
-
-    assert not universe.contains(
-        "QQQ"
-    )
-
-    # ==================================================================
-    # DATAFRAME
-    # ==================================================================
-
-    df = universe.to_dataframe()
-
-    assert df.shape[0] == 5
-
-    assert "ticker" in df.columns
-
-    assert "asset_class" in df.columns
-
-    # ==================================================================
-    # METADATA
-    # ==================================================================
-
-    metadata = universe.metadata
-
-    assert metadata["version"] == "1.0.0"
-
-    assert metadata["assets"] == 5
-
-    assert metadata[
-        "is_production_universe"
-    ] is False
-
-    # ==================================================================
-    # DUPLICATES
-    # ==================================================================
-
-    try:
-
-        universe.add_asset(
-            Asset(
-                ticker="SPY",
-                name="Duplicate",
-                asset_class="Equity",
-                sector="Large Cap",
-                country="USA",
-                currency="USD",
-                benchmark="SP500",
-            )
-        )
-
-        raise AssertionError(
-            "Expected ValueError"
-        )
-
-    except ValueError:
-        pass
-
-    # ==================================================================
-    # REMOVE
-    # ==================================================================
-
-    universe.remove_asset(
-        "CASH"
-    )
-
-    assert universe.size == 4
-
-    assert not universe.contains(
-        "CASH"
-    )
-
-    # ==================================================================
-    # HEALTH
-    # ==================================================================
-
-    assert universe.health_check()
-
-    # ==================================================================
-    # SERIALIZATION
-    # ==================================================================
-
-    exported = universe.to_dict()
-
-    restored = (
-        AssetUniverse.from_dict(
-            exported
-        )
-    )
-
-    assert restored.size == (
-        universe.size
-    )
-
-    assert restored.tickers == (
-        universe.tickers
-    )
-
-    # ==================================================================
-    # API FREEZE
-    # ==================================================================
-
-    assert (
-        AssetUniverse.API_VERSION
-        == "1.0.0"
-    )
-
-    assert tuple(
-        AssetUniverse.PUBLIC_METHODS
-    ) == (
-        "add_asset",
-        "remove_asset",
-        "get_asset",
-        "tickers",
-        "metadata",
-    )
-
-    # ==================================================================
-    # INVALID LOOKUP
-    # ==================================================================
-
-    try:
-
-        universe.get_asset(
-            "UNKNOWN"
-        )
-
-        raise AssertionError(
-            "Expected KeyError"
-        )
-
-    except KeyError:
-        pass
-
-    # ==================================================================
-    # INVALID REMOVE
-    # ==================================================================
-
-    try:
-
-        universe.remove_asset(
-            "UNKNOWN"
-        )
-
-        raise AssertionError(
-            "Expected KeyError"
-        )
-
-    except KeyError:
-        pass
-
-
-# ======================================================================
-# SECTION 6
-# REGRESSION TESTS — PRODUCTION UNIVERSE
-# ======================================================================
-
-
-def test_production_asset_universe() -> None:
-    """
-    Verify the canonical 14-asset production universe.
-    """
-
-    universe = (
-        AssetUniverse.production()
-    )
-
-    # ==================================================================
-    # SIZE
-    # ==================================================================
-
-    assert universe.size == 14
-
-    assert (
-        universe.PRODUCTION_ASSET_COUNT
-        == 14
-    )
-
-    assert (
-        PRODUCTION_ASSET_COUNT
-        == 14
-    )
-
-    # ==================================================================
-    # TICKER INTEGRITY
-    # ==================================================================
-
-    assert len(
-        PRODUCTION_ASSETS
-    ) == 14
-
-    assert len(
-        set(PRODUCTION_ASSETS)
-    ) == 14
-
-    assert set(
-        universe.tickers
-    ) == set(
-        PRODUCTION_ASSETS
-    )
-
-    assert (
-        universe.tickers
-        == sorted(PRODUCTION_ASSETS)
-    )
-
-    # ==================================================================
-    # ORDERED PRODUCTION REFERENCE
-    # ==================================================================
-
-    assert (
-        PRODUCTION_ASSET_TUPLE
-        == (
-            "SPY",
-            "QQQ",
-            "IWM",
-            "VEA",
-            "VWO",
-            "TLT",
-            "IEF",
-            "SHY",
-            "LQD",
-            "HYG",
-            "GLD",
-            "SLV",
-            "DBC",
-            "VNQ",
-        )
-    )
-
-    # ==================================================================
-    # PRODUCTION FLAG
-    # ==================================================================
-
-    assert (
-        universe.is_production_universe
-        is True
-    )
-
-    # ==================================================================
-    # ALL ACTIVE
-    # ==================================================================
-
-    assert len(
-        universe.active_assets
-    ) == 14
-
-    assert len(
-        universe.inactive_assets
-    ) == 0
-
-    # ==================================================================
-    # HEALTH
-    # ==================================================================
-
-    assert universe.health_check()
-
-    # ==================================================================
-    # EXPECTED ASSET CLASSES
-    # ==================================================================
-
-    assert (
-        len(
-            universe.equities()
-        )
-        == 5
-    )
-
-    assert (
-        len(
-            universe.bonds()
-        )
-        == 5
-    )
-
-    assert (
-        len(
-            universe.commodities()
-        )
-        == 3
-    )
-
-    assert (
-        len(
-            universe.reits()
-        )
-        == 1
-    )
-
-    # ==================================================================
-    # EXPECTED TICKERS BY CLASS
-    # ==================================================================
-
-    assert set(
-        asset.ticker
-        for asset in universe.equities()
-    ) == {
-        "SPY",
-        "QQQ",
-        "IWM",
-        "VEA",
-        "VWO",
-    }
-
-    assert set(
-        asset.ticker
-        for asset in universe.bonds()
-    ) == {
-        "TLT",
-        "IEF",
-        "SHY",
-        "LQD",
-        "HYG",
-    }
-
-    assert set(
-        asset.ticker
-        for asset in universe.commodities()
-    ) == {
-        "GLD",
-        "SLV",
-        "DBC",
-    }
-
-    assert set(
-        asset.ticker
-        for asset in universe.reits()
-    ) == {
-        "VNQ",
-    }
-
-    # ==================================================================
-    # LOOKUP
-    # ==================================================================
-
-    for ticker in PRODUCTION_ASSETS:
-
-        assert universe.contains(
-            ticker
-        )
-
-        asset = universe.get_asset(
-            ticker
-        )
-
-        assert asset.ticker == ticker
-
-        assert asset.active is True
-
-    # ==================================================================
-    # NO CASH AS PRODUCTION ASSET
-    # ==================================================================
-
-    assert not universe.contains(
-        "CASH"
-    )
-
-    assert len(
-        universe.cash()
-    ) == 0
-
-    # ==================================================================
-    # METADATA
-    # ==================================================================
-
-    metadata = (
-        universe.metadata
-    )
-
-    assert (
-        metadata["version"]
-        == "1.0.0"
-    )
-
-    assert (
-        metadata["assets"]
-        == 14
-    )
-
-    assert (
-        metadata["active"]
-        == 14
-    )
-
-    assert (
-        metadata["inactive"]
-        == 0
-    )
-
-    assert (
-        metadata["production_asset_count"]
-        == 14
-    )
-
-    assert (
-        metadata["is_production_universe"]
-        is True
-    )
-
-
-# ======================================================================
-# SECTION 7
-# REGRESSION TESTS — PRODUCTION DEFINITIONS
-# ======================================================================
-
-
-def test_production_asset_definitions() -> None:
-    """
-    Verify the canonical production definitions are complete and
-    aligned with the canonical ticker list.
-    """
-
-    assert len(
-        PRODUCTION_ASSET_DEFINITIONS
-    ) == 14
-
-    definition_tickers = [
-        definition["ticker"]
-        for definition
-        in PRODUCTION_ASSET_DEFINITIONS
-    ]
-
-    assert len(
-        definition_tickers
-    ) == 14
-
-    assert len(
-        set(definition_tickers)
-    ) == 14
-
-    assert set(
-        definition_tickers
-    ) == set(
-        PRODUCTION_ASSETS
-    )
-
-    for definition in (
-        PRODUCTION_ASSET_DEFINITIONS
-    ):
-
-        assert definition[
-            "ticker"
-        ]
-
-        assert definition[
-            "name"
-        ]
-
-        assert definition[
-            "asset_class"
-        ]
-
-        assert definition[
-            "sector"
-        ]
-
-        assert definition[
-            "country"
-        ]
-
-        assert definition[
-            "currency"
-        ]
-
-        assert definition[
-            "benchmark"
-        ]
-
-        assert definition[
-            "active"
-        ] is True
-
-
-# ======================================================================
-# SECTION 8
-# REGRESSION TESTS — PRODUCTION SERIALIZATION
-# ======================================================================
-
-
-def test_production_asset_universe_serialization() -> None:
-    """
-    Verify serialization and restoration of the production universe.
-    """
-
-    universe = (
-        AssetUniverse.production()
-    )
-
-    exported = (
-        universe.to_dict()
-    )
-
-    assert len(
-        exported
-    ) == 14
-
-    assert set(
-        exported.keys()
-    ) == set(
-        PRODUCTION_ASSETS
-    )
-
-    restored = (
-        AssetUniverse.from_dict(
-            exported
-        )
-    )
-
-    assert restored.size == 14
-
-    assert set(
-        restored.tickers
-    ) == set(
-        PRODUCTION_ASSETS
-    )
-
-    assert restored.health_check()
-
-    assert (
-        restored.is_production_universe
-        is True
-    )
-
-
-# ======================================================================
-# SECTION 9
-# REGRESSION TESTS — PRODUCTION IMMUTABILITY
-# ======================================================================
-
-
-def test_asset_immutability() -> None:
-    """
-    Verify Asset instances are immutable.
-    """
-
-    asset = Asset(
-        ticker="SPY",
-        name="SPDR S&P 500 ETF",
-        asset_class="Equity",
-        sector="Large Cap",
-        country="USA",
-        currency="USD",
-        benchmark="SP500",
-    )
-
-    try:
-
-        asset.ticker = "QQQ"
-
-        raise AssertionError(
-            "Expected FrozenInstanceError"
-        )
-
-    except AttributeError:
-        pass
-
-
-# ======================================================================
-# SECTION 10
-# REGRESSION ENTRY POINT
+# MODULE REGRESSION TEST
 # ======================================================================
 
 
 def run_regression_tests() -> None:
     """
-    Run all AssetUniverse regression tests.
+    Lightweight production-module regression certification.
+
+    Full pytest coverage belongs in test_assetuniverse.py.
     """
 
-    test_asset_universe()
+    production = (
+        AssetUniverse.production()
+    )
 
-    test_production_asset_universe()
+    assert production.health_check()
 
-    test_production_asset_definitions()
+    assert production.size == 14
 
-    test_production_asset_universe_serialization()
+    assert (
+        set(production.tickers)
+        == set(PRODUCTION_ASSETS)
+    )
 
-    test_asset_immutability()
+    assert (
+        len(production.equities())
+        == 5
+    )
+
+    assert (
+        len(production.bonds())
+        == 5
+    )
+
+    assert (
+        len(production.commodities())
+        == 3
+    )
+
+    assert (
+        len(production.reits())
+        == 1
+    )
+
+    assert (
+        production.is_production_universe
+        is True
+    )
 
     print(
         "============================================================"
     )
 
     print(
-        "AssetUniverse regression tests passed."
+        "AssetUniverse regression certification: PASS"
     )
 
     print(
-        "Canonical production universe: 14 assets."
+        "Production asset count: 14"
     )
 
     print(
@@ -1948,7 +1424,7 @@ def run_regression_tests() -> None:
     )
 
     print(
-        PRODUCTION_ASSETS
+        production.tickers
     )
 
     print(
@@ -1957,7 +1433,7 @@ def run_regression_tests() -> None:
 
 
 # ======================================================================
-# SECTION 11
+# SECTION 6
 # MODULE ENTRY POINT
 # ======================================================================
 

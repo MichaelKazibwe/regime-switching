@@ -1,0 +1,12 @@
+FROM python:3.12.16-slim-bookworm
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 XDG_CACHE_HOME=/tmp/managed-cache
+WORKDIR /app
+COPY release-manifest.json /tmp/managed-release-manifest.json
+COPY requirements-paper.hashed.lock ./
+RUN python -m pip install --no-cache-dir --require-hashes -r requirements-paper.hashed.lock && python -m pip check
+COPY . /app
+RUN python managed_release.py inspect --root /app && python -c "import managed_api, managed_execution, managed_positions, managed_transport, managed_evidence"
+RUN groupadd --gid 10001 managed && useradd --uid 10001 --gid managed --no-create-home managed
+USER 10001:10001
+# Verification only; no broker, listener, scheduler or trade worker is started.
+CMD ["python", "managed_release.py", "inspect", "--root", "/app"]

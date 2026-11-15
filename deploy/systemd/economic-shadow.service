@@ -1,0 +1,16 @@
+[Unit]
+Description=Isolated daily economic shadow cohorts after verified training
+After=strategy-validation.service
+
+[Service]
+Type=oneshot
+User=regime
+Group=regime
+WorkingDirectory=/opt/regime
+EnvironmentFile=/etc/regime/economic-shadow-image.env
+ExecStart=/usr/bin/docker compose -f compose.economic-shadow.yaml run --rm economic-shadow
+UMask=0077
+NoNewPrivileges=true
+TimeoutStartSec=900
+StandardOutput=journal
+StandardError=journal

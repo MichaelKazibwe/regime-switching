@@ -1,0 +1,17 @@
+services:
+  paper-worker:
+    image: ${PAPER_IMAGE:?Set PAPER_IMAGE to the reviewed image ID or immutable registry digest}
+    env_file:
+      - .env.paper
+    volumes:
+      - paper-state:/app/var
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  paper-state:

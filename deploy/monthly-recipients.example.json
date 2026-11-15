@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "users": [
+    {
+      "user_id": "example-user",
+      "name": "Example User",
+      "email": "replace-with-approved-recipient@example.com",
+      "start_month": "2026-10",
+      "active": false,
+      "portfolio_id": "paper-default"
+    }
+  ]
+}

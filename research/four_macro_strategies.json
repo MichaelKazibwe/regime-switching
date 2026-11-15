@@ -1,0 +1,309 @@
+{
+  "schema_version": 1,
+  "mode": "RESEARCH_ONLY",
+  "production_activation": false,
+  "research_revision": 6,
+  "reserved_start": "2025-10-30",
+  "risk_budget_tolerance": 1e-06,
+  "maximum_asset_weight": 0.25,
+  "maximum_full_account_risk_share": 0.25,
+  "maximum_reserve_weight": 0.25,
+  "minimum_cash": 0.05,
+  "stress_exposure_ceiling": 0.4,
+  "stress_volatility_ceiling": 0.05,
+  "expected_shortfall_daily_ceiling": 0.02,
+  "stress_expected_shortfall_daily_ceiling": 0.01,
+  "rebalance_sessions": 21,
+  "minimum_trade_notional": 0.04,
+  "volatility_half_life": 63,
+  "stress_correlation_weight": 0.25,
+  "calibration_half_life": 63,
+  "calibration_warmup": 63,
+  "maximum_calibration_multiplier": 2.0,
+  "training_sessions": 756,
+  "selection_interval_sessions": 252,
+  "training_drawdown_ceiling": null,
+  "training_volatility_ceiling": 0.05,
+  "objective": "Four fixed macro-aware challengers; retain 50%/3yr and 5% drawdown gates; no fitted winner or production activation",
+  "candidate_grid": {
+    "volatility_ceiling": [
+      0.06,
+      0.1
+    ],
+    "anchor": [
+      "growth_50",
+      "growth_70"
+    ],
+    "macro_view_weight": [
+      0.0,
+      0.1
+    ]
+  },
+  "sleeves": {
+    "equities": {
+      "SPY": 0.3333333333333333,
+      "VEA": 0.3333333333333333,
+      "VWO": 0.3333333333333333
+    },
+    "nominal_bonds": {
+      "TLT": 0.3,
+      "IEF": 0.4,
+      "IGOV": 0.3
+    },
+    "inflation_linked": {
+      "TIP": 1.0
+    },
+    "gold": {
+      "GLD": 1.0
+    },
+    "commodities": {
+      "DBC": 1.0
+    }
+  },
+  "anchors": {
+    "growth_50": [
+      0.5,
+      0.25,
+      0.05,
+      0.125,
+      0.075
+    ],
+    "growth_70": [
+      0.7,
+      0.15,
+      0.025,
+      0.075,
+      0.05
+    ]
+  },
+  "macro_views": {
+    "disinflationary_growth": [
+      0.55,
+      0.25,
+      0.05,
+      0.1,
+      0.05
+    ],
+    "inflationary_growth": [
+      0.45,
+      0.1,
+      0.1,
+      0.1,
+      0.25
+    ],
+    "stagflation": [
+      0.1,
+      0.15,
+      0.15,
+      0.25,
+      0.35
+    ],
+    "deflationary_slowdown": [
+      0.15,
+      0.45,
+      0.1,
+      0.25,
+      0.05
+    ]
+  },
+  "proxy_parameters": {
+    "volatility_ceiling": 0.04,
+    "anchor": "balanced",
+    "macro_view_weight": 0.0
+  },
+  "risk_contract": "Exact relative full-account Euler contributions among core assets, plus a separately capped Treasury reserve capital sleeve; full-account contributions always reported",
+  "reserve_eligibility": "SGOV after 252 actual returns, otherwise SHY; never equate either ETF to uninvested cash",
+  "benchmark": "All Weather-inspired equal-sleeve-risk liquid proxy; not actual Bridgewater private-fund performance",
+  "target_return": null,
+  "horizon_sessions": 756,
+  "maximum_drawdown": null,
+  "protective_drawdown_start": null,
+  "protective_cash_lock": null,
+  "base_currency": "USD",
+  "contributions": 0,
+  "overlay_grid": [
+    "plain",
+    "market_trend",
+    "macro_market"
+  ],
+  "research_screen": "Every observed complete cohort must reach the target and satisfy drawdown; descriptive feasibility screen, not a future guarantee or signed acceptance",
+  "frozen_inputs": {
+    "var/research/horizon-analysis/observed-history.csv": "36f47590cc0204f4c9862559102f29480252b629b5e58ade584d0755bfeeb1fc",
+    "var/research/smart-portfolio-v3/features.json": "e92c9c44fce79a27f3efb88d625dcfa9277f18a817e41909b20aaa8d646b42e2",
+    "var/research/smart-macro-vintages/manifest.json": "90180780ce713f2e6487ea36cf4686862ba046026e8c1e16e302147a35144ea1"
+  },
+  "prior_smart_variants": 36,
+  "strategies": {
+    "economic_balance": {
+      "risk_budgets": {
+        "disinflationary_growth": [
+          0.45,
+          0.25,
+          0.05,
+          0.15,
+          0.1
+        ],
+        "inflationary_growth": [
+          0.35,
+          0.15,
+          0.1,
+          0.2,
+          0.2
+        ],
+        "stagflation": [
+          0.15,
+          0.2,
+          0.2,
+          0.225,
+          0.225
+        ],
+        "deflationary_slowdown": [
+          0.2,
+          0.4,
+          0.1,
+          0.2,
+          0.1
+        ]
+      },
+      "volatility_ceilings": {
+        "disinflationary_growth": 0.06,
+        "inflationary_growth": 0.055,
+        "stagflation": 0.04,
+        "deflationary_slowdown": 0.035
+      },
+      "trend_overlay": false,
+      "tail_feedback": false
+    },
+    "defensive_growth": {
+      "risk_budgets": {
+        "disinflationary_growth": [
+          0.7,
+          0.15,
+          0.025,
+          0.075,
+          0.05
+        ],
+        "inflationary_growth": [
+          0.55,
+          0.15,
+          0.05,
+          0.1,
+          0.15
+        ],
+        "stagflation": [
+          0.15,
+          0.25,
+          0.15,
+          0.225,
+          0.225
+        ],
+        "deflationary_slowdown": [
+          0.15,
+          0.45,
+          0.1,
+          0.2,
+          0.1
+        ]
+      },
+      "volatility_ceilings": {
+        "disinflationary_growth": 0.1,
+        "inflationary_growth": 0.08,
+        "stagflation": 0.04,
+        "deflationary_slowdown": 0.03
+      },
+      "trend_overlay": true,
+      "tail_feedback": false
+    },
+    "inflation_resilience": {
+      "risk_budgets": {
+        "disinflationary_growth": [
+          0.45,
+          0.2,
+          0.1,
+          0.15,
+          0.1
+        ],
+        "inflationary_growth": [
+          0.35,
+          0.1,
+          0.15,
+          0.2,
+          0.2
+        ],
+        "stagflation": [
+          0.1,
+          0.2,
+          0.22,
+          0.24,
+          0.24
+        ],
+        "deflationary_slowdown": [
+          0.15,
+          0.4,
+          0.15,
+          0.2,
+          0.1
+        ]
+      },
+      "volatility_ceilings": {
+        "disinflationary_growth": 0.075,
+        "inflationary_growth": 0.065,
+        "stagflation": 0.04,
+        "deflationary_slowdown": 0.035
+      },
+      "trend_overlay": false,
+      "tail_feedback": false
+    },
+    "tail_aware_ensemble": {
+      "risk_budgets": {
+        "disinflationary_growth": [
+          0.5333333333333333,
+          0.19999999999999998,
+          0.05833333333333334,
+          0.125,
+          0.08333333333333333
+        ],
+        "inflationary_growth": [
+          0.4166666666666667,
+          0.13333333333333333,
+          0.09999999999999999,
+          0.16666666666666666,
+          0.18333333333333335
+        ],
+        "stagflation": [
+          0.13333333333333333,
+          0.21666666666666667,
+          0.19000000000000003,
+          0.22999999999999998,
+          0.22999999999999998
+        ],
+        "deflationary_slowdown": [
+          0.16666666666666666,
+          0.4166666666666667,
+          0.11666666666666665,
+          0.20000000000000004,
+          0.10000000000000002
+        ]
+      },
+      "volatility_ceilings": {
+        "disinflationary_growth": 0.08,
+        "inflationary_growth": 0.065,
+        "stagflation": 0.035,
+        "deflationary_slowdown": 0.03
+      },
+      "trend_overlay": true,
+      "tail_feedback": true
+    }
+  },
+  "macro_forecast": {
+    "horizon_sessions": 63,
+    "training_sessions": 1260,
+    "minimum_training": 504,
+    "refit_sessions": 21,
+    "regularization_C": 0.1,
+    "model_weight": 0.5,
+    "minimum_mature_predictions": 12,
+    "allocation_forecast_weight": 0.2
+  },
+  "objective_policy": "GROWTH_RESILIENCE_NO_FIXED_RETURN_OR_DRAWDOWN_TARGET"
+}

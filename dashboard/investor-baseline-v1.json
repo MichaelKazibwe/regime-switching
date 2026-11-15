@@ -1,0 +1,12 @@
+{
+  "version": "INVESTOR_DASHBOARD_V1",
+  "design_status": "FROZEN_BY_OWNER_2026_10_30",
+  "scope": "Presentation baseline only; no public release or model approval",
+  "source_sha256": {
+    "dashboard/investor.html": "089f35eb4bb6207b20d8ebba11120fed732cee9795d21ba30c1e0c3a158054f8",
+    "dashboard/investor.css": "a1b9561530d78547235d9e4f1211773366d297efea7c629dc7727dbfcf0be7bd",
+    "dashboard/investor.js": "05e505b2bca884909d1f23309b89140ccc324a89e929ae5292affc07f544cec7",
+    "investor_dashboard.py": "48c72c6d8af42206f618f041d737e4ffbebed441efa74cfa589d26234789212e",
+    "productreport.py": "57933e62258d6d7c6eec285f0eb43e49e72f59d8733849e016a90a0791a3415b"
+  }
+}

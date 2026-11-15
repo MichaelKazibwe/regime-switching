@@ -1,0 +1,11 @@
+[Unit]
+Description=Check for new completed market sessions hourly
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+RandomizedDelaySec=30
+Unit=regime-pilot-validation.service
+
+[Install]
+WantedBy=timers.target

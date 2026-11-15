@@ -221,21 +221,29 @@ class ExecutionEngine(BaseObject):
         self,
         order: Order,
         account: PortfolioAccount,
-        execution_price: float
+        execution_price: float,
+        quantity: float | None = None,
     ) -> Trade:
-        
-        commission, slippage = (
 
-        self.transaction_cost_model.estimate(
+        """
+        Execute one full or partial fill.
 
-        shares=order.quantity,
+        Parameters
+        ----------
+        order:
+            Canonical OMS order.
+        account:
+            Authoritative portfolio account.
+        execution_price:
+            Positive execution price.
+        quantity:
+            Optional fill quantity. If omitted, the complete remaining
+            order quantity is executed. If supplied, it must be strictly
+            positive and no greater than the order's remaining quantity.
 
-        price=execution_price
-
-    )
-
-)
-
+        The optional quantity argument is additive to the existing API and
+        preserves full-order execution when omitted.
+        """
 
         # ====================================================
         # VALIDATION
@@ -243,44 +251,41 @@ class ExecutionEngine(BaseObject):
 
         order.validate()
 
+        account.health_check()
+
         if execution_price <= 0:
-
             raise ValueError(
-
                 "Execution price must be positive."
+            )
 
+        remaining_quantity = float(
+            order.remaining_quantity
+        )
+
+        if quantity is None:
+            fill_quantity = remaining_quantity
+        else:
+            fill_quantity = float(quantity)
+
+        if fill_quantity <= 0:
+            raise ValueError(
+                "Execution quantity must be positive."
+            )
+
+        if fill_quantity > remaining_quantity + 1e-12:
+            raise ValueError(
+                "Execution quantity cannot exceed order remaining quantity."
             )
 
         # ====================================================
         # TRANSACTION COSTS
         # ====================================================
 
-        commission = (
-
-            self.transaction_cost_model.commission_rate
-
-            *
-
-            order.quantity
-
-            *
-
-            execution_price
-
-        )
-
-        slippage = (
-
-            self.transaction_cost_model.slippage_rate
-
-            *
-
-            order.quantity
-
-            *
-
-            execution_price
-
+        commission, slippage = (
+            self.transaction_cost_model.estimate(
+                shares=fill_quantity,
+                price=execution_price,
+            )
         )
 
         # ====================================================
@@ -288,31 +293,23 @@ class ExecutionEngine(BaseObject):
         # ====================================================
 
         trade = Trade(
-
             ticker=order.ticker,
-
-            shares=order.quantity,
-
+            shares=fill_quantity,
             price=execution_price,
-
             side=order.side,
-
             commission=commission,
-
-            slippage=slippage
-
+            slippage=slippage,
         )
+
+        trade.validate()
 
         # ====================================================
         # APPLY TRADE
         # ====================================================
 
         self._apply_trade(
-
             account,
-
-            trade
-
+            trade,
         )
 
         # ====================================================
@@ -320,11 +317,8 @@ class ExecutionEngine(BaseObject):
         # ====================================================
 
         order.fill(
-
-            quantity=order.quantity,
-
-            price=execution_price
-
+            quantity=fill_quantity,
+            price=execution_price,
         )
 
         # ====================================================
@@ -332,31 +326,23 @@ class ExecutionEngine(BaseObject):
         # ====================================================
 
         self.last_execution = {
-
             "ticker": trade.ticker,
-
             "side": trade.side,
-
             "shares": trade.shares,
-
             "execution_price": execution_price,
-
             "trade_value": trade.trade_value,
-
             "commission": trade.commission,
-
             "slippage": trade.slippage,
-
             "total_cost": trade.total_cost,
-
             "net_cash_flow": trade.net_cash_flow,
-
-            "cash_after": account.cash
-
+            "cash_after": account.cash,
+            "order_filled_quantity": order.filled_quantity,
+            "order_remaining_quantity": order.remaining_quantity,
+            "order_status": order.status,
         }
 
         return trade
-    
+
     # ========================================================
     # EXECUTE BATCH
     # ========================================================
@@ -464,6 +450,8 @@ class ExecutionEngine(BaseObject):
 
         return {
 
+    "api_version": self.API_VERSION,
+
     "execution_history": [
 
         trade.to_dict()
@@ -488,7 +476,27 @@ class ExecutionEngine(BaseObject):
         data
     ):
 
+        if not isinstance(data, dict):
+
+            raise TypeError(
+                "data must be a dictionary."
+            )
+
+        if data.get("api_version", cls.API_VERSION) != cls.API_VERSION:
+
+            raise ValueError(
+                "Unsupported ExecutionEngine API version."
+            )
+
         engine = cls()
+
+        raw_history = data.get("execution_history", [])
+
+        if not isinstance(raw_history, list):
+
+            raise ValueError(
+                "execution_history must be a list."
+            )
 
         engine.execution_history = [
 
@@ -516,11 +524,21 @@ class ExecutionEngine(BaseObject):
 
             )
 
-        engine.last_execution = data.get(
+        last_execution = data.get(
 
             "last_execution"
 
         )
+
+        if last_execution is not None and not isinstance(last_execution, dict):
+
+            raise ValueError(
+                "last_execution must be a dictionary or None."
+            )
+
+        engine.last_execution = last_execution
+
+        engine.health_check()
 
         return engine
 

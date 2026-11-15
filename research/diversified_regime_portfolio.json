@@ -1,0 +1,187 @@
+{
+  "schema_version": 1,
+  "name": "Diversified regime portfolio",
+  "mode": "RESEARCH_ONLY",
+  "currency": "USD",
+  "capital_borrowing_allowed": false,
+  "maximum_asset_weight": 0.25,
+  "risk_budget_tolerance": 1e-06,
+  "minimum_return_observations": 252,
+  "covariance_lookback_sessions": 756,
+  "covariance_estimator": "LedoitWolf",
+  "stress": {
+    "drawdown_entry": -0.1,
+    "drawdown_exit": -0.07,
+    "volatility_entry": 0.25,
+    "volatility_exit": 0.2,
+    "maximum_risky_exposure": 0.4,
+    "volatility_ceiling": 0.05
+  },
+  "regimes": {
+    "disinflationary_growth": {
+      "growth": "rising",
+      "inflation": "falling",
+      "risk_budgets": {
+        "equities": 0.5,
+        "government_bonds": 0.3,
+        "inflation_sensitive": 0.2
+      },
+      "minimum_cash": 0.05,
+      "volatility_ceiling": 0.12,
+      "groups": {
+        "equities": {
+          "SPY": 0.35,
+          "QQQ": 0.03,
+          "IWM": 0.02,
+          "VEA": 0.12,
+          "VWO": 0.08,
+          "EWJ": 0.05,
+          "XLF": 0.05,
+          "KIE": 0.04,
+          "XLP": 0.06,
+          "XLE": 0.04,
+          "XLU": 0.04,
+          "XLI": 0.06,
+          "ITB": 0.02,
+          "XLY": 0.04
+        },
+        "government_bonds": {
+          "TLT": 0.2,
+          "IEF": 0.35,
+          "SHY": 0.15,
+          "IGOV": 0.15,
+          "SGOV": 0.15
+        },
+        "inflation_sensitive": {
+          "GLD": 0.45,
+          "DBC": 0.15,
+          "TIP": 0.4
+        }
+      }
+    },
+    "inflationary_growth": {
+      "growth": "rising",
+      "inflation": "rising",
+      "risk_budgets": {
+        "equities": 0.4,
+        "government_bonds": 0.15,
+        "inflation_sensitive": 0.45
+      },
+      "minimum_cash": 0.1,
+      "volatility_ceiling": 0.1,
+      "groups": {
+        "equities": {
+          "SPY": 0.35,
+          "QQQ": 0.03,
+          "IWM": 0.02,
+          "VEA": 0.12,
+          "VWO": 0.08,
+          "EWJ": 0.05,
+          "XLF": 0.05,
+          "KIE": 0.04,
+          "XLP": 0.06,
+          "XLE": 0.04,
+          "XLU": 0.04,
+          "XLI": 0.06,
+          "ITB": 0.02,
+          "XLY": 0.04
+        },
+        "government_bonds": {
+          "TLT": 0.05,
+          "IEF": 0.15,
+          "SHY": 0.15,
+          "IGOV": 0.1,
+          "SGOV": 0.55
+        },
+        "inflation_sensitive": {
+          "GLD": 0.3,
+          "DBC": 0.4,
+          "TIP": 0.3
+        }
+      }
+    },
+    "stagflation": {
+      "growth": "falling",
+      "inflation": "rising",
+      "risk_budgets": {
+        "equities": 0.2,
+        "government_bonds": 0.25,
+        "inflation_sensitive": 0.55
+      },
+      "minimum_cash": 0.25,
+      "volatility_ceiling": 0.07,
+      "groups": {
+        "equities": {
+          "SPY": 0.35,
+          "QQQ": 0.03,
+          "IWM": 0.02,
+          "VEA": 0.12,
+          "VWO": 0.08,
+          "EWJ": 0.05,
+          "XLF": 0.05,
+          "KIE": 0.04,
+          "XLP": 0.06,
+          "XLE": 0.04,
+          "XLU": 0.04,
+          "XLI": 0.06,
+          "ITB": 0.02,
+          "XLY": 0.04
+        },
+        "government_bonds": {
+          "TLT": 0,
+          "IEF": 0.1,
+          "SHY": 0.15,
+          "IGOV": 0.1,
+          "SGOV": 0.65
+        },
+        "inflation_sensitive": {
+          "GLD": 0.35,
+          "DBC": 0.3,
+          "TIP": 0.35
+        }
+      }
+    },
+    "deflationary_slowdown": {
+      "growth": "falling",
+      "inflation": "falling",
+      "risk_budgets": {
+        "equities": 0.15,
+        "government_bonds": 0.55,
+        "inflation_sensitive": 0.3
+      },
+      "minimum_cash": 0.25,
+      "volatility_ceiling": 0.06,
+      "groups": {
+        "equities": {
+          "SPY": 0.35,
+          "QQQ": 0.03,
+          "IWM": 0.02,
+          "VEA": 0.12,
+          "VWO": 0.08,
+          "EWJ": 0.05,
+          "XLF": 0.05,
+          "KIE": 0.04,
+          "XLP": 0.06,
+          "XLE": 0.04,
+          "XLU": 0.04,
+          "XLI": 0.06,
+          "ITB": 0.02,
+          "XLY": 0.04
+        },
+        "government_bonds": {
+          "TLT": 0.3,
+          "IEF": 0.3,
+          "SHY": 0.1,
+          "IGOV": 0.2,
+          "SGOV": 0.1
+        },
+        "inflation_sensitive": {
+          "GLD": 0.5,
+          "DBC": 0,
+          "TIP": 0.5
+        }
+      }
+    }
+  },
+  "universe_profile": "diversified_research"
+}

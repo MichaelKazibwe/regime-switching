@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "status": "NOT_REVIEWED",
+  "reviewer": "",
+  "reviewed_at": null,
+  "expires_at": null,
+  "source_snapshot_id": "",
+  "bundle_sha256": "",
+  "dashboard_sha256": "",
+  "checks": {
+    "allocation_search": false,
+    "desktop_overview": false,
+    "macro_scenario_interaction": false,
+    "mobile_layout": false,
+    "news_failure_state": false,
+    "pdf_download": false,
+    "risk_charts": false
+  },
+  "artifacts": [],
+  "note": "Unapproved template only. Record actual source-bound browser tests and reviewer evidence; do not invent approvals."
+}

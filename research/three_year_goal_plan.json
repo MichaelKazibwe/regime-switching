@@ -1,0 +1,137 @@
+{
+  "schema_version": 1,
+  "mode": "RESEARCH_ONLY",
+  "production_activation": false,
+  "research_revision": 5,
+  "reserved_start": "2025-10-30",
+  "risk_budget_tolerance": 1e-06,
+  "maximum_asset_weight": 0.25,
+  "maximum_full_account_risk_share": 0.25,
+  "maximum_reserve_weight": 0.25,
+  "minimum_cash": 0.05,
+  "stress_exposure_ceiling": 0.4,
+  "stress_volatility_ceiling": 0.05,
+  "expected_shortfall_daily_ceiling": 0.02,
+  "stress_expected_shortfall_daily_ceiling": 0.01,
+  "rebalance_sessions": 21,
+  "minimum_trade_notional": 0.04,
+  "volatility_half_life": 63,
+  "stress_correlation_weight": 0.25,
+  "calibration_half_life": 63,
+  "calibration_warmup": 63,
+  "maximum_calibration_multiplier": 2.0,
+  "training_sessions": 756,
+  "selection_interval_sessions": 252,
+  "training_drawdown_ceiling": null,
+  "training_volatility_ceiling": 0.05,
+  "objective": "Feasibility first; never relax user drawdown or existing authorization limits to select a winner",
+  "candidate_grid": {
+    "volatility_ceiling": [
+      0.06,
+      0.1
+    ],
+    "anchor": [
+      "growth_50",
+      "growth_70"
+    ],
+    "macro_view_weight": [
+      0.0,
+      0.1
+    ]
+  },
+  "sleeves": {
+    "equities": {
+      "SPY": 0.3333333333333333,
+      "VEA": 0.3333333333333333,
+      "VWO": 0.3333333333333333
+    },
+    "nominal_bonds": {
+      "TLT": 0.3,
+      "IEF": 0.4,
+      "IGOV": 0.3
+    },
+    "inflation_linked": {
+      "TIP": 1.0
+    },
+    "gold": {
+      "GLD": 1.0
+    },
+    "commodities": {
+      "DBC": 1.0
+    }
+  },
+  "anchors": {
+    "growth_50": [
+      0.5,
+      0.25,
+      0.05,
+      0.125,
+      0.075
+    ],
+    "growth_70": [
+      0.7,
+      0.15,
+      0.025,
+      0.075,
+      0.05
+    ]
+  },
+  "macro_views": {
+    "disinflationary_growth": [
+      0.55,
+      0.25,
+      0.05,
+      0.1,
+      0.05
+    ],
+    "inflationary_growth": [
+      0.45,
+      0.1,
+      0.1,
+      0.1,
+      0.25
+    ],
+    "stagflation": [
+      0.1,
+      0.15,
+      0.15,
+      0.25,
+      0.35
+    ],
+    "deflationary_slowdown": [
+      0.15,
+      0.45,
+      0.1,
+      0.25,
+      0.05
+    ]
+  },
+  "proxy_parameters": {
+    "volatility_ceiling": 0.04,
+    "anchor": "balanced",
+    "macro_view_weight": 0.0
+  },
+  "risk_contract": "Exact relative full-account Euler contributions among core assets, plus a separately capped Treasury reserve capital sleeve; full-account contributions always reported",
+  "reserve_eligibility": "SGOV after 252 actual returns, otherwise SHY; never equate either ETF to uninvested cash",
+  "benchmark": "All Weather-inspired equal-sleeve-risk liquid proxy; not actual Bridgewater private-fund performance",
+  "target_return": null,
+  "horizon_sessions": 756,
+  "maximum_drawdown": null,
+  "protective_drawdown_start": null,
+  "protective_cash_lock": null,
+  "base_currency": "USD",
+  "contributions": 0,
+  "overlay_grid": [
+    "plain",
+    "market_trend",
+    "macro_market"
+  ],
+  "research_screen": "Every observed complete cohort must reach the target and satisfy drawdown; descriptive feasibility screen, not a future guarantee or signed acceptance",
+  "frozen_inputs": {
+    "var/research/horizon-analysis/observed-history.csv": "36f47590cc0204f4c9862559102f29480252b629b5e58ade584d0755bfeeb1fc",
+    "var/research/smart-portfolio-v3/features.json": "e92c9c44fce79a27f3efb88d625dcfa9277f18a817e41909b20aaa8d646b42e2",
+    "var/research/smart-macro-vintages/manifest.json": "90180780ce713f2e6487ea36cf4686862ba046026e8c1e16e302147a35144ea1"
+  },
+  "prior_smart_variants": 24,
+  "objective_policy": "GROWTH_RESILIENCE_NO_FIXED_RETURN_OR_DRAWDOWN_TARGET"
+}

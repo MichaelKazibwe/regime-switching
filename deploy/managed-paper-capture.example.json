@@ -1,0 +1,5 @@
+{
+  "tenant": "REPLACE_WITH_APPROVED_TENANT",
+  "paper_account": "REPLACE_WITH_PAPER_ACCOUNT",
+  "gateway_ca_file": "/protected/path/to/trusted-gateway-ca.pem"
+}

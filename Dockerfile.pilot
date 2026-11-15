@@ -1,0 +1,16 @@
+ARG PYTHON_BASE_IMAGE=python:3.12-slim-trixie@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
+FROM ${PYTHON_BASE_IMAGE}
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 XDG_CACHE_HOME=/tmp/regime-cache
+WORKDIR /app
+COPY requirements-paper.hashed.lock ./
+RUN python -m pip install --no-cache-dir --require-hashes -r requirements-paper.hashed.lock && python -m pip check
+COPY Dockerfile.pilot .dockerignore ./
+COPY *.py pilot-release.json ./
+COPY dashboard/ ./dashboard/
+COPY pilot/ ./pilot/
+COPY research/ ./research/
+RUN mkdir -p /app/var/pilot /app/output && chown -R 10001:10001 /app
+USER 10001:10001
+HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 CMD ["python", "-c", "import os,urllib.request,urllib.parse; r=urllib.request.Request('http://127.0.0.1:8780/healthz', headers={'Host':urllib.parse.urlsplit(os.environ['PILOT_PUBLIC_ORIGIN']).netloc}); urllib.request.urlopen(r,timeout=4).read()"]
+ENTRYPOINT ["python", "pilot_server.py"]
+CMD ["--snapshot", "var/pilot-input/launch.json", "--bind", "0.0.0.0", "--benchmark", "var/pilot-input/benchmark.json"]

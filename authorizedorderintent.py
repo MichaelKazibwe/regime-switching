@@ -575,6 +575,11 @@ class AuthorizedOrderIntent:
             "quantity": quantity,
             "order_type": order_type,
             "time_in_force": time_in_force,
+            # Preserve the execution authorization's decision identity on
+            # the canonical Order itself. Downstream broker and accounting
+            # records already carry this field, so dropping it here breaks
+            # end-to-end audit correlation.
+            "decision_id": authorization.decision_id,
         }
 
         if limit_price is not None:

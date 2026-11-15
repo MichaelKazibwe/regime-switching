@@ -1,0 +1,21 @@
+[Unit]
+Description=Private daily strategy shadow validation
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=regime
+Group=regime
+WorkingDirectory=/opt/regime
+EnvironmentFile=/etc/regime/strategy-image.env
+ExecStart=/usr/bin/docker compose -f compose.strategy.yaml run --rm validation
+UMask=0077
+TimeoutStartSec=7500
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/regime/var /opt/regime/output
+StandardOutput=journal
+StandardError=journal

@@ -802,6 +802,131 @@ class ReconciliationEngine:
         )
 
     # ==================================================================
+    # INTERNAL ORDER-STATE VALIDATION
+    # ==================================================================
+
+    def _validate_normalized_state(
+        self,
+        record: dict,
+        source: str,
+    ) -> Optional[str]:
+        """
+        Validate quantity, fill, remaining-quantity, and lifecycle
+        invariants for one normalized OMS or broker order.
+
+        Reconciliation must never declare two internally-invalid states
+        as MATCHED merely because their fields happen to agree.
+
+        Returns
+        -------
+        Optional[str]
+            ``None`` when valid; otherwise a deterministic reason.
+        """
+
+        quantity = float(record["quantity"])
+        filled = float(record["filled_quantity"])
+        remaining = float(record["remaining_quantity"])
+        status = record.get("status")
+
+        if quantity <= self.quantity_tolerance:
+            return (
+                f"{source} order quantity must be strictly positive."
+            )
+
+        if filled < -self.quantity_tolerance:
+            return (
+                f"{source} filled quantity cannot be negative."
+            )
+
+        if filled > quantity + self.quantity_tolerance:
+            return (
+                f"{source} filled quantity exceeds order quantity."
+            )
+
+        if remaining < -self.quantity_tolerance:
+            return (
+                f"{source} remaining quantity cannot be negative."
+            )
+
+        expected_remaining = max(
+            quantity - filled,
+            0.0,
+        )
+
+        if not self._same_quantity(
+            remaining,
+            expected_remaining,
+        ):
+            return (
+                f"{source} remaining quantity is inconsistent with "
+                "order quantity minus filled quantity."
+            )
+
+        if status is None:
+            return (
+                f"{source} order lifecycle status is missing."
+            )
+
+        # Lifecycle state must agree with quantity state.  CANCELLED is
+        # intentionally allowed after a partial fill: a cancellation can
+        # close the remaining quantity while preserving executed fills.
+        if status == "FILLED":
+            if not self._same_quantity(filled, quantity):
+                return (
+                    f"{source} FILLED order must have filled quantity "
+                    "equal to order quantity."
+                )
+            if not self._same_quantity(remaining, 0.0):
+                return (
+                    f"{source} FILLED order must have zero remaining quantity."
+                )
+
+        elif status == "PARTIALLY_FILLED":
+            if filled <= self.quantity_tolerance:
+                return (
+                    f"{source} PARTIALLY_FILLED order must have a positive fill."
+                )
+            if filled >= quantity - self.quantity_tolerance:
+                return (
+                    f"{source} PARTIALLY_FILLED order cannot be fully filled."
+                )
+            if remaining <= self.quantity_tolerance:
+                return (
+                    f"{source} PARTIALLY_FILLED order must have remaining quantity."
+                )
+
+        elif status in {
+            "PENDING",
+            "SUBMITTED",
+            "NEW",
+            "ACCEPTED",
+            "OPEN",
+        }:
+            if remaining <= self.quantity_tolerance:
+                return (
+                    f"{source} open order cannot have zero remaining quantity."
+                )
+
+        elif status == "REJECTED":
+            if filled > self.quantity_tolerance:
+                return (
+                    f"{source} REJECTED order cannot contain executed quantity."
+                )
+            if not self._same_quantity(remaining, quantity):
+                return (
+                    f"{source} REJECTED order must retain its full remaining quantity."
+                )
+
+        elif status == "CANCELLED":
+            # Cancellation may occur after any quantity of execution,
+            # including a broker/OMS terminal-state race where the final
+            # fill and cancellation are observed in different snapshots.
+            # Quantity consistency is the authoritative check here.
+            pass
+
+        return None
+
+    # ==================================================================
     # BUILD DECISION
     # ==================================================================
 
@@ -1319,6 +1444,40 @@ class ReconciliationEngine:
 
                 expected_position,
 
+            )
+
+        oms_state_error = self._validate_normalized_state(
+            oms,
+            "OMS",
+        )
+
+        if oms_state_error is not None:
+            return self._build_decision(
+                ReconciliationStatus.DISCREPANCY,
+                DiscrepancyType.INVALID_OMS_STATE,
+                False,
+                oms,
+                broker,
+                oms_state_error,
+                account_position,
+                expected_position,
+            )
+
+        broker_state_error = self._validate_normalized_state(
+            broker,
+            "Broker",
+        )
+
+        if broker_state_error is not None:
+            return self._build_decision(
+                ReconciliationStatus.DISCREPANCY,
+                DiscrepancyType.INVALID_BROKER_STATE,
+                False,
+                oms,
+                broker,
+                broker_state_error,
+                account_position,
+                expected_position,
             )
 
         if (

@@ -1,0 +1,17 @@
+[Unit]
+Description=Regime switching paper portfolio cycle
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/regime-switching
+EnvironmentFile=/opt/regime-switching/.env.image
+UMask=0077
+ExecStart=/usr/bin/docker compose -f /opt/regime-switching/compose.paper.yaml run --rm --no-deps paper-worker
+TimeoutStartSec=30min
+Restart=no
+
+# Docker daemon access is effectively root-equivalent. Install this unit only
+# on the isolated paper host and restrict host access to the named operator.

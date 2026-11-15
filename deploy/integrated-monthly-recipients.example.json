@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "users": [
+    {
+      "user_id": "operator-preview",
+      "name": "Portfolio operator",
+      "email": "operator@example.com",
+      "start_month": "2026-11",
+      "active": false,
+      "portfolio_id": "Growth_Resilience_reference"
+    }
+  ]
+}

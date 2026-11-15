@@ -1,0 +1,191 @@
+{
+  "version": "GROWTH_RESILIENCE_V1",
+  "kind": "GENERATED_REFERENCE_DESIGN_NOT_ACTIVE_EXECUTION_CONFIG",
+  "fixed_return_target": null,
+  "maximum_account_drawdown": null,
+  "weights": {
+    "SPY": 0.18,
+    "VEA": 0.1,
+    "VWO": 0.08,
+    "EWJ": 0.02,
+    "QQQ": 0.05,
+    "XLI": 0.04,
+    "XLV": 0.04,
+    "XLP": 0.03,
+    "XLU": 0.02,
+    "XLE": 0.02,
+    "KIE": 0.02,
+    "IEF": 0.07,
+    "TLT": 0.03,
+    "TIP": 0.06,
+    "IGOV": 0.03,
+    "GLD": 0.07,
+    "DBC": 0.03,
+    "DBMF": 0.04,
+    "SGOV": 0.02,
+    "USD_CASH": 0.05
+  },
+  "assets": [
+    {
+      "symbol": "SPY",
+      "weight": 0.18,
+      "role": "US broad equity",
+      "geography": "US equity",
+      "purpose": "Broad earnings growth",
+      "variance_share": 0.23074065398245397
+    },
+    {
+      "symbol": "VEA",
+      "weight": 0.1,
+      "role": "Developed ex-US equity",
+      "geography": "Developed ex-US, including Japan",
+      "purpose": "International earnings diversification",
+      "variance_share": 0.18606584689210814
+    },
+    {
+      "symbol": "VWO",
+      "weight": 0.08,
+      "role": "Emerging equity",
+      "geography": "Emerging markets",
+      "purpose": "Emerging economies and consumption",
+      "variance_share": 0.1402634326452779
+    },
+    {
+      "symbol": "EWJ",
+      "weight": 0.02,
+      "role": "Japan equity tilt",
+      "geography": "Japan; overlaps VEA",
+      "purpose": "Japan industrial and corporate earnings",
+      "variance_share": 0.03898609091620411
+    },
+    {
+      "symbol": "QQQ",
+      "weight": 0.05,
+      "role": "Innovation equity tilt",
+      "geography": "US-listed global companies",
+      "purpose": "Digital infrastructure and technology; concentrated",
+      "variance_share": 0.09217393270114371
+    },
+    {
+      "symbol": "XLI",
+      "weight": 0.04,
+      "role": "Industrial equity tilt",
+      "geography": "US equity",
+      "purpose": "Infrastructure and industrial investment",
+      "variance_share": 0.058354940036365655
+    },
+    {
+      "symbol": "XLV",
+      "weight": 0.04,
+      "role": "Healthcare equity tilt",
+      "geography": "US equity",
+      "purpose": "Healthcare demand and innovation",
+      "variance_share": 0.020656808823554886
+    },
+    {
+      "symbol": "XLP",
+      "weight": 0.03,
+      "role": "Defensive equity",
+      "geography": "US equity",
+      "purpose": "Essential consumption",
+      "variance_share": 0.0023907706407561885
+    },
+    {
+      "symbol": "XLU",
+      "weight": 0.02,
+      "role": "Defensive equity",
+      "geography": "US equity",
+      "purpose": "Utilities and electrification; rate sensitive",
+      "variance_share": 0.008998186607169726
+    },
+    {
+      "symbol": "XLE",
+      "weight": 0.02,
+      "role": "Energy equity",
+      "geography": "US equity",
+      "purpose": "Energy production; cyclical inflation sensitivity",
+      "variance_share": -0.006851196929742372
+    },
+    {
+      "symbol": "KIE",
+      "weight": 0.02,
+      "role": "Insurance equity",
+      "geography": "US equity",
+      "purpose": "Insurance earnings; underwriting and catastrophe risk",
+      "variance_share": 0.0012694157116584712
+    },
+    {
+      "symbol": "IEF",
+      "weight": 0.07,
+      "role": "Intermediate sovereign bonds",
+      "geography": "US sovereign",
+      "purpose": "Duration diversification in disinflation",
+      "variance_share": 0.017366116468289408
+    },
+    {
+      "symbol": "TLT",
+      "weight": 0.03,
+      "role": "Long sovereign bonds",
+      "geography": "US sovereign",
+      "purpose": "Recession duration hedge; inflation risk",
+      "variance_share": 0.01230915731190397
+    },
+    {
+      "symbol": "TIP",
+      "weight": 0.06,
+      "role": "Inflation-linked bonds",
+      "geography": "US sovereign",
+      "purpose": "Inflation-linked principal; real-rate risk",
+      "variance_share": 0.00964321237429487
+    },
+    {
+      "symbol": "IGOV",
+      "weight": 0.03,
+      "role": "International sovereign bonds",
+      "geography": "Developed ex-US sovereign",
+      "purpose": "Country and currency diversification; unhedged FX",
+      "variance_share": 0.01808832147702997
+    },
+    {
+      "symbol": "GLD",
+      "weight": 0.07,
+      "role": "Gold",
+      "geography": "Global commodity",
+      "purpose": "Monetary and crisis diversification; no yield",
+      "variance_share": 0.15606954572966789
+    },
+    {
+      "symbol": "DBC",
+      "weight": 0.03,
+      "role": "Commodity futures",
+      "geography": "Global commodities",
+      "purpose": "Supply and inflation sensitivity; roll risk",
+      "variance_share": -0.006344275904383071
+    },
+    {
+      "symbol": "DBMF",
+      "weight": 0.04,
+      "role": "Managed futures",
+      "geography": "Global multi-asset",
+      "purpose": "Trend diversification; strategy and derivative risk",
+      "variance_share": 0.019850642860865356
+    },
+    {
+      "symbol": "SGOV",
+      "weight": 0.02,
+      "role": "Treasury bills",
+      "geography": "US sovereign",
+      "purpose": "Short-duration invested reserve",
+      "variance_share": -3.160234461892521e-05
+    },
+    {
+      "symbol": "USD_CASH",
+      "weight": 0.05,
+      "role": "Uninvested cash",
+      "geography": "USD cash",
+      "purpose": "Liquidity; zero unverified net interest assumed",
+      "variance_share": 0.0
+    }
+  ],
+  "note": "Design source is growth_resilience.py; variance shares are dated 2026-10-30 estimates."
+}

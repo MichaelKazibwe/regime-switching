@@ -1,0 +1,26 @@
+{
+  "version": "INVESTOR_DASHBOARD_V3_STRATEGY_LAB",
+  "design_status": "IMPLEMENTED_REQUEST_PENDING_REVIEW",
+  "scope": "Private, non-executable strategy/scenario proposals; no model promotion",
+  "source_sha256": {
+    "dashboard/investor.html": "2f4661cabb6515cfe0de75def3101b0b7bf08fb850942223022561b17c5afadb",
+    "dashboard/investor.css": "83d13a85523f61055c207da282adc36a5aeffb03560354676326e34a3d3f4578",
+    "dashboard/investor.js": "ce5df531487c8b9ee68b3c0cbd8caed32ab5d0a6a3e0bb8b989b60ba600abc8d",
+    "investor_dashboard.py": "c92f4ac476b9a4a1025f77b1697905e8049188403cdb44217bd7d523175b3c43",
+    "assetroles.py": "5e189f97d59bc1df9a5f51f5f73e683ef07f0ca1ec4367d0189188bba9132a0a",
+    "macro_allocation_lab.py": "a5b9cef3fd06b02e2255b74de9e99eaea501472b13aa8d975cdd34feb6ddbf8a",
+    "macro_lab_pdf.py": "2547f16e278d65912f69cb9ea37c48ebb1ebbb5df9eacedb04009169e8e78cca",
+    "strategy_dashboard_server.py": "8f8edbc3ffbba10a01225e03005db72201a248545bb8d9ded60b5e2b20f7fa47",
+    "refresh_strategy_dashboard.py": "0325098b0cf2c40627e9108a8e0db078d64142948e0eaa7cf2244b2f64962daf",
+    "macro_feature_contract.py": "d3a9cf747ed53b1864fe86602b6eb90b96c46b9497cb02bb66d566c3dc4f1271",
+    "investor_analytics.py": "67e263ab86f5d9603d49e24cc81ddb22188723432b6709c7f8b19c45596c8139",
+    "investor_macro_feed.py": "2a76c795a7ea728af37fdde140750fad36003398c118488b6a2fcff47cf6c5c1",
+    "strategy_integrity.py": "f170e01fd9cb5ce7df38ebf8dbea88e900032076358d7f9e6bcd91217d4ac1d7",
+    "strategy_receipts.py": "b9045ca300840dd1aee08e13e486b3867bd4aaacd00f7a0931581cd930afb001",
+    "strategy_operations.py": "bad8d18a6cc97c460a2d07569235c97c83f8e4833668c25a71a36886e6e82857",
+    "strategy_report.py": "68d59e85b4770436f13595a9fbb80e6ba8d5b1271f7bfce3aa9cdb5c0fc86858",
+    "scheduled_strategy_validation.py": "e36bb3fba163f0ecf461d67fc482e00dee4ff0df5c7c1493d76aec71d80899c8",
+    "strategy_healthcheck.py": "8b3892f5b55625cbf97bacb5dd95c72a5f4d803f686d16b7c5fdf71e03f8fb5a",
+    "prospective_strategy_ledger.py": "f920cc56cbe9d3ed5d947bf18b2cff0abd5c6d2bd4d68a2e87db2823f0120a87"
+  }
+}

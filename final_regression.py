@@ -3,12 +3,12 @@
 FINAL COMPREHENSIVE REGRESSION
 ==============================================================================
 
-Single-file regression gate for the complete 65-module production
-portfolio/trading repository.
+Single-file regression gate for the registered production
+portfolio/trading architecture and complete Python repository.
 
 Design goals
 ------------
-* Inventory exactly the 70 project modules, excluding this harness.
+* Inventory of project modules, excluding this harness.
 * Compile every module.
 * Run Ruff over the complete repository.
 * AST-audit every module and build the local import graph.
@@ -33,6 +33,7 @@ The harness does not modify project source files.
 from __future__ import annotations
 
 import ast
+from collections import Counter
 import hashlib
 import importlib
 import os
@@ -42,6 +43,7 @@ import subprocess
 import sys
 import time
 import traceback
+import json
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -66,7 +68,10 @@ SELF_NAME = Path(
     __file__
 ).name
 
-EXPECTED_PROJECT_FILE_COUNT = 70
+_SOURCE_INVENTORY = json.loads(
+    (PROJECT_ROOT / "research/source_inventory.json").read_text()
+)
+EXPECTED_PROJECT_FILE_COUNT = _SOURCE_INVENTORY["expected_root_python_files"]
 
 
 # The active production allocation universe is defined by the regime risk
@@ -121,35 +126,55 @@ REGRESSION_MODULES = (
 
 
 # ==============================================================================
-# SECTION 4 — COMPLETE 65-MODULE ARCHITECTURE
+# # SECTION 4 — REGISTERED PRODUCTION ARCHITECTURE
 # ==============================================================================
 
 REQUIRED_MODULES = (
+    "alertengine.py",
+    "analyticalgreeks.py",
     "analytics.py",
     "assetuniverse.py",
+    "atr.py",
+    "audittrail.py",
+    "authorizedexecutionhandoff.py",
+    "authorizedorder.py",
+    "authorizedorderintent.py",
+    "authorizedroutinghandoff.py",
     "basecomponent.py",
     "basecovariancemodel.py",
     "blacklitterman.py",
+    "blackscholes.py",
     "brokerexecutionengine.py",
     "brokerrouter.py",
+    "circuitbreaker.py",
     "constraints.py",
     "core_constants.py",
     "covarianceengine.py",
     "drawdownforecast.py",
+    "drawdownrisk.py",
+    "emailtransport.py",
     "ensemblecovariance.py",
     "exceptions.py",
     "executionanalytics.py",
     "executionengine.py",
+    "expectedreturncalibrator.py",
     "expectedreturnforecaster.py",
     "factorcovariance.py",
     "factorexposuremodel.py",
+    "factorstressrisk.py",
     "forecastmodels.py",
     "forwardriskanalyzer.py",
     "forwardriskmetrics.py",
+    "killswitch.py",
     "livebroker.py",
     "macroregime.py",
     "marketdataloader.py",
     "oms.py",
+    "operationalevent.py",
+    "operationalhealth.py",
+    "optionsrisk.py",
+    "optionsriskgovernor.py",
+    "optionstailrisk.py",
     "order.py",
     "orderbook.py",
     "orderstatus.py",
@@ -158,7 +183,9 @@ REQUIRED_MODULES = (
     "portfolio.py",
     "portfolioaccount.py",
     "portfoliodecisionengine.py",
+    "portfoliogreeks.py",
     "portfoliooptimizer.py",
+    "positionsizing.py",
     "posttradeexecutionmonitor.py",
     "pretraderiskgate.py",
     "productioncomposition.py",
@@ -167,6 +194,7 @@ REQUIRED_MODULES = (
     "productionintegration.py",
     "productionpipelineintegration.py",
     "productionriskvalidation.py",
+    "putcallparity.py",
     "quantitative_regression.py",
     "rebalanceengine.py",
     "reconciliationengine.py",
@@ -175,27 +203,121 @@ REQUIRED_MODULES = (
     "regimeforecastengine.py",
     "regimesimulation.py",
     "regression_suite.py",
+    "restartrecovery.py",
     "rewrite.py",
     "riskbudgetengine.py",
     "riskcontributionanalyzer.py",
+    "riskgovernor.py",
     "riskmodel.py",
+    "riskreport.py",
     "scenarioengine.py",
     "step7_production_test.py",
     "step8_historical_data_test.py",
     "step9_historical_backtest.py",
-    "testsupport.py",
-    "test_portfoliooptimizer_hardening.py",
+    "stresstailrisk.py",
+    "structuredlogging.py",
+    "tailaggregation.py",
     "test_phase_iv_d_production_gate.py",
     "test_phase_iv_f_execution_safety.py",
     "test_phase_iv_g_downstream_execution_safety.py",
     "test_phase_iv_h_execution_integrity.py",
+    "test_portfoliooptimizer_hardening.py",
+    "testsupport.py",
     "trade.py",
     "tradeanalytics.py",
     "tradegenerator.py",
+    "tradingcalendar.py",
     "transactioncostmodel.py",
     "validators.py",
+    "volatilitycorrelationstress.py",
     "volatilitytargeting.py",
 )
+
+
+# Additional top-level Python files are classified separately from the modules
+# that are imported and self-tested by the production regression pipeline.
+# Every top-level .py file except this harness must appear in exactly one
+# inventory category. New files intentionally fail inventory until classified.
+SUPPLEMENTAL_TOOL_MODULES = (
+    "Options_Stress.py",
+    "Volatility_Surface_Inputs.py",
+    "e2e_proof_runner.py",
+    "e2e_proof_runner_phase3e.py",
+    "generate_e2e_proof_matrix.py",
+    "git_status_audit.py",
+    "phase1a_repository_reconciliation.py",
+    "regression_suite_r3b.py",
+)
+
+SUPPLEMENTAL_TEST_MODULES = (
+    "test_alertengine_corrected_fixed.py",
+    "test_assetuniverse.py",
+    "test_circuitbreaker.py",
+    "test_circuitbreaker_5j4.py",
+    "test_drawdownrisk_r3d4.py",
+    "test_emailtransport.py",
+    "test_factor_exposure_model.py",
+    "test_factorstressrisk_r3e5.py",
+    "test_killswitch.py",
+    "test_killswitch_5j4.py",
+    "test_marketdataloader.py",
+    "test_marketdataloader_5j3.py",
+    "test_operationalevent.py",
+    "test_phase3d_step1_decision_identity.py",
+    "test_phase3d_step2_immutable_decision.py",
+    "test_phase3d_step4_execution_identity.py",
+    "test_phase3d_step5_reconciliation_integrity.py",
+    "test_phase3d_step5a_execution_replay_protection.py",
+    "test_phase3d_step5b_partial_accounting.py",
+    "test_phase3d_step5c_posttrade_lifecycle.py",
+    "test_phase3d_step6_restart_integrity.py",
+    "test_phase3e_runtime_orchestration.py",
+    "test_phase5c_logging_audit.py",
+    "test_phase5e_execution_gate.py",
+    "test_phase5f_audittrail_integration.py",
+    "test_phase5f_circuitbreaker_integration.py",
+    "test_phase5f_delivery_failure.py",
+    "test_phase5f_email_integration.py",
+    "test_phase5f_killswitch_integration.py",
+    "test_phase5g_operational_health.py",
+    "test_phase5h_restart_recovery.py",
+    "test_phase5i_operational_runbook.py",
+    "test_phase_iii_b_architecture_boundaries.py",
+    "test_phase_iv_i_authorized_execution_boundary.py",
+    "test_phase_iv_i_authorized_execution_handoff.py",
+    "test_phase_iv_i_authorized_oms.py",
+    "test_phase_iv_i_authorized_order.py",
+    "test_phase_iv_i_authorized_order_bridge.py",
+    "test_phase_iv_i_authorized_order_intent.py",
+    "test_phase_iv_i_authorized_routing.py",
+    "test_phase_iv_i_legacy_execution_containment.py",
+    "test_portfolio.py",
+    "test_portfoliodecisionengine.py",
+    "test_portfoliodecisionengine_5j1.py",
+    "test_portfoliooptimizer.py",
+    "test_portfoliooptimizer_a16.py",
+    "test_portfoliooptimizer_r3c.py",
+    "test_r4_12_regression.py",
+    "test_riskgovernor.py",
+    "test_riskreport_r3e8.py",
+    "test_scenarioengine.py",
+    "test_stresstailrisk_r3e4.py",
+    "test_tailaggregation_r3e7.py",
+    "test_tradingcalendar_5j2.py",
+    "test_volatilitycorrelationstress_r3e6.py",
+    "test_tradeanalytics.py",
+)
+
+HISTORICAL_OR_DAMAGED_MODULES = ()
+
+INVENTORY_CATEGORIES = {
+    "registered modules": REQUIRED_MODULES,
+    "supplemental tools": SUPPLEMENTAL_TOOL_MODULES,
+    "supplemental tests": SUPPLEMENTAL_TEST_MODULES,
+    "historical/damaged files": HISTORICAL_OR_DAMAGED_MODULES,
+    "research and pilot modules": tuple(_SOURCE_INVENTORY["additional_research_and_pilot_modules"]),
+    "additional tests": tuple(_SOURCE_INVENTORY["additional_test_modules"]),
+}
 
 
 # ==============================================================================
@@ -1000,83 +1122,97 @@ class FinalRegression:
     def inventory(
         self,
     ) -> bool:
+        """Require every top-level Python file to be classified exactly once."""
+        banner("PHASE 1 — COMPLETE PYTHON FILE INVENTORY")
 
-        banner(
-            "PHASE 1 — COMPLETE 70-FILE INVENTORY"
-        )
+        actual = sorted(p.name for p in local_python_files(self.root))
+        actual_set = set(actual)
 
-        actual = [
-            p.name
-            for p in local_python_files(
-                self.root
-            )
+        category_entries = [
+            (category, filename)
+            for category, filenames in INVENTORY_CATEGORIES.items()
+            for filename in filenames
         ]
+        all_registered = [filename for _, filename in category_entries]
+        counts = Counter(all_registered)
+        duplicate_classifications = sorted(
+            filename for filename, count in counts.items() if count > 1
+        )
+        classified_set = set(all_registered)
+        unclassified = sorted(actual_set - classified_set)
+        missing_classified = sorted(classified_set - actual_set)
+        category_count_ok = len(all_registered) == EXPECTED_PROJECT_FILE_COUNT
+        actual_count_ok = len(actual) == EXPECTED_PROJECT_FILE_COUNT
 
-        expected = sorted(
-            REQUIRED_MODULES
+        # The 101 registered modules remain the only set imported and run as
+        # production/library regressions. Supplemental tests and tools are
+        # tracked for inventory and are covered by repository-wide compile/AST.
+        production_duplicates = sorted(
+            filename
+            for filename, count in Counter(REQUIRED_MODULES).items()
+            if count > 1
+        )
+        production_count_ok = len(REQUIRED_MODULES) == 101
+
+        passed = all((
+            not unclassified,
+            not missing_classified,
+            not duplicate_classifications,
+            not production_duplicates,
+            category_count_ok,
+            actual_count_ok,
+            production_count_ok,
+        ))
+
+        category_summary = "\n".join(
+            f"  {category}: {len(filenames)}"
+            for category, filenames in INVENTORY_CATEGORIES.items()
+        )
+        details = (
+            f"Repository Python files: {len(actual)}\n"
+            f"Expected complete inventory: {EXPECTED_PROJECT_FILE_COUNT}\n"
+            f"Registered production/import modules: {len(REQUIRED_MODULES)}\n"
+            f"Classified entries across all categories: {len(all_registered)}\n"
+            f"Category counts:\n{category_summary}\n"
+            f"Unclassified files ({len(unclassified)}): {unclassified}\n"
+            f"Classified files missing from repository ({len(missing_classified)}): "
+            f"{missing_classified}\n"
+            f"Duplicate classifications: {duplicate_classifications}\n"
+            f"Duplicate production registrations: {production_duplicates}"
         )
 
-        missing = sorted(
-            set(expected)
-            - set(actual)
-        )
-
-        unexpected = sorted(
-            set(actual)
-            - set(expected)
-        )
-
-        passed = (
-            actual == expected
-            and len(actual)
-            == EXPECTED_PROJECT_FILE_COUNT
-            and len(expected)
-            == EXPECTED_PROJECT_FILE_COUNT
-        )
-
-        inventory_details = (
-            f"Expected: "
-            f"{EXPECTED_PROJECT_FILE_COUNT}\n"
-            f"Discovered: "
-            f"{len(actual)}\n"
-            f"Registered: "
-            f"{len(expected)}\n"
-            f"Missing from project: "
-            f"{missing}\n"
-            f"Unexpected project files: "
-            f"{unexpected}\n"
-            + "\n".join(
-                actual
+        reasons = []
+        if unclassified:
+            reasons.append(f"unclassified Python files: {unclassified}")
+        if missing_classified:
+            reasons.append(f"registered files missing from repository: {missing_classified}")
+        if duplicate_classifications:
+            reasons.append(f"files classified more than once: {duplicate_classifications}")
+        if duplicate_production := production_duplicates:
+            reasons.append(f"duplicate production registrations: {duplicate_production}")
+        if not category_count_ok:
+            reasons.append(
+                f"category count mismatch: expected {EXPECTED_PROJECT_FILE_COUNT}, "
+                f"found {len(all_registered)}"
             )
-        )
-
-        return self.record(
-            TestResult(
-                "Complete Python project inventory",
-                passed,
-                0 if passed else 1,
-                0.0,
-                inventory_details,
-                reason=(
-                    None
-                    if passed
-                    else (
-                        "Project Python inventory "
-                        "differs from the registered "
-                        "65-file architecture."
-                        + (
-                            f" Missing: "
-                            f"{missing};"
-                            f" Unexpected: "
-                            f"{unexpected}"
-                            if missing
-                            or unexpected
-                            else ""
-                        )
-                    )
-                ),
+        if not actual_count_ok:
+            reasons.append(
+                f"repository count mismatch: expected {EXPECTED_PROJECT_FILE_COUNT}, "
+                f"found {len(actual)}"
             )
-        )
+        if not production_count_ok:
+            reasons.append(
+                f"production registry count changed: expected 101, found {len(REQUIRED_MODULES)}"
+            )
+
+        return self.record(TestResult(
+            "Complete Python repository inventory",
+            passed,
+            0 if passed else 1,
+            0.0,
+            stdout=details,
+            reason="; ".join(reasons) if reasons else None,
+        ))
 
     # ------------------------------------------------------------------
     # PHASE 2 — COMPILATION
@@ -2858,6 +2994,9 @@ class FinalRegression:
             "*.pyc",
         )
 
+        # Recovery snapshots belong under ignored runtime storage, not source.
+        allowed_retained_backups = set()
+
         artifacts: list[
             str
         ] = []
@@ -2874,6 +3013,7 @@ class FinalRegression:
                     pattern
                 )
                 if p.is_file()
+                and p.name not in allowed_retained_backups
             )
 
         # py_compile caches are generated under __pycache__, not project-root

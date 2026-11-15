@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "scope": "private recommendation simulation preview",
+  "host": null,
+  "immutable_image_digest": null,
+  "jurisdiction_review": null,
+  "alert_delivery_receipt": null,
+  "independent_economic_review": null,
+  "minimum_observed_sessions": 20,
+  "public_release_approved": false,
+  "notes": "Placeholders are not evidence. Use source-bound qualification receipts and protected evidence configuration. Do not store credentials here."
+}

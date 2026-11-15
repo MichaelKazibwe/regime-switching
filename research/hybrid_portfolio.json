@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "mode": "RESEARCH_ONLY",
+  "name": "Regime adaptive hybrid",
+  "maximum_asset_weight": 0.25,
+  "minimum_normal_cash": 0.02,
+  "defensive_exposure_ceiling": 0.60,
+  "defensive_volatility_ceiling": 0.07,
+  "stress_exposure_ceiling": 0.40,
+  "stress_volatility_ceiling": 0.05,
+  "minimum_trade_notional": 0.03,
+  "covariance_window": 252,
+  "trend_window": 200,
+  "maximum_source_age_days": 35,
+  "training_sessions": 252,
+  "selection_interval_sessions": 126,
+  "selection_drawdown_limit": 0.06,
+  "selection_objective": "Highest net training CAGR subject to maximum drawdown <=6%; if infeasible, maximize CAGR minus twice absolute maximum drawdown",
+  "candidate_grid": {
+    "growth_model_fraction": [0.75, 1.0],
+    "defensive_model_fraction": [0.0, 0.25],
+    "growth_volatility_ceiling": [0.10, 0.12, 0.15]
+  },
+  "covariance_estimator": "LedoitWolf correlation shrinkage rescaled by historical asset volatilities",
+  "execution": "Decision after completed close; simulated trade at next session adjusted close",
+  "production_activation": false
+}

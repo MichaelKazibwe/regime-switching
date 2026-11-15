@@ -1,0 +1,10 @@
+[Unit]
+Description=Economic shadow handoff after the bounded validation window
+
+[Timer]
+OnCalendar=Tue..Sat *-*-* 00:50:00 UTC
+Persistent=true
+Unit=economic-shadow.service
+
+[Install]
+WantedBy=timers.target

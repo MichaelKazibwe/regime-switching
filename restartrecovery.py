@@ -185,8 +185,8 @@ class RestartRecovery:
                 message="Restart recovery failed.",
                 metadata={
                     "status": "FAILED",
-                    "failed_components": sorted(set(failed_components)),
-                    "errors": dict(errors),
+                    "failed_components": sorted(set(result.failed_components)),
+                    "errors": dict(result.errors),
                 },
             )
 

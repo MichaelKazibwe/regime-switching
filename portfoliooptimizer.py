@@ -103,6 +103,7 @@ from __future__ import annotations
 from typing import Any, Optional
 
 import numpy as np
+import pandas as pd
 
 from blacklitterman import BlackLittermanModel
 from core_constants import (
@@ -112,7 +113,9 @@ from core_constants import (
 )
 from expectedreturnforecaster import ExpectedReturnForecaster
 from macroregime import PortfolioRegimeMapper, Regime
+from positionsizing import ATRPositionSizer, PositionSizeResult
 from riskcontributionanalyzer import RiskBudgetReport
+from riskgovernor import PortfolioRiskGovernor, RiskGovernorAction
 
 
 # ======================================================================
@@ -173,6 +176,10 @@ class PortfolioOptimizer:
     -----------------
     BlackLittermanModel
 
+    Instrument-level position sizing
+    ---------------------------------
+    ATRPositionSizer
+
     Final portfolio construction
     ----------------------------
     PortfolioOptimizer
@@ -181,9 +188,15 @@ class PortfolioOptimizer:
     risk-budget configuration.
     """
 
-    API_VERSION = "2.1.0"
+    API_VERSION = "2.4.0"
     COMPONENT = "PortfolioOptimizer"
-    PHASE = "IV-B.1B"
+    PHASE = "A16"
+
+    PUBLIC_METHODS = (
+        "optimize",
+        "health_check",
+        "summary",
+    )
 
     DEFAULT_BL_TILT_STRENGTH = 0.25
     DEFAULT_BL_TILT_FLOOR = 0.50
@@ -199,6 +212,20 @@ class PortfolioOptimizer:
     EXPOSURE_TOLERANCE = 1e-10
 
     # ==================================================================
+    # RISK UNIT CONTRACT
+    # ==================================================================
+    #
+    # Production covariance is estimated from daily returns. The
+    # covariance matrix therefore remains in native daily units.
+    # Regime volatility targets are annual targets. Annualization is
+    # performed only when risk is consumed for target/diagnostic
+    # purposes; native covariance semantics are not changed.
+    #
+    RISK_FREQUENCY = "daily"
+    PERIODS_PER_YEAR = 252
+    ANNUALIZATION_METHOD = "sqrt_time"
+
+    # ==================================================================
     # CONSTRUCTOR
     # ==================================================================
 
@@ -209,6 +236,10 @@ class PortfolioOptimizer:
         vol_target_engine,
         forecast_engine=None,
         black_litterman=None,
+        atr_position_sizer=None,
+        risk_governor=None,
+        risk_governor_max_risk_contribution_pct: float = 1.0,
+        risk_governor_max_aggregate_tail_loss_pct: float | None = None,
         bl_tilt_strength: float = DEFAULT_BL_TILT_STRENGTH,
         bl_tilt_floor: float = DEFAULT_BL_TILT_FLOOR,
         bl_tilt_cap: float = DEFAULT_BL_TILT_CAP,
@@ -300,6 +331,30 @@ class PortfolioOptimizer:
             else BlackLittermanModel()
         )
 
+        # R3B ATR position sizing is an optional downstream sizing layer.
+        # It never replaces RiskBudgetEngine, PortfolioConstraints, or
+        # VolatilityTargeting.
+        self.atr_position_sizer = (
+            atr_position_sizer
+            if atr_position_sizer is not None
+            else ATRPositionSizer()
+        )
+
+        # R3C portfolio-level risk governance is deliberately downstream
+        # of constraints, volatility targeting, and ATR sizing. A supplied
+        # governor is authoritative. When none is supplied, optimize()
+        # constructs a run-specific governor from the active regime limits
+        # and the existing constraint position ceiling.
+        self.risk_governor = risk_governor
+        self.risk_governor_max_risk_contribution_pct = float(
+            risk_governor_max_risk_contribution_pct
+        )
+        self.risk_governor_max_aggregate_tail_loss_pct = (
+            None
+            if risk_governor_max_aggregate_tail_loss_pct is None
+            else float(risk_governor_max_aggregate_tail_loss_pct)
+        )
+
         self.bl_tilt_strength = float(
             bl_tilt_strength
         )
@@ -345,6 +400,14 @@ class PortfolioOptimizer:
         self.last_bl_multipliers = None
         self.last_bl_tilted_weights = None
         self.last_constraint_result = None
+        self.last_atr_sizing = None
+        self.last_atr_sizing_map = None
+        self.last_atr_sized_weights = None
+        self.last_risk_governor_result = None
+        self.last_governed_weights = None
+        self.last_tail_risk = None
+        self.last_result = None
+        self.last_asset_order = None
 
     # ==================================================================
     # CONFIGURATION VALIDATION
@@ -406,6 +469,48 @@ class PortfolioOptimizer:
             raise PortfolioOptimizerConfigurationError(
                 "tolerance must be positive and finite."
             )
+
+        if (
+            not np.isfinite(
+                self.risk_governor_max_risk_contribution_pct
+            )
+            or self.risk_governor_max_risk_contribution_pct <= 0.0
+        ):
+            raise PortfolioOptimizerConfigurationError(
+                "risk_governor_max_risk_contribution_pct must be "
+                "positive and finite."
+            )
+
+        if self.risk_governor_max_aggregate_tail_loss_pct is not None and (
+            not np.isfinite(self.risk_governor_max_aggregate_tail_loss_pct)
+            or self.risk_governor_max_aggregate_tail_loss_pct <= 0.0
+        ):
+            raise PortfolioOptimizerConfigurationError(
+                "risk_governor_max_aggregate_tail_loss_pct must be "
+                "positive and finite when configured."
+            )
+
+        if self.risk_governor is not None:
+            required_governor_methods = (
+                "govern",
+                "health_check",
+            )
+            missing_governor_methods = [
+                method
+                for method in required_governor_methods
+                if not callable(
+                    getattr(
+                        self.risk_governor,
+                        method,
+                        None,
+                    )
+                )
+            ]
+            if missing_governor_methods:
+                raise PortfolioOptimizerConfigurationError(
+                    "risk_governor is missing required interfaces: "
+                    f"{missing_governor_methods}"
+                )
 
     # ==================================================================
     # REGIME NORMALIZATION
@@ -1421,6 +1526,8 @@ class PortfolioOptimizer:
                     covariance,
                     target_vol,
                     max_leverage=max_leverage,
+                    annualize=True,
+                    periods_per_year=self.PERIODS_PER_YEAR,
                 )
             )
         except Exception as exc:
@@ -1495,6 +1602,430 @@ class PortfolioOptimizer:
         return (
             scaled_weights,
             engine_result,
+        )
+
+    # ==================================================================
+    # R3B ATR POSITION SIZING
+    # ==================================================================
+
+    @staticmethod
+    def _extract_current_prices(
+        prices,
+        asset_order: tuple[str, ...],
+    ) -> dict[str, float]:
+        """
+        Extract one current price per asset.
+
+        Accepted inputs:
+            - mapping: asset -> current price
+            - pandas-like DataFrame: final row indexed by asset columns
+
+        Historical price data remains the responsibility of the data/
+        forecast layer. This method only extracts the latest executable
+        reference price required by position sizing.
+        """
+        if prices is None:
+            raise PortfolioOptimizerCalculationError(
+                "ATR position sizing requires current prices."
+            )
+
+        if hasattr(
+            prices,
+            "columns",
+        ) and hasattr(
+            prices,
+            "iloc",
+        ):
+            try:
+                latest = prices.iloc[-1]
+            except Exception as exc:
+                raise PortfolioOptimizerCalculationError(
+                    "Unable to extract the latest prices for ATR sizing."
+                ) from exc
+
+            current_prices: dict[str, float] = {}
+
+            for asset in asset_order:
+                if asset not in prices.columns:
+                    raise PortfolioOptimizerCalculationError(
+                        f"Current prices are missing asset '{asset}'."
+                    )
+
+                try:
+                    value = float(
+                        latest[asset]
+                    )
+                except (TypeError, ValueError) as exc:
+                    raise PortfolioOptimizerCalculationError(
+                        f"Current price for '{asset}' is not numeric."
+                    ) from exc
+
+                if (
+                    not np.isfinite(value)
+                    or value <= 0.0
+                ):
+                    raise PortfolioOptimizerCalculationError(
+                        f"Current price for '{asset}' must be positive and finite."
+                    )
+
+                current_prices[asset] = value
+
+            return current_prices
+
+        if isinstance(
+            prices,
+            dict,
+        ):
+            current_prices = {}
+
+            for asset in asset_order:
+                if asset not in prices:
+                    raise PortfolioOptimizerCalculationError(
+                        f"Current prices are missing asset '{asset}'."
+                    )
+
+                try:
+                    value = float(
+                        prices[asset]
+                    )
+                except (TypeError, ValueError) as exc:
+                    raise PortfolioOptimizerCalculationError(
+                        f"Current price for '{asset}' is not numeric."
+                    ) from exc
+
+                if (
+                    not np.isfinite(value)
+                    or value <= 0.0
+                ):
+                    raise PortfolioOptimizerCalculationError(
+                        f"Current price for '{asset}' must be positive and finite."
+                    )
+
+                current_prices[asset] = value
+
+            return current_prices
+
+        raise PortfolioOptimizerCalculationError(
+            "ATR position sizing prices must be a mapping or "
+            "a DataFrame-like object."
+        )
+
+    def _apply_atr_position_sizing(
+        self,
+        weights: np.ndarray,
+        asset_order: tuple[str, ...],
+        prices,
+        atr_values,
+        account_equity: float,
+        risk_fraction: float | None = None,
+        stop_multiple: float | None = None,
+        max_position_weight: float | None = None,
+        fractional_shares: bool = False,
+    ) -> tuple[
+        np.ndarray,
+        dict[str, PositionSizeResult],
+    ]:
+        """
+        Apply instrument-level ATR risk caps to target weights.
+
+        ATR sizing is deliberately downstream of portfolio optimization.
+        It can only reduce an already-approved position. It cannot add
+        exposure, change risk budgets, bypass portfolio constraints, or
+        increase leverage.
+
+        The portfolio-level covariance/risk engine therefore remains
+        authoritative for aggregate risk.
+        """
+        if self.atr_position_sizer is None:
+            raise PortfolioOptimizerCalculationError(
+                "ATR position sizer is not configured."
+            )
+
+        weights = np.asarray(
+            weights,
+            dtype=float,
+        ).reshape(-1)
+
+        if weights.size != len(asset_order):
+            raise PortfolioOptimizerCalculationError(
+                "ATR sizing weights and asset order have different dimensions."
+            )
+
+        if not np.isfinite(
+            weights
+        ).all():
+            raise PortfolioOptimizerCalculationError(
+                "ATR sizing received non-finite weights."
+            )
+
+        if np.any(
+            weights < -self.tolerance
+        ):
+            raise PortfolioOptimizerCalculationError(
+                "ATR sizing received negative weights."
+            )
+
+        if not isinstance(
+            atr_values,
+            dict,
+        ):
+            try:
+                atr_values = dict(
+                    atr_values
+                )
+            except (TypeError, ValueError) as exc:
+                raise PortfolioOptimizerCalculationError(
+                    "atr_values must be a mapping of asset to ATR."
+                ) from exc
+
+        current_prices = self._extract_current_prices(
+            prices,
+            asset_order,
+        )
+
+        target_weight_map = {
+            asset: float(
+                weights[index]
+            )
+            for index, asset
+            in enumerate(
+                asset_order
+            )
+        }
+
+        try:
+            results = (
+                self.atr_position_sizer.size_portfolio(
+                    account_equity=account_equity,
+                    target_weights=target_weight_map,
+                    prices=current_prices,
+                    atrs=atr_values,
+                    risk_fraction=risk_fraction,
+                    stop_multiple=stop_multiple,
+                    max_position_weight=max_position_weight,
+                    fractional_shares=fractional_shares,
+                )
+            )
+        except Exception as exc:
+            raise PortfolioOptimizerCalculationError(
+                "ATR position sizing failed: "
+                f"{exc}"
+            ) from exc
+
+        if set(results) != set(asset_order):
+            raise PortfolioOptimizerCalculationError(
+                "ATR position sizer returned an unexpected asset set."
+            )
+
+        sized_weights = np.asarray(
+            [
+                results[asset].sized_weight
+                for asset in asset_order
+            ],
+            dtype=float,
+        )
+
+        if not np.isfinite(
+            sized_weights
+        ).all():
+            raise PortfolioOptimizerCalculationError(
+                "ATR position sizing produced non-finite weights."
+            )
+
+        if np.any(
+            sized_weights < -self.tolerance
+        ):
+            raise PortfolioOptimizerCalculationError(
+                "ATR position sizing produced negative weights."
+            )
+
+        # A downstream sizing layer may only reduce long-only exposure.
+        if np.any(
+            sized_weights
+            > weights
+            + self.tolerance
+        ):
+            raise PortfolioOptimizerCalculationError(
+                "ATR position sizing increased an approved portfolio position."
+            )
+
+        return (
+            np.maximum(
+                sized_weights,
+                0.0,
+            ),
+            dict(results),
+        )
+
+    # ==================================================================
+    # R3C PORTFOLIO RISK GOVERNANCE
+    # ==================================================================
+
+    def _resolve_risk_governor(
+        self,
+        target_vol: float,
+        max_leverage: float,
+    ) -> PortfolioRiskGovernor:
+        """
+        Resolve the authoritative portfolio-level risk governor.
+
+        A supplied governor is reused unchanged. Otherwise a run-specific
+        governor is constructed from the active regime volatility and
+        leverage limits plus the existing PortfolioConstraints position
+        ceiling. This keeps R3C policy explicit without duplicating a second
+        static regime configuration inside PortfolioOptimizer.
+        """
+        if self.risk_governor is not None:
+            return self.risk_governor
+
+        max_position_weight = getattr(
+            self.constraints,
+            "MAX_WEIGHT",
+            1.0,
+        )
+
+        try:
+            max_position_weight = float(
+                max_position_weight
+            )
+        except (TypeError, ValueError) as exc:
+            raise PortfolioOptimizerConfigurationError(
+                "Unable to resolve the PortfolioConstraints maximum "
+                "position weight for the Risk Governor."
+            ) from exc
+
+        if (
+            not np.isfinite(max_position_weight)
+            or max_position_weight <= 0.0
+        ):
+            raise PortfolioOptimizerConfigurationError(
+                "PortfolioConstraints maximum position weight must be "
+                "positive and finite."
+            )
+
+        try:
+            return PortfolioRiskGovernor(
+                max_annual_volatility=float(target_vol),
+                max_leverage=float(max_leverage),
+                max_position_weight=max_position_weight,
+                max_risk_contribution_pct=(
+                    self.risk_governor_max_risk_contribution_pct
+                ),
+                max_aggregate_tail_loss_pct=(
+                    self.risk_governor_max_aggregate_tail_loss_pct
+                ),
+                tolerance=self.tolerance,
+                periods_per_year=self.PERIODS_PER_YEAR,
+            )
+        except (TypeError, ValueError) as exc:
+            raise PortfolioOptimizerConfigurationError(
+                "Unable to construct the production Portfolio Risk Governor."
+            ) from exc
+
+    def _apply_risk_governor(
+        self,
+        weights: np.ndarray,
+        covariance: np.ndarray,
+        target_vol: float,
+        max_leverage: float,
+        tail_risk: Any = None,
+    ) -> tuple[np.ndarray, Any]:
+        """
+        Apply the final portfolio-level Risk Governor.
+
+        The governor is strictly downstream of ATR sizing and may only
+        preserve or reduce approved exposure. A rejected portfolio cannot
+        cross the optimizer boundary as a successful result.
+        """
+        governor = self._resolve_risk_governor(
+            target_vol,
+            max_leverage,
+        )
+
+        try:
+            result = governor.govern(
+                weights,
+                covariance,
+                tail_risk=tail_risk,
+            )
+        except Exception as exc:
+            raise PortfolioOptimizerCalculationError(
+                "Portfolio Risk Governor failed: "
+                f"{exc}"
+            ) from exc
+
+        if result is None:
+            raise PortfolioOptimizerCalculationError(
+                "Portfolio Risk Governor returned None."
+            )
+
+        if not bool(
+            getattr(result, "approved", False)
+        ):
+            action = getattr(
+                result,
+                "action",
+                RiskGovernorAction.REJECT.value,
+            )
+            breaches = getattr(
+                result,
+                "breaches",
+                (),
+            )
+            reasons = getattr(
+                result,
+                "reasons",
+                (),
+            )
+
+            raise PortfolioOptimizerCalculationError(
+                "Portfolio Risk Governor rejected the candidate. "
+                f"action={action}; breaches={list(breaches)}; "
+                f"reasons={list(reasons)}."
+            )
+
+        governed_weights = np.asarray(
+            result.approved_weights,
+            dtype=float,
+        ).reshape(-1)
+
+        if governed_weights.shape != weights.shape:
+            raise PortfolioOptimizerCalculationError(
+                "Portfolio Risk Governor returned weights with an "
+                "unexpected dimension."
+            )
+
+        if not np.isfinite(
+            governed_weights
+        ).all():
+            raise PortfolioOptimizerCalculationError(
+                "Portfolio Risk Governor returned non-finite weights."
+            )
+
+        if np.any(
+            governed_weights < -self.tolerance
+        ):
+            raise PortfolioOptimizerCalculationError(
+                "Portfolio Risk Governor returned negative weights."
+            )
+
+        if np.any(
+            governed_weights
+            > weights
+            + self.tolerance
+        ):
+            raise PortfolioOptimizerCalculationError(
+                "Portfolio Risk Governor increased approved exposure."
+            )
+
+        governed_weights = np.maximum(
+            governed_weights,
+            0.0,
+        )
+
+        return (
+            governed_weights,
+            result,
         )
 
     # ==================================================================
@@ -1801,15 +2332,41 @@ class PortfolioOptimizer:
             "net_exposure"
         ]
 
-        volatility_error = (
+        # ``final_volatility`` remains in native covariance units for
+        # backward compatibility. Regime targets are annual, therefore
+        # all target comparisons use the explicitly annualized value.
+        annualization_factor = float(
+            np.sqrt(
+                self.PERIODS_PER_YEAR
+            )
+        )
+
+        final_variance = float(
+            max(
+                final_volatility * final_volatility,
+                0.0,
+            )
+        )
+
+        final_volatility_annualized = float(
             final_volatility
+            * annualization_factor
+        )
+
+        final_variance_annualized = float(
+            final_variance
+            * self.PERIODS_PER_YEAR
+        )
+
+        volatility_error = (
+            final_volatility_annualized
             - target_vol
         )
 
         volatility_shortfall = max(
             0.0,
             target_vol
-            - final_volatility,
+            - final_volatility_annualized,
         )
 
         diagnostics: dict[str, Any] = {
@@ -1819,12 +2376,39 @@ class PortfolioOptimizer:
                 else "CALCULATED"
             ),
             "engine_result": engine_result,
+            "risk_frequency": self.RISK_FREQUENCY,
+            "covariance_frequency": self.RISK_FREQUENCY,
+            "periods_per_year": int(
+                self.PERIODS_PER_YEAR
+            ),
+            "annualization_method": (
+                self.ANNUALIZATION_METHOD
+            ),
             "original_volatility": None,
+            "portfolio_variance_native": float(
+                final_variance
+            ),
+            "portfolio_volatility_native": float(
+                final_volatility
+            ),
+            "portfolio_variance_annualized": float(
+                final_variance_annualized
+            ),
+            "portfolio_volatility_annualized": float(
+                final_volatility_annualized
+            ),
             "target_volatility": float(
                 target_vol
             ),
+            "target_volatility_frequency": "annual",
             "final_volatility": float(
                 final_volatility
+            ),
+            "final_volatility_frequency": (
+                self.RISK_FREQUENCY
+            ),
+            "final_volatility_annualized": float(
+                final_volatility_annualized
             ),
             "volatility_error": float(
                 volatility_error
@@ -1834,7 +2418,7 @@ class PortfolioOptimizer:
             ),
             "target_achieved": bool(
                 np.isclose(
-                    final_volatility,
+                    final_volatility_annualized,
                     target_vol,
                     rtol=1e-6,
                     atol=1e-8,
@@ -2124,6 +2708,13 @@ class PortfolioOptimizer:
         regime,
         asset_order,
         prices=None,
+        atr_values=None,
+        account_equity=None,
+        atr_risk_fraction=None,
+        atr_stop_multiple=None,
+        atr_max_position_weight=None,
+        atr_fractional_shares=False,
+        tail_risk=None,
     ) -> dict[str, Any]:
         """
         Execute the complete production portfolio optimization pipeline.
@@ -2296,6 +2887,122 @@ class PortfolioOptimizer:
         )
 
         # --------------------------------------------------------------
+        # R3B ATR POSITION SIZING
+        # --------------------------------------------------------------
+
+        atr_sizing_results = None
+        atr_sized_weights = scaled_weights.copy()
+
+        if atr_values is not None:
+            if account_equity is None:
+                raise PortfolioOptimizerCalculationError(
+                    "account_equity is required when atr_values are supplied."
+                )
+
+            (
+                atr_sized_weights,
+                atr_sizing_results,
+            ) = self._apply_atr_position_sizing(
+                scaled_weights,
+                asset_order,
+                prices,
+                atr_values,
+                account_equity,
+                risk_fraction=atr_risk_fraction,
+                stop_multiple=atr_stop_multiple,
+                max_position_weight=atr_max_position_weight,
+                fractional_shares=atr_fractional_shares,
+            )
+
+        self.last_atr_sizing = (
+            None
+            if atr_sizing_results is None
+            else dict(
+                atr_sizing_results
+            )
+        )
+
+        self.last_atr_sized_weights = (
+            atr_sized_weights.copy()
+        )
+
+        self.last_atr_sizing_map = (
+            None
+            if atr_sizing_results is None
+            else {
+                asset: {
+                    "target_weight": float(
+                        atr_sizing_results[asset].target_weight
+                    ),
+                    "sized_weight": float(
+                        atr_sizing_results[asset].sized_weight
+                    ),
+                    "max_atr_weight": float(
+                        atr_sizing_results[asset].max_atr_weight
+                    ),
+                    "price": float(
+                        atr_sizing_results[asset].price
+                    ),
+                    "atr": float(
+                        atr_sizing_results[asset].atr
+                    ),
+                    "stop_distance": float(
+                        atr_sizing_results[asset].stop_distance
+                    ),
+                    "risk_fraction": float(
+                        atr_sizing_results[asset].risk_fraction
+                    ),
+                    "risk_capital": float(
+                        atr_sizing_results[asset].risk_capital
+                    ),
+                    "shares": float(
+                        atr_sizing_results[asset].shares
+                    ),
+                    "position_value": float(
+                        atr_sizing_results[asset].position_value
+                    ),
+                    "estimated_stop_loss": float(
+                        atr_sizing_results[asset].estimated_stop_loss
+                    ),
+                    "capped_by_atr": bool(
+                        atr_sizing_results[asset].capped_by_atr
+                    ),
+                }
+                for asset in asset_order
+            }
+        )
+
+        # Cap oversized candidates before governance. This is a hard
+        # feasibility safeguard, not a replacement for Risk Governor
+        # checks: the governor still evaluates the capped candidate.
+        (
+            risk_governor_input_weights,
+            pre_governor_leverage_binding,
+        ) = self._enforce_leverage_backstop(
+            atr_sized_weights,
+            max_leverage,
+        )
+
+        # --------------------------------------------------------------
+        # R3C PORTFOLIO RISK GOVERNOR
+        # --------------------------------------------------------------
+
+        (
+            governed_weights,
+            risk_governor_result,
+        ) = self._apply_risk_governor(
+            risk_governor_input_weights,
+            covariance,
+            target_vol,
+            max_leverage,
+            tail_risk=tail_risk,
+        )
+
+        self.last_risk_governor_result = risk_governor_result
+        self.last_governed_weights = governed_weights.copy()
+        self.last_tail_risk = tail_risk
+
+        # --------------------------------------------------------------
         # LEVERAGE BACKSTOP
         # --------------------------------------------------------------
 
@@ -2303,8 +3010,11 @@ class PortfolioOptimizer:
             final_weights,
             leverage_backstop_binding,
         ) = self._enforce_leverage_backstop(
-            scaled_weights,
+            governed_weights,
             max_leverage,
+        )
+        leverage_backstop_binding = bool(
+            leverage_backstop_binding or pre_governor_leverage_binding
         )
 
         # --------------------------------------------------------------
@@ -2429,6 +3139,63 @@ class PortfolioOptimizer:
             )
 
         # --------------------------------------------------------------
+        # R3C RISK GOVERNOR DIAGNOSTICS
+        # --------------------------------------------------------------
+
+        if risk_governor_result is not None:
+            if hasattr(
+                risk_governor_result,
+                "to_dict",
+            ):
+                risk_governance = risk_governor_result.to_dict()
+            else:
+                risk_governance = dict(
+                    risk_governor_result
+                )
+
+            volatility_diagnostics[
+                "risk_governance"
+            ] = risk_governance
+
+            volatility_diagnostics[
+                "risk_governance_action"
+            ] = str(
+                getattr(
+                    risk_governor_result,
+                    "action",
+                    RiskGovernorAction.PASS.value,
+                )
+            )
+
+            volatility_diagnostics[
+                "risk_governance_scale"
+            ] = float(
+                getattr(
+                    risk_governor_result,
+                    "scale",
+                    1.0,
+                )
+            )
+
+            volatility_diagnostics[
+                "risk_governance_tail_risk_available"
+            ] = bool(
+                getattr(
+                    risk_governor_result,
+                    "tail_risk_available",
+                    False,
+                )
+            )
+
+            volatility_diagnostics[
+                "risk_governance_governed_tail_loss_pct"
+            ] = getattr(
+                risk_governor_result,
+                "governed_aggregate_tail_loss_pct",
+                None,
+            )
+
+        # --------------------------------------------------------------
         # RISK REPORT
         # --------------------------------------------------------------
 
@@ -2547,7 +3314,7 @@ class PortfolioOptimizer:
         # FINAL PUBLIC CONTRACT
         # --------------------------------------------------------------
 
-        return {
+        result = {
             "weights": final_weights.copy(),
 
             "cash": float(
@@ -2645,6 +3412,98 @@ class PortfolioOptimizer:
             "weight_map": dict(
                 weight_map
             ),
+
+            "atr_sizing": (
+                None
+                if self.last_atr_sizing_map is None
+                else dict(
+                    self.last_atr_sizing_map
+                )
+            ),
+
+            "atr_sized_weights": (
+                atr_sized_weights.copy()
+            ),
+
+            "atr_sizing_enabled": bool(
+                atr_sizing_results is not None
+            ),
+
+            "risk_governance": (
+                None
+                if risk_governor_result is None
+                else (
+                    risk_governor_result.to_dict()
+                    if hasattr(
+                        risk_governor_result,
+                        "to_dict",
+                    )
+                    else dict(
+                        risk_governor_result
+                    )
+                )
+            ),
+
+            "risk_governed_weights": (
+                governed_weights.copy()
+            ),
+
+            "risk_governance_enabled": True,
+            "tail_risk_governance_enabled": bool(
+                risk_governor_result is not None
+                and getattr(
+                    risk_governor_result,
+                    "tail_risk_available",
+                    False,
+                )
+                and getattr(
+                    risk_governor_result,
+                    "max_aggregate_tail_loss_pct",
+                    None,
+                )
+                is not None
+            ),
+            "tail_risk_supplied": bool(tail_risk is not None),
+            "tail_risk_aggregate_loss_pct": (
+                None
+                if risk_governor_result is None
+                else getattr(
+                    risk_governor_result,
+                    "aggregate_tail_loss_pct",
+                    None,
+                )
+            ),
+        }
+
+        # Successful production state is committed only after the complete
+        # result has passed every validation boundary above.
+        self.last_result = dict(result)
+        self.last_asset_order = tuple(asset_order)
+
+        return result
+
+    # ==================================================================
+    # SUMMARY
+    # ==================================================================
+
+    def summary(self) -> dict[str, Any]:
+        """Return deterministic state for the most recent successful run."""
+
+        return {
+            "component": self.COMPONENT,
+            "api_version": self.API_VERSION,
+            "phase": self.PHASE,
+            "last_result_available": self.last_result is not None,
+            "last_regime": self.last_regime,
+            "asset_count": (
+                None
+                if self.last_asset_order is None
+                else len(self.last_asset_order)
+            ),
+            "gross_exposure": self.last_gross_exposure,
+            "net_exposure": self.last_net_exposure,
+            "cash": self.last_cash,
+            "financing": self.last_financing,
         }
 
     # ==================================================================
@@ -2709,6 +3568,28 @@ class PortfolioOptimizer:
                     )
                 ),
 
+                "atr_position_sizing": (
+                    self.atr_position_sizer is None
+                    or hasattr(
+                        self.atr_position_sizer,
+                        "size_portfolio",
+                    )
+                ),
+
+                "risk_governor": (
+                    self.risk_governor is None
+                    or (
+                        hasattr(
+                            self.risk_governor,
+                            "govern",
+                        )
+                        and hasattr(
+                            self.risk_governor,
+                            "health_check",
+                        )
+                    )
+                ),
+
                 "configuration": True,
             }
 
@@ -2751,6 +3632,8 @@ def build_portfolio_optimizer(
     vol_target_engine,
     forecast_engine=None,
     black_litterman=None,
+    atr_position_sizer=None,
+    risk_governor=None,
     **kwargs,
 ) -> PortfolioOptimizer:
     """
@@ -2763,6 +3646,8 @@ def build_portfolio_optimizer(
         vol_target_engine=vol_target_engine,
         forecast_engine=forecast_engine,
         black_litterman=black_litterman,
+        atr_position_sizer=atr_position_sizer,
+        risk_governor=risk_governor,
         **kwargs,
     )
 
@@ -2827,6 +3712,8 @@ def test_portfolio_optimizer_exposes_production_volatility_targeting() -> None:
             covariance,
             target_vol,
             max_leverage=None,
+            annualize=False,
+            periods_per_year=252,
         ):
             return np.asarray(weights, dtype=float).copy()
 
@@ -2969,6 +3856,271 @@ def test_portfolio_optimizer_exposure_accounting() -> None:
 
 
 # ======================================================================
+# R3B ATR POSITION-SIZING INTEGRATION SELF-TEST
+# ======================================================================
+
+
+def test_portfolio_optimizer_atr_position_sizing_integration() -> None:
+    """
+    Verify that ATR sizing is a downstream exposure cap.
+
+    The test intentionally uses a deterministic sizer configuration and
+    confirms that:
+        1. existing optimizer construction remains valid;
+        2. ATR sizing reduces only positions that breach the ATR cap;
+        3. no position is increased;
+        4. the optimizer exposes auditable sizing diagnostics.
+    """
+
+    class _TestRiskBudgetEngine:
+        def get_target_budgets(
+            self,
+            regime,
+            assets,
+        ):
+            return {
+                asset: 1.0
+                for asset in assets
+            }
+
+        def optimize(
+            self,
+            covariance,
+            risk_budget,
+        ):
+            values = np.asarray(
+                risk_budget,
+                dtype=float,
+            )
+            return values / values.sum()
+
+    class _TestConstraints:
+        def enforce(
+            self,
+            weights,
+        ):
+            values = np.asarray(
+                weights,
+                dtype=float,
+            )
+            return {
+                "weights": values.copy(),
+                "cash": 0.0,
+            }
+
+    class _TestVolatilityTargeting:
+        def scale_weights(
+            self,
+            weights,
+            covariance,
+            target_vol,
+            max_leverage=None,
+            annualize=False,
+            periods_per_year=252,
+        ):
+            return np.asarray(
+                weights,
+                dtype=float,
+            ).copy()
+
+    class _TestForecastEngine:
+        def forecast(self, prices):
+            return pd.Series(
+                [0.0, 0.0],
+                index=prices.columns,
+                dtype=float,
+            )
+
+    class _TestBlackLitterman:
+        def posterior_returns(
+            self,
+            covariance,
+            market_weights,
+            forecast_values,
+        ):
+            return np.zeros(
+                len(market_weights),
+                dtype=float,
+            )
+
+    optimizer = PortfolioOptimizer(
+        risk_budget_engine=_TestRiskBudgetEngine(),
+        constraints=_TestConstraints(),
+        vol_target_engine=_TestVolatilityTargeting(),
+        forecast_engine=_TestForecastEngine(),
+        black_litterman=_TestBlackLitterman(),
+    )
+
+    covariance = np.eye(
+        2,
+        dtype=float,
+    )
+
+    result = optimizer.optimize(
+        covariance=covariance,
+        regime="neutral",
+        asset_order=("SPY", "TLT"),
+        prices=pd.DataFrame(
+            {
+                "SPY": [100.0],
+                "TLT": [100.0],
+            }
+        ),
+        atr_values={
+            "SPY": 10.0,
+            "TLT": 1.0,
+        },
+        account_equity=100_000.0,
+        atr_risk_fraction=0.01,
+        atr_stop_multiple=2.0,
+        atr_fractional_shares=True,
+    )
+
+    assert result[
+        "atr_sizing_enabled"
+    ] is True
+
+    # Equal target weights are 50/50. SPY ATR cap is:
+    # 1,000 / (10 * 2) = 50 shares = 5,000 = 5%.
+    # TLT ATR cap is 50%, so its 50% target remains unchanged.
+    assert np.isclose(
+        result["atr_sizing"]["SPY"]["sized_weight"],
+        0.05,
+    )
+
+    assert np.isclose(
+        result["atr_sizing"]["TLT"]["sized_weight"],
+        0.50,
+    )
+
+    assert result[
+        "atr_sizing"]["SPY"]["capped_by_atr"
+    ] is True
+
+    assert result[
+        "atr_sizing"]["TLT"]["capped_by_atr"
+    ] is False
+
+    # ATR sizing is upstream of the R3C Risk Governor and final leverage
+    # backstop. Therefore the final production weights may only preserve
+    # or reduce the ATR-sized exposure.
+    assert np.all(
+        result["weights"]
+        <= result["atr_sized_weights"]
+        + 1e-8
+    )
+
+
+# ======================================================================
+# R3C PORTFOLIO RISK GOVERNOR INTEGRATION SELF-TEST
+# ======================================================================
+
+
+def test_portfolio_optimizer_risk_governor_integration() -> None:
+    """
+    Verify that R3C governance is downstream of ATR sizing and can only
+    preserve or reduce the approved portfolio.
+    """
+
+    class _TestRiskBudgetEngine:
+        def get_target_budgets(self, regime, assets):
+            return {asset: 1.0 for asset in assets}
+
+        def optimize(self, covariance, risk_budget):
+            values = np.asarray(risk_budget, dtype=float)
+            return values / values.sum()
+
+    class _TestConstraints:
+        MAX_WEIGHT = 1.0
+
+        def enforce(self, weights):
+            values = np.asarray(weights, dtype=float)
+            return {
+                "weights": values.copy(),
+                "cash": 0.0,
+            }
+
+    class _TestVolatilityTargeting:
+        def scale_weights(
+            self,
+            weights,
+            covariance,
+            target_vol,
+            max_leverage=None,
+            annualize=False,
+            periods_per_year=252,
+        ):
+            return np.asarray(weights, dtype=float).copy()
+
+    governor = PortfolioRiskGovernor(
+        max_annual_volatility=0.10,
+        max_leverage=1.00,
+        max_position_weight=1.00,
+        max_risk_contribution_pct=1.00,
+        tolerance=1e-10,
+        periods_per_year=252,
+    )
+
+    optimizer = PortfolioOptimizer(
+        risk_budget_engine=_TestRiskBudgetEngine(),
+        constraints=_TestConstraints(),
+        vol_target_engine=_TestVolatilityTargeting(),
+        risk_governor=governor,
+    )
+
+    result = optimizer.optimize(
+        covariance=np.diag([0.0004, 0.0004]),
+        regime="neutral",
+        asset_order=("SPY", "TLT"),
+    )
+
+    governance = result["risk_governance"]
+
+    if governance["action"] != RiskGovernorAction.REDUCE.value:
+        raise AssertionError(
+            "R3C integration should produce a REDUCE decision "
+            "for the deterministic high-volatility candidate."
+        )
+
+    if governance["approved"] is not True:
+        raise AssertionError(
+            "A successful scalar Risk Governor reduction must be approved."
+        )
+
+    governed = np.asarray(
+        result["risk_governed_weights"],
+        dtype=float,
+    )
+
+    original = np.asarray(
+        result["atr_sized_weights"],
+        dtype=float,
+    )
+
+    if not np.all(
+        governed <= original + 1e-10
+    ):
+        raise AssertionError(
+            "Risk Governor increased exposure during integration."
+        )
+
+    if not np.isclose(
+        governance["governed_annualized_volatility"],
+        0.10,
+        atol=1e-10,
+    ):
+        raise AssertionError(
+            "Risk Governor did not reduce the deterministic portfolio "
+            "to the configured volatility ceiling."
+        )
+
+    if result["risk_governance_enabled"] is not True:
+        raise AssertionError(
+            "Risk governance must be enabled in production optimizer output."
+        )
+
+
+# ======================================================================
 # MAIN
 # ======================================================================
 
@@ -2977,6 +4129,8 @@ if __name__ == "__main__":
     test_portfolio_optimizer_configuration()
     test_portfolio_optimizer_exposes_production_volatility_targeting()
     test_portfolio_optimizer_exposure_accounting()
+    test_portfolio_optimizer_atr_position_sizing_integration()
+    test_portfolio_optimizer_risk_governor_integration()
 
     print(
         "PortfolioOptimizer Phase IV-B.1B tests passed."

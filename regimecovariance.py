@@ -267,16 +267,9 @@ class RegimeCovariance:
             )
 
         regimes = regimes.map(
-            lambda value: (
-                value.value
-                if hasattr(
-                    value,
-                    "value",
-                )
-                else str(
-                    value
-                ).strip().lower()
-            )
+            lambda value: str(
+                value.value if hasattr(value, "value") else value
+            ).strip().lower()
         )
 
         return regimes
@@ -290,15 +283,14 @@ class RegimeCovariance:
         Validate that returns and regime observations are aligned.
         """
 
-        if len(
-            returns
-        ) != len(
-            regimes
-        ):
-
+        if len(returns) != len(regimes):
             raise ValueError(
-                "Returns and regimes "
-                "must have identical length."
+                "Returns and regimes must have identical length."
+            )
+
+        if not returns.index.equals(regimes.index):
+            raise ValueError(
+                "Returns and regimes must have identical index."
             )
 
     def _select_regime(
@@ -313,16 +305,9 @@ class RegimeCovariance:
         'EXPANSION' all resolve to the same internal regime.
         """
 
-        canonical_regime = (
-            regime.value
-            if hasattr(
-                regime,
-                "value",
-            )
-            else str(
-                regime
-            ).strip().lower()
-        )
+        canonical_regime = str(
+            regime.value if hasattr(regime, "value") else regime
+        ).strip().lower()
 
         mask = (
             self.regimes
@@ -355,22 +340,21 @@ class RegimeCovariance:
         regimes,
     ):
 
-        returns = (
-            self._ensure_dataframe(
-                returns
-            )
-        )
+        returns = self._ensure_dataframe(returns)
 
-        regimes = (
-            self._ensure_series(
-                regimes
-            )
-        )
+        # Lists represent positional observations. Attach them to the
+        # returns index before canonicalization and index validation.
+        if isinstance(regimes, list):
+            if len(regimes) != len(returns):
+                raise ValueError(
+                    "Returns and regimes must have identical length."
+                )
 
-        self._validate_lengths(
-            returns,
-            regimes,
-        )
+            regimes = pd.Series(regimes, index=returns.index)
+
+        regimes = self._ensure_series(regimes)
+
+        self._validate_lengths(returns, regimes)
 
         self.returns = (
             returns.copy()

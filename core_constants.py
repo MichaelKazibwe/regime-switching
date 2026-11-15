@@ -5,6 +5,8 @@ from pydantic_settings import (
 
 import numpy as np
 
+from assetuniverse import DIVERSIFIED_ASSETS, PRODUCTION_ASSETS
+
 
 # ============================================================
 # SETTINGS
@@ -54,34 +56,9 @@ BENCHMARK = "SPY"
 # STRATEGIC ASSET UNIVERSE
 # ============================================================
 
-DEFAULT_ASSETS = [
-
-    # US EQUITIES
-    "SPY",
-    "QQQ",
-    "IWM",
-
-    # INTERNATIONAL EQUITIES
-    "VEA",
-    "VWO",
-
-    # GOVERNMENT BONDS
-    "TLT",
-    "IEF",
-    "SHY",
-
-    # CREDIT
-    "LQD",
-    "HYG",
-
-    # REAL ASSETS
-    "GLD",
-    "SLV",
-    "DBC",
-
-    # REAL ESTATE
-    "VNQ"
-]
+# AssetUniverse owns the order; avoid maintaining independent ticker lists.
+DEFAULT_ASSETS = list(PRODUCTION_ASSETS)
+DIVERSIFIED_RESEARCH_ASSETS = list(DIVERSIFIED_ASSETS)
 
 
 # ============================================================

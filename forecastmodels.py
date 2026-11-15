@@ -1,795 +1,1309 @@
+"""
+================================================================
+FORECAST MODELS
+
+Institutional signal-generation layer.
+
+Provides three deterministic forecast signals:
+
+    1. Momentum
+    2. Trend
+    3. Mean reversion
+
+A forecast signal is NOT an expected return.
+
+This module therefore guarantees the integrity of the raw signal
+outputs while leaving economic calibration to the next layer.
+
+Production invariants
+---------------------
+
+Every successful forecast:
+
+    * is a pandas Series
+    * contains exactly one value per asset
+    * preserves the input asset order
+    * contains no NaN values
+    * contains no infinite values
+    * contains only numeric values
+    * does not mutate the caller's price data
+
+Signal definitions
+------------------
+
+Momentum:
+
+    P_t / P_(t-L) - 1
+
+Trend:
+
+    SMA_short / SMA_long - 1
+
+Mean reversion:
+
+    -z_score(return)
+
+================================================================
+"""
+
 from __future__ import annotations
+
+from typing import Any
 
 import numpy as np
 import pandas as pd
 
 
-# ======================================================================
-# FORECAST MODEL VALIDATION
-# ======================================================================
+# ============================================================
+# SIGNAL VALIDATION
+# ============================================================
 
 
-def _validate_price_history(
-    prices: pd.DataFrame,
-) -> pd.DataFrame:
+class ForecastSignalValidator:
     """
-    Validate and normalize price-history input.
+    Central validation boundary for forecast signals.
 
-    Expected structure
-    ------------------
-    index:
-        Time observations.
-
-    columns:
-        Asset tickers.
-
-    Returns
-    -------
-    pandas.DataFrame
-        A validated, numeric, defensive copy of the input.
-
-    Notes
-    -----
-    This function deliberately does not mutate the caller's DataFrame.
+    All forecast components should pass their output through this
+    validator before returning it to the orchestration layer.
     """
 
-    if not isinstance(
-        prices,
-        pd.DataFrame,
-    ):
-        raise TypeError(
-            "Prices must be provided as a pandas DataFrame."
+    @staticmethod
+    def validate_prices(
+        prices: pd.DataFrame,
+    ) -> pd.DataFrame:
+        """
+        Validate and defensively copy price history.
+        """
+
+        if not isinstance(
+            prices,
+            pd.DataFrame,
+        ):
+            raise TypeError(
+                "Prices must be a pandas DataFrame."
+            )
+
+        if prices.empty:
+            raise ValueError(
+                "Prices cannot be empty."
+            )
+
+        if prices.shape[1] == 0:
+            raise ValueError(
+                "Prices must contain at least one asset."
+            )
+
+        if prices.columns.duplicated().any():
+            duplicated = (
+                prices.columns[
+                    prices.columns.duplicated()
+                ]
+                .tolist()
+            )
+
+            raise ValueError(
+                "Prices contain duplicated asset "
+                f"columns: {duplicated}."
+            )
+
+        if not prices.index.is_monotonic_increasing:
+            raise ValueError(
+                "Price index must be monotonically increasing."
+            )
+
+        numeric = prices.apply(
+            pd.to_numeric,
+            errors="coerce",
         )
 
-    if prices.empty:
-        raise ValueError(
-            "Price history cannot be empty."
+        values = numeric.to_numpy(
+            dtype=float
         )
 
-    if prices.shape[1] == 0:
-        raise ValueError(
-            "Price history must contain at least one asset."
-        )
+        if not np.isfinite(
+            values
+        ).all():
+            raise ValueError(
+                "Prices contain non-finite values."
+            )
 
-    if prices.columns.has_duplicates:
-        duplicated = (
-            prices.columns[
-                prices.columns.duplicated()
-            ]
-            .tolist()
-        )
+        if (
+            values <= 0.0
+        ).any():
+            raise ValueError(
+                "Prices must contain strictly positive values."
+            )
 
-        raise ValueError(
-            "Price history contains duplicated asset columns: "
-            f"{duplicated}."
-        )
+        return numeric.copy()
 
-    if not prices.index.is_monotonic_increasing:
-        raise ValueError(
-            "Price history index must be monotonically increasing."
-        )
+    @staticmethod
+    def validate_signal(
+        signal: Any,
+        asset_index: pd.Index,
+        signal_name: str,
+    ) -> pd.Series:
+        """
+        Validate a completed forecast signal.
 
-    if prices.index.has_duplicates:
-        raise ValueError(
-            "Price history index cannot contain duplicate observations."
-        )
+        The returned Series is guaranteed to have the canonical
+        asset index and ordering.
+        """
 
-    numeric = prices.apply(
-        pd.to_numeric,
-        errors="coerce",
-    )
+        if not isinstance(
+            asset_index,
+            pd.Index,
+        ):
+            asset_index = pd.Index(
+                asset_index
+            )
 
-    values = numeric.to_numpy(
-        dtype=float
-    )
+        if len(asset_index) == 0:
+            raise ValueError(
+                "Signal asset index cannot be empty."
+            )
 
-    if values.size == 0:
-        raise ValueError(
-            "Price history contains no observations."
-        )
+        if asset_index.has_duplicates:
+            raise ValueError(
+                "Signal asset index contains duplicate assets."
+            )
 
-    if not np.isfinite(
-        values
-    ).all():
-        raise ValueError(
-            "Price history contains non-finite values."
-        )
+        # ----------------------------------------------------
+        # Convert to Series
+        # ----------------------------------------------------
 
-    if (
-        numeric <= 0.0
-    ).any().any():
-        raise ValueError(
-            "Price history must contain strictly positive prices."
-        )
+        if isinstance(
+            signal,
+            pd.Series,
+        ):
+            result = signal.copy()
 
-    return numeric.copy()
+        else:
+            try:
+                values = np.asarray(
+                    signal,
+                    dtype=float,
+                ).reshape(-1)
 
+            except (
+                TypeError,
+                ValueError,
+            ) as exc:
 
-def _validate_asset_index(
-    asset_index: pd.Index,
-) -> pd.Index:
-    """
-    Validate the asset index used by forecast outputs.
-    """
+                raise ValueError(
+                    f"{signal_name} signal could not be "
+                    "converted to numeric values."
+                ) from exc
 
-    if not isinstance(
-        asset_index,
-        pd.Index,
-    ):
-        asset_index = pd.Index(
-            asset_index
-        )
+            if values.size != len(asset_index):
+                raise ValueError(
+                    f"{signal_name} signal returned "
+                    f"{values.size} values; expected "
+                    f"{len(asset_index)}."
+                )
 
-    if len(asset_index) == 0:
-        raise ValueError(
-            "Asset index cannot be empty."
-        )
+            result = pd.Series(
+                values,
+                index=asset_index,
+                dtype=float,
+            )
 
-    if asset_index.has_duplicates:
-        raise ValueError(
-            "Asset index cannot contain duplicate assets."
-        )
+        # ----------------------------------------------------
+        # Dimension
+        # ----------------------------------------------------
 
-    return asset_index
+        if result.size != len(asset_index):
+            raise ValueError(
+                f"{signal_name} signal returned "
+                f"{result.size} values; expected "
+                f"{len(asset_index)}."
+            )
 
-
-def _validate_forecast_output(
-    forecast,
-    asset_index: pd.Index,
-    component_name: str,
-) -> pd.Series:
-    """
-    Validate a forecast component and return it as an
-    asset-indexed pandas Series.
-
-    The returned Series always has exactly the supplied
-    asset index and therefore cannot silently retain an
-    incompatible index.
-    """
-
-    asset_index = _validate_asset_index(
-        asset_index
-    )
-
-    # --------------------------------------------------------------
-    # SERIES INPUT
-    # --------------------------------------------------------------
-
-    if isinstance(
-        forecast,
-        pd.Series,
-    ):
-
-        result = forecast.copy()
+        # ----------------------------------------------------
+        # Duplicate labels
+        # ----------------------------------------------------
 
         if result.index.has_duplicates:
-            raise ValueError(
-                f"{component_name} forecast contains "
-                "duplicate asset labels."
+            duplicated = (
+                result.index[
+                    result.index.duplicated()
+                ]
+                .tolist()
             )
 
-        if len(result) != len(asset_index):
-
             raise ValueError(
-                f"{component_name} forecast returned "
-                f"{len(result)} values but "
-                f"{len(asset_index)} assets were expected."
+                f"{signal_name} signal contains "
+                f"duplicate asset labels: {duplicated}."
             )
 
-        # Explicitly align by asset label.
+        # ----------------------------------------------------
+        # Asset-set validation
+        # ----------------------------------------------------
+
+        if set(result.index) != set(asset_index):
+            missing = [
+                asset
+                for asset in asset_index
+                if asset not in result.index
+            ]
+
+            unexpected = [
+                asset
+                for asset in result.index
+                if asset not in asset_index
+            ]
+
+            raise ValueError(
+                f"{signal_name} signal asset mismatch. "
+                f"Missing={missing}, "
+                f"unexpected={unexpected}."
+            )
+
+        # ----------------------------------------------------
+        # Canonical ordering
+        # ----------------------------------------------------
+
         result = result.reindex(
             asset_index
         )
 
-    # --------------------------------------------------------------
-    # ARRAY-LIKE INPUT
-    # --------------------------------------------------------------
-
-    else:
+        # ----------------------------------------------------
+        # Numeric conversion
+        # ----------------------------------------------------
 
         try:
-
-            values = np.asarray(
-                forecast,
-                dtype=float,
-            ).reshape(-1)
-
-        except Exception as exc:
-
-            raise ValueError(
-                f"{component_name} forecast could not "
-                "be converted to numeric values."
-            ) from exc
-
-        if values.size != len(asset_index):
-
-            raise ValueError(
-                f"{component_name} forecast returned "
-                f"{values.size} values but "
-                f"{len(asset_index)} assets were expected."
+            result = result.astype(
+                float
             )
 
-        result = pd.Series(
+        except (
+            TypeError,
+            ValueError,
+        ) as exc:
+
+            raise ValueError(
+                f"{signal_name} signal contains "
+                "non-numeric values."
+            ) from exc
+
+        # ----------------------------------------------------
+        # Missing values
+        # ----------------------------------------------------
+
+        if result.isna().any():
+            missing_assets = (
+                result.index[
+                    result.isna()
+                ]
+                .tolist()
+            )
+
+            raise ValueError(
+                f"{signal_name} signal contains "
+                f"missing values for assets: "
+                f"{missing_assets}."
+            )
+
+        # ----------------------------------------------------
+        # Finite values
+        # ----------------------------------------------------
+
+        values = result.to_numpy(
+            dtype=float
+        )
+
+        if not np.isfinite(
+            values
+        ).all():
+
+            invalid_assets = (
+                result.index[
+                    ~np.isfinite(values)
+                ]
+                .tolist()
+            )
+
+            raise ValueError(
+                f"{signal_name} signal contains "
+                f"non-finite values for assets: "
+                f"{invalid_assets}."
+            )
+
+        # ----------------------------------------------------
+        # Final canonical output
+        # ----------------------------------------------------
+
+        return pd.Series(
             values,
             index=asset_index,
             dtype=float,
+            name=signal_name,
         )
 
-    # --------------------------------------------------------------
-    # FINAL VALIDATION
-    # --------------------------------------------------------------
 
-    if not result.index.equals(
-        asset_index
-    ):
-
-        raise ValueError(
-            f"{component_name} forecast index does not "
-            "match the expected asset index."
-        )
-
-    if result.isna().any():
-
-        missing_assets = (
-            result.index[
-                result.isna()
-            ]
-            .tolist()
-        )
-
-        raise ValueError(
-            f"{component_name} forecast contains missing "
-            f"values for assets: {missing_assets}."
-        )
-
-    values = result.to_numpy(
-        dtype=float
-    )
-
-    if not np.isfinite(
-        values
-    ).all():
-
-        raise ValueError(
-            f"{component_name} forecast contains non-finite values."
-        )
-
-    return result.astype(
-        float
-    )
+# ============================================================
+# BASE SIGNAL MODEL
+# ============================================================
 
 
-def _align_asset_series(
-    series: pd.Series,
-    asset_index: pd.Index,
-    component_name: str,
-) -> pd.Series:
+class _BaseForecast:
     """
-    Explicitly align a Series to the canonical asset index.
-
-    This helper exists specifically to prevent accidental pandas
-    label alignment from propagating incompatible indexes through
-    forecast calculations.
+    Internal base class for forecast signal components.
     """
 
-    if not isinstance(
-        series,
-        pd.Series,
-    ):
-        raise TypeError(
-            f"{component_name} must be a pandas Series."
+    API_VERSION = "1.0.0"
+
+    COMPONENT = "Forecast"
+
+    @staticmethod
+    def _validate_prices(
+        prices: pd.DataFrame,
+    ) -> pd.DataFrame:
+
+        return ForecastSignalValidator.validate_prices(
+            prices
         )
 
-    if series.index.has_duplicates:
-        raise ValueError(
-            f"{component_name} contains duplicate asset labels."
-        )
+    @staticmethod
+    def _validate_history(
+        prices: pd.DataFrame,
+        minimum_history: int,
+        component: str,
+    ) -> None:
 
-    aligned = series.reindex(
-        asset_index
-    )
+        if len(prices) < minimum_history:
+            raise ValueError(
+                f"Insufficient history for {component}: "
+                f"required at least {minimum_history} "
+                f"observations, received {len(prices)}."
+            )
 
-    if aligned.isna().any():
+    @staticmethod
+    def _validate_parameter(
+        value: int,
+        name: str,
+        minimum: int = 1,
+    ) -> int:
 
-        missing_assets = (
-            aligned.index[
-                aligned.isna()
-            ]
-            .tolist()
-        )
+        if isinstance(
+            value,
+            bool,
+        ):
+            raise TypeError(
+                f"{name} must be an integer."
+            )
 
-        raise ValueError(
-            f"{component_name} cannot be aligned to the "
-            f"asset universe. Missing assets: {missing_assets}."
-        )
+        try:
+            value = int(value)
 
-    values = aligned.to_numpy(
-        dtype=float
-    )
+        except (
+            TypeError,
+            ValueError,
+        ) as exc:
 
-    if not np.isfinite(
-        values
-    ).all():
+            raise TypeError(
+                f"{name} must be an integer."
+            ) from exc
 
-        raise ValueError(
-            f"{component_name} contains non-finite values."
-        )
+        if value < minimum:
+            raise ValueError(
+                f"{name} must be at least {minimum}."
+            )
 
-    return aligned.astype(
-        float
-    )
+        return value
 
 
-def _validate_window(
-    value: int,
-    name: str,
-) -> None:
+# ============================================================
+# MOMENTUM FORECAST
+# ============================================================
+
+
+class MomentumForecast(
+    _BaseForecast
+):
     """
-    Validate a positive integer forecasting window.
-    """
-
-    if not isinstance(
-        value,
-        (int, np.integer),
-    ) or isinstance(
-        value,
-        bool,
-    ) or value <= 0:
-
-        raise ValueError(
-            f"{name} must be a positive integer."
-        )
-
-
-# ======================================================================
-# MOMENTUM FORECASTING
-# ======================================================================
-
-
-class MomentumForecast:
-    """
-    Deterministic momentum forecast.
+    Cross-sectional momentum signal.
 
     Formula
     -------
 
-        P_t / P_{t-L} - 1
-
-    where L is the configured lookback.
+        P_t / P_(t-L) - 1
     """
+
+    COMPONENT = "Momentum"
+
+    DEFAULT_LOOKBACK = 252
 
     def forecast(
         self,
-        prices,
-        lookback: int = 252,
+        prices: pd.DataFrame,
+        lookback: int = DEFAULT_LOOKBACK,
     ) -> pd.Series:
 
-        prices = _validate_price_history(
+        prices = self._validate_prices(
             prices
         )
 
-        _validate_window(
+        lookback = self._validate_parameter(
             lookback,
-            "Momentum lookback",
+            "lookback",
         )
 
-        if len(prices) < lookback:
+        self._validate_history(
+            prices,
+            lookback,
+            self.COMPONENT,
+        )
 
-            raise ValueError(
-                "Insufficient history for momentum forecast: "
-                f"required {lookback} observations, "
-                f"received {len(prices)}."
-            )
-
-        asset_index = prices.columns
-
-        latest_prices = (
+        signal = (
             prices.iloc[-1]
-            .copy()
-        )
-
-        historical_prices = (
-            prices.iloc[-lookback]
-            .copy()
-        )
-
-        latest_prices = _align_asset_series(
-            latest_prices,
-            asset_index,
-            "Momentum latest prices",
-        )
-
-        historical_prices = _align_asset_series(
-            historical_prices,
-            asset_index,
-            "Momentum historical prices",
-        )
-
-        # Convert to NumPy arrays before arithmetic so pandas
-        # cannot introduce unintended label alignment.
-        latest_values = latest_prices.to_numpy(
-            dtype=float
-        )
-
-        historical_values = historical_prices.to_numpy(
-            dtype=float
-        )
-
-        forecast_values = (
-            latest_values
             /
-            historical_values
+            prices.iloc[-lookback - 1]
             -
             1.0
         )
 
-        forecast = pd.Series(
-            forecast_values,
-            index=asset_index,
-            dtype=float,
-        )
-
-        return _validate_forecast_output(
-            forecast,
-            asset_index,
-            "Momentum",
+        return ForecastSignalValidator.validate_signal(
+            signal,
+            prices.columns,
+            self.COMPONENT,
         )
 
 
-# ======================================================================
-# TREND FORECASTING
-# ======================================================================
+# ============================================================
+# TREND FORECAST
+# ============================================================
 
 
-class TrendForecast:
+class TrendForecast(
+    _BaseForecast
+):
     """
-    Moving-average trend forecast.
+    Moving-average trend signal.
 
     Formula
     -------
 
-        short_MA / long_MA - 1
+        SMA_short / SMA_long - 1
     """
+
+    COMPONENT = "Trend"
+
+    DEFAULT_SHORT_WINDOW = 50
+
+    DEFAULT_LONG_WINDOW = 200
 
     def forecast(
         self,
-        prices,
-        short_window: int = 50,
-        long_window: int = 200,
+        prices: pd.DataFrame,
+        short_window: int = DEFAULT_SHORT_WINDOW,
+        long_window: int = DEFAULT_LONG_WINDOW,
     ) -> pd.Series:
 
-        prices = _validate_price_history(
+        prices = self._validate_prices(
             prices
         )
 
-        _validate_window(
+        short_window = self._validate_parameter(
             short_window,
-            "Trend short_window",
+            "short_window",
         )
 
-        _validate_window(
+        long_window = self._validate_parameter(
             long_window,
-            "Trend long_window",
+            "long_window",
         )
 
-        if short_window > long_window:
-
+        if short_window >= long_window:
             raise ValueError(
-                "Trend short_window cannot exceed long_window."
+                "short_window must be smaller than "
+                "long_window."
             )
 
-        if len(prices) < long_window:
-
-            raise ValueError(
-                "Insufficient history for trend forecast: "
-                f"required {long_window} observations, "
-                f"received {len(prices)}."
-            )
-
-        asset_index = prices.columns
+        self._validate_history(
+            prices,
+            long_window,
+            self.COMPONENT,
+        )
 
         short_ma = (
-            prices
-            .rolling(
-                window=short_window,
-                min_periods=short_window,
-            )
+            prices.iloc[
+                -short_window:
+            ]
             .mean()
-            .iloc[-1]
         )
 
         long_ma = (
-            prices
-            .rolling(
-                window=long_window,
-                min_periods=long_window,
-            )
+            prices.iloc[
+                -long_window:
+            ]
             .mean()
-            .iloc[-1]
         )
 
-        short_ma = _align_asset_series(
-            short_ma,
-            asset_index,
-            "Trend short moving average",
-        )
-
-        long_ma = _align_asset_series(
-            long_ma,
-            asset_index,
-            "Trend long moving average",
-        )
-
-        short_values = short_ma.to_numpy(
-            dtype=float
-        )
-
-        long_values = long_ma.to_numpy(
-            dtype=float
-        )
-
-        if not (
-            short_values > 0.0
-        ).all():
+        if (
+            long_ma <= 0
+        ).any():
 
             raise ValueError(
-                "Trend short moving averages must "
-                "be strictly positive."
+                "Trend calculation encountered "
+                "non-positive long-window averages."
             )
 
-        if not (
-            long_values > 0.0
-        ).all():
-
-            raise ValueError(
-                "Trend long moving averages must "
-                "be strictly positive."
-            )
-
-        forecast_values = (
-            short_values
+        signal = (
+            short_ma
             /
-            long_values
+            long_ma
             -
             1.0
         )
 
-        forecast = pd.Series(
-            forecast_values,
-            index=asset_index,
-            dtype=float,
-        )
-
-        return _validate_forecast_output(
-            forecast,
-            asset_index,
-            "Trend",
+        return ForecastSignalValidator.validate_signal(
+            signal,
+            prices.columns,
+            self.COMPONENT,
         )
 
 
-# ======================================================================
+# ============================================================
 # MEAN REVERSION FORECAST
-# ======================================================================
+# ============================================================
 
 
-class MeanReversionForecast:
+class MeanReversionForecast(
+    _BaseForecast
+):
     """
-    Mean-reversion forecast based on the most recent return's
-    standardized deviation from its trailing return distribution.
+    Mean-reversion signal based on return z-score.
 
     Formula
     -------
 
-        z_t = (r_t - mean(r)) / std(r)
-
-        forecast = -z_t
-
-    The implementation explicitly aligns all intermediate
-    Series to the canonical asset index before performing
-    calculations.
+        -z(return)
     """
+
+    COMPONENT = "MeanReversion"
+
+    DEFAULT_LOOKBACK = 63
 
     def forecast(
         self,
-        prices,
-        lookback: int = 63,
+        prices: pd.DataFrame,
+        lookback: int = DEFAULT_LOOKBACK,
     ) -> pd.Series:
 
-        prices = _validate_price_history(
+        prices = self._validate_prices(
             prices
         )
 
-        _validate_window(
+        lookback = self._validate_parameter(
             lookback,
-            "Mean-reversion lookback",
+            "lookback",
         )
 
-        asset_index = prices.columns
+        minimum_history = (
+            lookback + 1
+        )
 
-        # --------------------------------------------------------------
-        # RETURNS
-        # --------------------------------------------------------------
+        self._validate_history(
+            prices,
+            minimum_history,
+            self.COMPONENT,
+        )
 
         returns = (
             prices
             .pct_change(
                 fill_method=None
             )
-            .iloc[1:]
-            .copy()
+            .dropna()
         )
-
-        if returns.empty:
-
-            raise ValueError(
-                "Unable to calculate returns from "
-                "the supplied price history."
-            )
 
         if len(returns) < lookback:
-
             raise ValueError(
-                "Insufficient return history for "
-                "mean-reversion forecast: "
-                f"required {lookback} return observations, "
-                f"received {len(returns)}."
+                f"Insufficient return history for "
+                f"{self.COMPONENT}: required at least "
+                f"{lookback} observations."
             )
 
-        # Explicitly enforce canonical asset ordering.
-        returns = returns.reindex(
-            columns=asset_index
+        window = (
+            returns.iloc[
+                -lookback:
+            ]
         )
 
-        if not returns.columns.equals(
-            asset_index
-        ):
+        mean = window.mean()
 
-            raise ValueError(
-                "Mean-reversion return columns do not "
-                "match the price-history asset universe."
-            )
-
-        # --------------------------------------------------------------
-        # TRAILING RETURN DISTRIBUTION
-        # --------------------------------------------------------------
-
-        recent_returns = (
-            returns
-            .tail(
-                lookback
-            )
-            .copy()
+        std = window.std(
+            ddof=1
         )
 
-        if len(recent_returns) != lookback:
-
-            raise ValueError(
-                "Mean-reversion trailing return window "
-                "has an unexpected length."
-            )
-
-        mean = (
-            recent_returns
-            .mean(
-                axis=0
-            )
-        )
-
-        std = (
-            recent_returns
-            .std(
-                axis=0,
-                ddof=1,
-            )
-        )
-
-        latest = (
-            returns
-            .iloc[-1]
-            .copy()
-        )
-
-        # --------------------------------------------------------------
-        # EXPLICIT ASSET ALIGNMENT
-        # --------------------------------------------------------------
-
-        mean = _align_asset_series(
-            mean,
-            asset_index,
-            "Mean-reversion trailing mean",
-        )
-
-        std = _align_asset_series(
-            std,
-            asset_index,
-            "Mean-reversion trailing standard deviation",
-        )
-
-        latest = _align_asset_series(
-            latest,
-            asset_index,
-            "Mean-reversion latest return",
-        )
-
-        # --------------------------------------------------------------
-        # ZERO-VARIANCE VALIDATION
-        # --------------------------------------------------------------
-
-        std_values = std.to_numpy(
-            dtype=float
-        )
-
-        zero_variance_mask = (
-            std_values <= 0.0
-        )
-
-        if zero_variance_mask.any():
+        if (
+            std <= 0
+        ).any():
 
             zero_variance_assets = (
-                asset_index[
-                    zero_variance_mask
+                std.index[
+                    std <= 0
                 ]
                 .tolist()
             )
 
             raise ValueError(
-                "Mean-reversion forecast cannot be calculated "
-                "for zero-variance assets: "
+                "Mean-reversion calculation encountered "
+                "zero-variance returns for assets: "
                 f"{zero_variance_assets}."
             )
 
-        # --------------------------------------------------------------
-        # NUMPY CALCULATION
-        # --------------------------------------------------------------
-        #
-        # Once the Series have been explicitly aligned, arithmetic
-        # is performed on NumPy arrays. This prevents pandas from
-        # silently performing label-based alignment during the
-        # critical forecast calculation.
-        # --------------------------------------------------------------
-
-        latest_values = latest.to_numpy(
-            dtype=float
+        latest_returns = (
+            returns.iloc[-1]
         )
 
-        mean_values = mean.to_numpy(
-            dtype=float
-        )
+        signal = -(
+            latest_returns - mean
+        ) / std
 
-        std_values = std.to_numpy(
-            dtype=float
-        )
-
-        zscore_values = (
-            latest_values
-            -
-            mean_values
-        ) / std_values
-
-        forecast_values = (
-            -zscore_values
-        )
-
-        forecast = pd.Series(
-            forecast_values,
-            index=asset_index,
-            dtype=float,
-        )
-
-        return _validate_forecast_output(
-            forecast,
-            asset_index,
-            "Mean-reversion",
+        return ForecastSignalValidator.validate_signal(
+            signal,
+            prices.columns,
+            self.COMPONENT,
         )
 
 
-# ======================================================================
-# MODULE CONTRACT
-# ======================================================================
+# ============================================================
+# REGRESSION TESTS
+# ============================================================
 
 
-__all__ = [
-    "MomentumForecast",
-    "TrendForecast",
-    "MeanReversionForecast",
-]
+def test_forecast_signal_validator():
+
+    assets = pd.Index(
+        [
+            "SPY",
+            "QQQ",
+            "TLT",
+        ]
+    )
+
+    # --------------------------------------------------------
+    # Valid signal
+    # --------------------------------------------------------
+
+    signal = pd.Series(
+        [
+            0.10,
+            0.20,
+            -0.05,
+        ],
+        index=assets,
+    )
+
+    result = (
+        ForecastSignalValidator.validate_signal(
+            signal,
+            assets,
+            "Test",
+        )
+    )
+
+    assert isinstance(
+        result,
+        pd.Series,
+    )
+
+    assert result.index.equals(
+        assets
+    )
+
+    assert np.isfinite(
+        result.values
+    ).all()
+
+    # --------------------------------------------------------
+    # Ordering must be canonicalized
+    # --------------------------------------------------------
+
+    reversed_signal = pd.Series(
+        [
+            -0.05,
+            0.20,
+            0.10,
+        ],
+        index=[
+            "TLT",
+            "QQQ",
+            "SPY",
+        ],
+    )
+
+    result = (
+        ForecastSignalValidator.validate_signal(
+            reversed_signal,
+            assets,
+            "Test",
+        )
+    )
+
+    assert result.index.equals(
+        assets
+    )
+
+    assert np.allclose(
+        result.values,
+        [
+            0.10,
+            0.20,
+            -0.05,
+        ],
+    )
+
+    # --------------------------------------------------------
+    # Missing asset
+    # --------------------------------------------------------
+
+    try:
+
+        ForecastSignalValidator.validate_signal(
+            pd.Series(
+                [0.10, 0.20],
+                index=[
+                    "SPY",
+                    "QQQ",
+                ],
+            ),
+            assets,
+            "Test",
+        )
+
+        raise AssertionError(
+            "Expected ValueError"
+        )
+
+    except ValueError:
+        pass
+
+    # --------------------------------------------------------
+    # Duplicate asset
+    # --------------------------------------------------------
+
+    try:
+
+        ForecastSignalValidator.validate_signal(
+            pd.Series(
+                [0.10, 0.20, 0.30],
+                index=[
+                    "SPY",
+                    "SPY",
+                    "TLT",
+                ],
+            ),
+            assets,
+            "Test",
+        )
+
+        raise AssertionError(
+            "Expected ValueError"
+        )
+
+    except ValueError:
+        pass
+
+    # --------------------------------------------------------
+    # NaN
+    # --------------------------------------------------------
+
+    try:
+
+        ForecastSignalValidator.validate_signal(
+            pd.Series(
+                [0.10, np.nan, 0.30],
+                index=assets,
+            ),
+            assets,
+            "Test",
+        )
+
+        raise AssertionError(
+            "Expected ValueError"
+        )
+
+    except ValueError:
+        pass
+
+    # --------------------------------------------------------
+    # Infinity
+    # --------------------------------------------------------
+
+    try:
+
+        ForecastSignalValidator.validate_signal(
+            pd.Series(
+                [0.10, np.inf, 0.30],
+                index=assets,
+            ),
+            assets,
+            "Test",
+        )
+
+        raise AssertionError(
+            "Expected ValueError"
+        )
+
+    except ValueError:
+        pass
+
+
+def test_momentum_forecast():
+
+    periods = 300
+
+    prices = pd.DataFrame(
+        {
+            "SPY": np.linspace(
+                100.0,
+                150.0,
+                periods,
+            ),
+            "QQQ": np.linspace(
+                100.0,
+                130.0,
+                periods,
+            ),
+            "TLT": np.linspace(
+                100.0,
+                90.0,
+                periods,
+            ),
+        }
+    )
+
+    model = MomentumForecast()
+
+    signal = model.forecast(
+        prices,
+        lookback=252,
+    )
+
+    assert isinstance(
+        signal,
+        pd.Series,
+    )
+
+    assert signal.index.equals(
+        prices.columns
+    )
+
+    assert np.isfinite(
+        signal.values
+    ).all()
+
+    expected = (
+        prices.iloc[-1]
+        /
+        prices.iloc[-253]
+        -
+        1.0
+    )
+
+    assert np.allclose(
+        signal.values,
+        expected.values,
+    )
+
+
+def test_trend_forecast():
+
+    periods = 300
+
+    prices = pd.DataFrame(
+        {
+            "SPY": np.linspace(
+                100.0,
+                150.0,
+                periods,
+            ),
+            "QQQ": np.linspace(
+                100.0,
+                130.0,
+                periods,
+            ),
+            "TLT": np.linspace(
+                100.0,
+                90.0,
+                periods,
+            ),
+        }
+    )
+
+    model = TrendForecast()
+
+    signal = model.forecast(
+        prices,
+        short_window=50,
+        long_window=200,
+    )
+
+    assert isinstance(
+        signal,
+        pd.Series,
+    )
+
+    assert signal.index.equals(
+        prices.columns
+    )
+
+    assert np.isfinite(
+        signal.values
+    ).all()
+
+    short_ma = (
+        prices.iloc[-50:]
+        .mean()
+    )
+
+    long_ma = (
+        prices.iloc[-200:]
+        .mean()
+    )
+
+    expected = (
+        short_ma
+        /
+        long_ma
+        -
+        1.0
+    )
+
+    assert np.allclose(
+        signal.values,
+        expected.values,
+    )
+
+
+def test_mean_reversion_forecast():
+
+    np.random.seed(42)
+
+    periods = 200
+
+    returns = np.random.normal(
+        0.001,
+        0.02,
+        size=(periods, 3),
+    )
+
+    prices = pd.DataFrame(
+        100.0
+        *
+        np.exp(
+            np.cumsum(
+                returns,
+                axis=0,
+            )
+        ),
+        columns=[
+            "SPY",
+            "QQQ",
+            "TLT",
+        ],
+    )
+
+    model = MeanReversionForecast()
+
+    signal = model.forecast(
+        prices,
+        lookback=63,
+    )
+
+    assert isinstance(
+        signal,
+        pd.Series,
+    )
+
+    assert signal.index.equals(
+        prices.columns
+    )
+
+    assert np.isfinite(
+        signal.values
+    ).all()
+
+
+def test_forecast_history_validation():
+
+    prices = pd.DataFrame(
+        np.ones(
+            (50, 3)
+        ),
+        columns=[
+            "SPY",
+            "QQQ",
+            "TLT",
+        ],
+    )
+
+    try:
+
+        MomentumForecast().forecast(
+            prices,
+            lookback=252,
+        )
+
+        raise AssertionError(
+            "Expected ValueError"
+        )
+
+    except ValueError:
+        pass
+
+    try:
+
+        TrendForecast().forecast(
+            prices,
+            short_window=10,
+            long_window=200,
+        )
+
+        raise AssertionError(
+            "Expected ValueError"
+        )
+
+    except ValueError:
+        pass
+
+    try:
+
+        MeanReversionForecast().forecast(
+            prices,
+            lookback=63,
+        )
+
+        raise AssertionError(
+            "Expected ValueError"
+        )
+
+    except ValueError:
+        pass
+
+
+def test_forecast_parameter_validation():
+
+    prices = pd.DataFrame(
+        np.ones(
+            (300, 3)
+        ),
+        columns=[
+            "SPY",
+            "QQQ",
+            "TLT",
+        ],
+    )
+
+    try:
+
+        MomentumForecast().forecast(
+            prices,
+            lookback=0,
+        )
+
+        raise AssertionError(
+            "Expected ValueError"
+        )
+
+    except ValueError:
+        pass
+
+    try:
+
+        TrendForecast().forecast(
+            prices,
+            short_window=200,
+            long_window=50,
+        )
+
+        raise AssertionError(
+            "Expected ValueError"
+        )
+
+    except ValueError:
+        pass
+
+    try:
+
+        MeanReversionForecast().forecast(
+            prices,
+            lookback=0,
+        )
+
+        raise AssertionError(
+            "Expected ValueError"
+        )
+
+    except ValueError:
+        pass
+
+
+def test_forecast_price_validation():
+
+    prices = pd.DataFrame(
+        {
+            "SPY": [100.0, 101.0, np.nan],
+            "QQQ": [100.0, 101.0, 102.0],
+        }
+    )
+
+    try:
+
+        MomentumForecast().forecast(
+            prices,
+            lookback=1,
+        )
+
+        raise AssertionError(
+            "Expected ValueError"
+        )
+
+    except ValueError:
+        pass
+
+    prices = pd.DataFrame(
+        {
+            "SPY": [100.0, 101.0, 102.0],
+            "QQQ": [100.0, 101.0, 102.0],
+        }
+    )
+
+    # Python dictionaries cannot preserve duplicate keys, so
+    # duplicate-column validation is tested directly.
+
+    duplicate_columns = pd.DataFrame(
+        [
+            [100.0, 100.0],
+            [101.0, 101.0],
+            [102.0, 102.0],
+        ],
+        columns=[
+            "SPY",
+            "SPY",
+        ],
+    )
+
+    try:
+
+        MomentumForecast().forecast(
+            duplicate_columns,
+            lookback=1,
+        )
+
+        raise AssertionError(
+            "Expected ValueError"
+        )
+
+    except ValueError:
+        pass
+
+
+def test_forecast_models_do_not_mutate_prices():
+
+    np.random.seed(42)
+
+    prices = pd.DataFrame(
+        100.0
+        *
+        np.exp(
+            np.cumsum(
+                np.random.normal(
+                    0.001,
+                    0.02,
+                    size=(300, 3),
+                ),
+                axis=0,
+            )
+        ),
+        columns=[
+            "SPY",
+            "QQQ",
+            "TLT",
+        ],
+    )
+
+    original = prices.copy(
+        deep=True
+    )
+
+    MomentumForecast().forecast(
+        prices,
+        lookback=252,
+    )
+
+    TrendForecast().forecast(
+        prices,
+        short_window=50,
+        long_window=200,
+    )
+
+    MeanReversionForecast().forecast(
+        prices,
+        lookback=63,
+    )
+
+    assert prices.equals(
+        original
+    )
+
+
+def test_forecast_signal_api():
+
+    assert MomentumForecast.API_VERSION == "1.0.0"
+
+    assert TrendForecast.API_VERSION == "1.0.0"
+
+    assert MeanReversionForecast.API_VERSION == "1.0.0"
+
+    assert (
+        MomentumForecast.COMPONENT
+        == "Momentum"
+    )
+
+    assert (
+        TrendForecast.COMPONENT
+        == "Trend"
+    )
+
+    assert (
+        MeanReversionForecast.COMPONENT
+        == "MeanReversion"
+    )
+
+
+# ============================================================
+# REGRESSION ENTRY POINT
+# ============================================================
+
+
+def run_regression_tests():
+
+    test_forecast_signal_validator()
+
+    test_momentum_forecast()
+
+    test_trend_forecast()
+
+    test_mean_reversion_forecast()
+
+    test_forecast_history_validation()
+
+    test_forecast_parameter_validation()
+
+    test_forecast_price_validation()
+
+    test_forecast_models_do_not_mutate_prices()
+
+    test_forecast_signal_api()
+
+    print(
+        "A15.1 forecast signal tests passed."
+    )
+
+
+if __name__ == "__main__":
+
+    run_regression_tests()

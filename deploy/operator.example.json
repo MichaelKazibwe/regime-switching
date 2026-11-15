@@ -1,0 +1,12 @@
+{
+  "primary_operator": "REQUIRED",
+  "alert_recipient": "REQUIRED",
+  "absence_escalation": "REQUIRED",
+  "qualification_approver": "REQUIRED",
+  "backup_retention_days": 90,
+  "backup_location": "REQUIRED: outside the runtime volume and host",
+  "recovery_point_objective": "one completed paper session",
+  "recovery_time_objective": "before the next scheduled session",
+  "review_schedule": "after each scheduled cycle",
+  "incident_policy": "Stop scheduling, preserve evidence, diagnose, verify recovery, obtain owner approval before resuming. Select a fresh observation window after unresolved incidents."
+}

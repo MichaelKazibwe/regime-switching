@@ -1,0 +1,9 @@
+{
+  "schema_version": 1, "verified": false, "reviewer": "",
+  "as_of": null, "reviewed_at": null,
+  "evidence": [{"file": "protected-holdings-evidence.csv", "sha256": "REPLACE"}],
+  "instruments": {
+    "SPY": {"effective_duration": null, "unhedged_fx_fraction": null,
+            "lookthrough_coverage": null, "holdings_source": "REPLACE_WITH_MEASURED_SOURCE", "accessible": false}
+  }
+}

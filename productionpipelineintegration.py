@@ -92,8 +92,10 @@ Design principles
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
+
+import numpy as np
 
 
 # ----------------------------------------------------------------------
@@ -110,6 +112,10 @@ from productiondecisionexecution import (
 )
 
 from productionexecutiongate import ProductionExecutionGate
+from productionriskvalidation import ProductionRiskValidation
+from riskbudgetengine import RiskBudgetEngine
+from macroregime import PortfolioRegimeMapper, Regime
+from core_constants import settings
 
 
 # ======================================================================
@@ -326,7 +332,9 @@ class ProductionPipelineIntegration:
         self.integration = (
             integration
             if integration is not None
-            else ProductionIntegration()
+            else ProductionIntegration(
+                composition=self.composition,
+            )
         )
 
         # --------------------------------------------------------------
@@ -811,6 +819,18 @@ class ProductionPipelineIntegration:
 
             return result
 
+        # The IV-B.4 risk stage above is the authoritative validation
+        # boundary. Carry its explicit successful result to IV-B.5 so the
+        # execution gate does not have to infer a pass from absent flags.
+        execution_result = replace(
+            execution_result,
+            diagnostics={
+                **execution_result.diagnostics,
+                "risk_validation_passed": True,
+            },
+        )
+        stage_results["production_decision_execution"] = execution_result
+
         # --------------------------------------------------------------
         # 9.1.5 EXECUTION GATE
         # --------------------------------------------------------------
@@ -1019,11 +1039,59 @@ class ProductionPipelineIntegration:
                 ),
             }
 
+        decision = result.decision
+        if decision is None:
+            return {
+                "healthy": False,
+                "approved": False,
+                "status": ProductionPipelineStatus.REJECTED,
+                "error": "Authoritative PortfolioDecision artifact is missing.",
+            }
+        try:
+            tickers = list(result.tickers)
+            covariance = np.asarray(
+                [
+                    [float(decision.covariance[ticker][other]) for other in tickers]
+                    for ticker in tickers
+                ],
+                dtype=float,
+            )
+            risk_regime = PortfolioRegimeMapper.map_regime(
+                Regime[str(result.regime).upper()]
+            )
+            risk_budget_result = RiskBudgetEngine().analyze(
+                dict(result.weights), covariance, risk_regime, tickers=tickers
+            )
+            validator = ProductionRiskValidation(
+                max_portfolio_volatility=0.15 / np.sqrt(252.0),
+                max_net_exposure=1.0,
+                max_position_weight=settings.max_position_weight,
+                budget_tolerance=RiskBudgetEngine.DEFAULT_TOLERANCE,
+            )
+            validation = validator.validate(
+                decision,
+                risk_budget_result=risk_budget_result,
+                regime_max_leverage=settings.max_leverage,
+            )
+        except Exception as exc:
+            return {
+                "healthy": False,
+                "approved": False,
+                "status": ProductionPipelineStatus.FAILED,
+                "error": f"Production IV-B.4 risk validation failed: {exc}",
+            }
+
         return {
-            "healthy": True,
-            "approved": True,
-            "status": ProductionPipelineStatus.APPROVED,
-            "risk_validated": True,
+            "healthy": bool(validation.approved),
+            "approved": bool(validation.approved),
+            "status": (
+                ProductionPipelineStatus.APPROVED
+                if validation.approved
+                else ProductionPipelineStatus.REJECTED
+            ),
+            "risk_validated": bool(validation.approved),
+            "risk_validation": validation.to_dict(),
+            "risk_budget": risk_budget_result.to_dict(),
         }
 
 

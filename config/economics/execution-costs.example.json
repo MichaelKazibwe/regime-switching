@@ -1,0 +1,9 @@
+{
+  "schema_version": 1, "verified": false, "reviewer": "",
+  "as_of": null, "reviewed_at": null,
+  "evidence": [{"file": "protected-broker-evidence.csv", "sha256": "REPLACE"}],
+  "instruments": {
+    "SPY": {"commission": null, "half_spread": null, "impact": null,
+            "fx_cost": null, "stress_cost_rate": null, "source": "REPLACE_WITH_OBSERVED_SOURCE"}
+  }
+}

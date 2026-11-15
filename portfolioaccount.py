@@ -18,6 +18,7 @@ import pandas as pd
 import numpy as np
 
 from basecomponent import BaseObject
+from trade import Trade
 
 
 # ============================================================
@@ -112,6 +113,10 @@ class PortfolioAccount(BaseObject):
     ):
 
         return {
+
+            "api_version":
+
+                self.API_VERSION,
 
             "cash":
 
@@ -390,6 +395,10 @@ class PortfolioAccount(BaseObject):
 
         return {
 
+            "api_version":
+
+                self.API_VERSION,
+
             "cash":
 
                 self.cash,
@@ -412,7 +421,23 @@ class PortfolioAccount(BaseObject):
 
                     "market_price":
 
-                        position.market_price
+                        position.market_price,
+
+                    "trade_id":
+
+                        position.trade_id,
+
+                    "broker":
+
+                        position.broker,
+
+                    "exchange":
+
+                        position.exchange,
+
+                    "currency":
+
+                        position.currency
 
                 }
 
@@ -424,11 +449,17 @@ class PortfolioAccount(BaseObject):
 
             "trade_history":
 
-                list(
+                [
 
-                    self.trade_history
+                    trade.to_dict()
 
-                ),
+                    if hasattr(trade, "to_dict")
+
+                    else dict(trade)
+
+                    for trade in self.trade_history
+
+                ],
 
             "turnover_history":
 
@@ -457,6 +488,11 @@ class PortfolioAccount(BaseObject):
         cls,
         data
     ):
+
+        if data.get("api_version", cls.API_VERSION) != cls.API_VERSION:
+            raise ValueError(
+                "Unsupported PortfolioAccount API version."
+            )
 
         account = cls(
 
@@ -492,21 +528,62 @@ class PortfolioAccount(BaseObject):
 
                     0.0
 
+                ),
+
+                trade_id=values.get(
+                    "trade_id"
+                ),
+
+                broker=values.get(
+                    "broker"
+                ),
+
+                exchange=values.get(
+                    "exchange"
+                ),
+
+                currency=values.get(
+                    "currency",
+                    "USD",
                 )
 
             )
 
-        account.trade_history = list(
+        raw_trade_history = data.get(
 
-            data.get(
+            "trade_history",
 
-                "trade_history",
-
-                []
-
-            )
+            []
 
         )
+
+        if not isinstance(raw_trade_history, list):
+
+            raise ValueError(
+                "trade_history must be a list."
+            )
+
+        account.trade_history = []
+
+        for item in raw_trade_history:
+
+            if isinstance(item, Trade):
+
+                trade = item
+
+            elif isinstance(item, dict):
+
+                trade = Trade.from_dict(item)
+
+            else:
+
+                raise ValueError(
+                    "trade_history entries must be Trade objects or dictionaries."
+                )
+
+            trade.validate()
+
+            account.trade_history.append(trade)
 
         account.turnover_history = list(
 
@@ -531,6 +608,20 @@ class PortfolioAccount(BaseObject):
             )
 
         )
+
+        if len(account.turnover_history) != len(account.trade_history):
+
+            raise ValueError(
+                "turnover_history length must match trade_history length."
+            )
+
+        if len(account.cost_history) != len(account.trade_history):
+
+            raise ValueError(
+                "cost_history length must match trade_history length."
+            )
+
+        account.health_check()
 
         return account
     

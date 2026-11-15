@@ -1,8 +1,11 @@
 from __future__ import annotations
+
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Mapping, Optional
+from uuid import uuid4
+from types import MappingProxyType
 import numpy as np
 try:
     from assetuniverse import AssetUniverse
@@ -52,6 +55,11 @@ try:
     from scenarioengine import ScenarioEngine
 except ImportError:
     ScenarioEngine = Any
+try:
+    from drawdownrisk import DrawdownRiskEngine
+except ImportError:
+    DrawdownRiskEngine = Any
+DEFAULT_DRAWDOWN_RNG_SEED = 42
 _UNSET = object()
 
 class DecisionSeverity(str, Enum):
@@ -80,44 +88,227 @@ class DecisionEvent:
         """Serialize the audit event."""
         return asdict(self)
 
-@dataclass
+# ======================================================================
+# IMMUTABLE DECISION VALUE HELPERS
+# ======================================================================
+
+
+def _freeze_value(value: Any) -> Any:
+    """Recursively convert supported containers into immutable values."""
+    if isinstance(value, Mapping):
+        return MappingProxyType(
+            {
+                key: _freeze_value(item)
+                for key, item in value.items()
+            }
+        )
+    if isinstance(value, (list, tuple)):
+        return tuple(
+            _freeze_value(item)
+            for item in value
+        )
+    if isinstance(value, set):
+        return frozenset(
+            _freeze_value(item)
+            for item in value
+        )
+    return value
+
+
+def _thaw_value(value: Any) -> Any:
+    """Convert immutable decision state into serialization-safe containers."""
+    if isinstance(value, Mapping):
+        return {
+            key: _thaw_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, tuple):
+        return [
+            _thaw_value(item)
+            for item in value
+        ]
+    if isinstance(value, frozenset):
+        return [
+            _thaw_value(item)
+            for item in value
+        ]
+    return value
+
+
+# ======================================================================
+# PORTFOLIO DECISION
+# ======================================================================
+
+
+@dataclass(frozen=True)
 class PortfolioDecision:
-    """Complete result of one portfolio decision cycle."""
+    """Immutable, self-contained result of one portfolio decision cycle."""
+
     decision_id: str
     status: str
     approved: bool
     regime: Optional[str]
     tickers: tuple[str, ...]
-    weights: dict[str, float]
-    expected_returns: dict[str, float]
-    covariance: dict[str, dict[str, float]]
+    weights: Mapping[str, float]
+    expected_returns: Mapping[str, float]
+    covariance: Mapping[str, Mapping[str, float]]
     portfolio_return: float
     portfolio_volatility: float
     portfolio_variance: float
     gross_exposure: float
     net_exposure: float
     number_of_positions: int
-    risk_contributions: dict[str, float]
-    risk_contribution_pct: dict[str, float]
-    scenario_results: dict[str, Any]
-    diagnostics: dict[str, Any]
+    risk_contributions: Mapping[str, float]
+    risk_contribution_pct: Mapping[str, float]
+    scenario_results: Mapping[str, Any]
+    diagnostics: Mapping[str, Any]
     warnings: tuple[str, ...]
     errors: tuple[str, ...]
     timestamp: str
     api_version: str
 
+    def __post_init__(self) -> None:
+        """Freeze every supported nested mutable container at construction."""
+        object.__setattr__(
+            self,
+            'tickers',
+            tuple(self.tickers),
+        )
+        object.__setattr__(
+            self,
+            'weights',
+            _freeze_value(self.weights),
+        )
+        object.__setattr__(
+            self,
+            'expected_returns',
+            _freeze_value(self.expected_returns),
+        )
+        object.__setattr__(
+            self,
+            'covariance',
+            _freeze_value(self.covariance),
+        )
+        object.__setattr__(
+            self,
+            'risk_contributions',
+            _freeze_value(self.risk_contributions),
+        )
+        object.__setattr__(
+            self,
+            'risk_contribution_pct',
+            _freeze_value(self.risk_contribution_pct),
+        )
+        object.__setattr__(
+            self,
+            'scenario_results',
+            _freeze_value(self.scenario_results),
+        )
+        object.__setattr__(
+            self,
+            'diagnostics',
+            _freeze_value(self.diagnostics),
+        )
+        object.__setattr__(
+            self,
+            'warnings',
+            tuple(self.warnings),
+        )
+        object.__setattr__(
+            self,
+            'errors',
+            tuple(self.errors),
+        )
+
     def to_dict(self) -> dict[str, Any]:
-        """Serialize the portfolio decision."""
-        data = asdict(self)
-        data['tickers'] = list(self.tickers)
-        data['warnings'] = list(self.warnings)
-        data['errors'] = list(self.errors)
-        return data
+        """Serialize the immutable decision into independent plain containers."""
+        return {
+            'decision_id': self.decision_id,
+            'status': self.status,
+            'approved': self.approved,
+            'regime': self.regime,
+            'tickers': list(self.tickers),
+            'weights': _thaw_value(self.weights),
+            'expected_returns': _thaw_value(self.expected_returns),
+            'covariance': _thaw_value(self.covariance),
+            'portfolio_return': self.portfolio_return,
+            'portfolio_volatility': self.portfolio_volatility,
+            'portfolio_variance': self.portfolio_variance,
+            'gross_exposure': self.gross_exposure,
+            'net_exposure': self.net_exposure,
+            'number_of_positions': self.number_of_positions,
+            'risk_contributions': _thaw_value(self.risk_contributions),
+            'risk_contribution_pct': _thaw_value(self.risk_contribution_pct),
+            'scenario_results': _thaw_value(self.scenario_results),
+            'diagnostics': _thaw_value(self.diagnostics),
+            'warnings': list(self.warnings),
+            'errors': list(self.errors),
+            'timestamp': self.timestamp,
+            'api_version': self.api_version,
+        }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> 'PortfolioDecision':
-        """Restore a portfolio decision from serialized state."""
-        return cls(decision_id=str(data.get('decision_id', '')), status=str(data.get('status', PortfolioDecisionStatus.FAILED.value)), approved=bool(data.get('approved', False)), regime=data.get('regime'), tickers=tuple((str(ticker) for ticker in data.get('tickers', []))), weights={str(key): float(value) for key, value in data.get('weights', {}).items()}, expected_returns={str(key): float(value) for key, value in data.get('expected_returns', {}).items()}, covariance={str(key): {str(inner_key): float(inner_value) for inner_key, inner_value in row.items()} for key, row in data.get('covariance', {}).items()}, portfolio_return=float(data.get('portfolio_return', 0.0)), portfolio_volatility=float(data.get('portfolio_volatility', 0.0)), portfolio_variance=float(data.get('portfolio_variance', 0.0)), gross_exposure=float(data.get('gross_exposure', 0.0)), net_exposure=float(data.get('net_exposure', 0.0)), number_of_positions=int(data.get('number_of_positions', 0)), risk_contributions={str(key): float(value) for key, value in data.get('risk_contributions', {}).items()}, risk_contribution_pct={str(key): float(value) for key, value in data.get('risk_contribution_pct', {}).items()}, scenario_results=dict(data.get('scenario_results', {})), diagnostics=dict(data.get('diagnostics', {})), warnings=tuple((str(warning) for warning in data.get('warnings', []))), errors=tuple((str(error) for error in data.get('errors', []))), timestamp=str(data.get('timestamp', '')), api_version=str(data.get('api_version', '1.0.0')))
+        """Restore a decision while copying and freezing all nested state."""
+        if not isinstance(data, dict):
+            raise TypeError('PortfolioDecision state must be a dictionary.')
+
+        return cls(
+            decision_id=str(data.get('decision_id', '')),
+            status=str(
+                data.get(
+                    'status',
+                    PortfolioDecisionStatus.FAILED.value,
+                )
+            ),
+            approved=bool(data.get('approved', False)),
+            regime=data.get('regime'),
+            tickers=tuple(
+                str(ticker)
+                for ticker in data.get('tickers', [])
+            ),
+            weights={
+                str(key): float(value)
+                for key, value in data.get('weights', {}).items()
+            },
+            expected_returns={
+                str(key): float(value)
+                for key, value in data.get('expected_returns', {}).items()
+            },
+            covariance={
+                str(key): {
+                    str(inner_key): float(inner_value)
+                    for inner_key, inner_value in row.items()
+                }
+                for key, row in data.get('covariance', {}).items()
+            },
+            portfolio_return=float(data.get('portfolio_return', 0.0)),
+            portfolio_volatility=float(data.get('portfolio_volatility', 0.0)),
+            portfolio_variance=float(data.get('portfolio_variance', 0.0)),
+            gross_exposure=float(data.get('gross_exposure', 0.0)),
+            net_exposure=float(data.get('net_exposure', 0.0)),
+            number_of_positions=int(data.get('number_of_positions', 0)),
+            risk_contributions={
+                str(key): float(value)
+                for key, value in data.get('risk_contributions', {}).items()
+            },
+            risk_contribution_pct={
+                str(key): float(value)
+                for key, value in data.get('risk_contribution_pct', {}).items()
+            },
+            scenario_results=dict(data.get('scenario_results', {})),
+            diagnostics=dict(data.get('diagnostics', {})),
+            warnings=tuple(
+                str(warning)
+                for warning in data.get('warnings', [])
+            ),
+            errors=tuple(
+                str(error)
+                for error in data.get('errors', [])
+            ),
+            timestamp=str(data.get('timestamp', '')),
+            api_version=str(data.get('api_version', '1.0.0')),
+        )
 
 class PortfolioDecisionEngine:
     """
@@ -130,8 +321,12 @@ class PortfolioDecisionEngine:
     API_VERSION = '1.0.0'
     PUBLIC_METHODS = ('decide', 'get_decision', 'decisions', 'health_check', 'summary', 'metadata', 'to_dict', 'from_dict', 'reset')
 
-    def __init__(self, asset_universe: Any=None, regime_model: Any=None, expected_return_forecaster: Any=None, covariance_engine: Any=None, regime_covariance: Any=_UNSET, ensemble_covariance: Any=_UNSET, black_litterman: Any=_UNSET, optimizer: Any=None, constraints: Any=None, risk_model: Any=None, risk_contribution_analyzer: Any=_UNSET, scenario_engine: Any=None, normalize_weights: bool=True, weight_tolerance: float=1e-08, minimum_weight: float=0.0, maximum_weight: float=1.0) -> None:
+    def __init__(self, asset_universe: Any=None, regime_model: Any=None, expected_return_forecaster: Any=None, covariance_engine: Any=None, regime_covariance: Any=_UNSET, ensemble_covariance: Any=_UNSET, black_litterman: Any=_UNSET, optimizer: Any=None, constraints: Any=None, risk_model: Any=None, risk_contribution_analyzer: Any=_UNSET, scenario_engine: Any=None, drawdown_risk_engine: Any=_UNSET, normalize_weights: bool=True, weight_tolerance: float=1e-08, minimum_weight: float=0.0, maximum_weight: float=1.0) -> None:
         """Initialize the portfolio decision engine."""
+        # A process/engine-specific namespace makes decision identities globally
+        # non-reusable across engine resets and fresh process instances.  The
+        # namespace is persisted by ``to_dict`` and restored by ``from_dict``.
+        self._identity_namespace = uuid4().hex[:16].upper()
         if weight_tolerance < 0:
             raise ValueError('weight_tolerance must be non-negative.')
         if minimum_weight < 0:
@@ -152,6 +347,11 @@ class PortfolioDecisionEngine:
         self.risk_model = risk_model if risk_model is not None else self._safe_construct(RiskModel)
         self.risk_contribution_analyzer = self._safe_construct(RiskContributionAnalytics) if risk_contribution_analyzer is _UNSET else risk_contribution_analyzer
         self.scenario_engine = scenario_engine if scenario_engine is not None else self._safe_construct(ScenarioEngine)
+        self.drawdown_risk_engine = (
+            self._safe_construct(DrawdownRiskEngine)
+            if drawdown_risk_engine is _UNSET
+            else drawdown_risk_engine
+        )
         self.normalize_weights = bool(normalize_weights)
         self.weight_tolerance = float(weight_tolerance)
         self.minimum_weight = float(minimum_weight)
@@ -184,9 +384,9 @@ class PortfolioDecisionEngine:
         return datetime.now(timezone.utc).isoformat()
 
     def _next_decision_id(self) -> str:
-        """Generate the next deterministic decision identifier."""
+        """Generate a unique decision identifier for this engine lifecycle."""
         self._sequence += 1
-        return f'PDEC-{self._sequence:08d}'
+        return f'PDEC-{self._identity_namespace}-{self._sequence:08d}'
 
     @staticmethod
     def _get(obj: Any, key: str, default: Any=None) -> Any:
@@ -624,7 +824,7 @@ class PortfolioDecisionEngine:
             return dict(expected_returns)
         return self._normalize_expected_returns(result, tickers)
 
-    def _optimize(self, expected_returns: dict[str, float], covariance: dict[str, dict[str, float]], portfolio: Any, regime: Optional[str], tickers: list[str], constraints: Any=None, prices: Any=None) -> dict[str, float]:
+    def _optimize(self, expected_returns: dict[str, float], covariance: dict[str, dict[str, float]], portfolio: Any, regime: Optional[str], tickers: list[str], constraints: Any=None, prices: Any=None, tail_risk: Any=None) -> dict[str, float]:
         """Invoke PortfolioOptimizer through its production API contract."""
         if not tickers:
             return {}
@@ -633,22 +833,49 @@ class PortfolioDecisionEngine:
         optimize_method = getattr(self.optimizer, 'optimize', None)
         if callable(optimize_method):
             import inspect
-            parameter_names = set(inspect.signature(optimize_method).parameters)
-            matrix = np.asarray([[self._to_float(covariance.get(a, {}).get(b, 0.0)) for b in tickers] for a in tickers], dtype=float)
+            signature_parameters = inspect.signature(optimize_method).parameters
+            parameter_names = set(signature_parameters)
+            accepts_kwargs = any(
+                parameter.kind == inspect.Parameter.VAR_KEYWORD
+                for parameter in signature_parameters.values()
+            )
+            matrix = np.asarray(
+                [[self._to_float(covariance.get(a, {}).get(b, 0.0)) for b in tickers]
+                 for a in tickers],
+                dtype=float,
+            )
             if 'asset_order' in parameter_names:
-                result = optimize_method(covariance=matrix, regime=regime, asset_order=tuple(tickers), prices=prices)
+                optimizer_kwargs = {
+                    'covariance': matrix,
+                    'regime': regime,
+                    'asset_order': tuple(tickers),
+                    'prices': prices,
+                }
             else:
-                result = optimize_method(
-                    tickers=tickers,
-                    expected_returns=expected_returns,
-                    covariance=covariance,
-                    portfolio=portfolio,
-                    regime=regime,
-                    constraints=constraints,
-                    prices=prices,
-                )
+                optimizer_kwargs = {
+                    'tickers': tickers,
+                    'expected_returns': expected_returns,
+                    'covariance': covariance,
+                    'portfolio': portfolio,
+                    'regime': regime,
+                    'constraints': constraints,
+                    'prices': prices,
+                }
+            if 'tail_risk' in parameter_names or accepts_kwargs:
+                optimizer_kwargs['tail_risk'] = tail_risk
+            result = optimize_method(**optimizer_kwargs)
         else:
-            result = self._call(self.optimizer, ('allocate', 'solve', 'construct'), expected_returns=expected_returns, covariance=covariance, portfolio=portfolio, regime=regime, tickers=tickers, constraints=constraints)
+            result = self._call(
+                self.optimizer,
+                ('allocate', 'solve', 'construct'),
+                expected_returns=expected_returns,
+                covariance=covariance,
+                portfolio=portfolio,
+                regime=regime,
+                tickers=tickers,
+                constraints=constraints,
+                tail_risk=tail_risk,
+            )
         weights = self._extract_optimizer_weights(result, tickers)
         if not weights:
             raise RuntimeError('PortfolioOptimizer returned no usable portfolio weights.')
@@ -830,18 +1057,168 @@ class PortfolioDecisionEngine:
         number_of_positions = int(sum((1 for value in vector if abs(value) > 1e-12)))
         return (portfolio_return, portfolio_variance, portfolio_volatility, gross_exposure, net_exposure, number_of_positions)
 
-    def _run_scenarios(self, weights: dict[str, float], scenarios: Any, portfolio: Any) -> dict[str, Any]:
-        """Run scenario analysis when a scenario engine is available."""
+    def _run_scenarios(
+        self,
+        weights: dict[str, float],
+        scenarios: Any,
+        portfolio: Any,
+        expected_returns: dict[str, float] | None = None,
+    ) -> dict[str, Any]:
+        """Run registered additive return shocks against the approved mix."""
         if scenarios is None:
             return {}
         if self.scenario_engine is None:
             return {}
-        result = self._call(self.scenario_engine, ('compare', 'apply', 'run'), weights=weights, scenarios=scenarios, portfolio=portfolio)
-        if isinstance(result, dict):
-            return result
-        return {}
+        from assetuniverse import AssetUniverse
+        from portfolio import Portfolio
 
-    def decide(self, portfolio: Any, returns: Any=None, prices: Any = None, macro_data: Any=None, views: Any=None, market_weights: Any=None, scenarios: Any=None, expected_returns: Any=None, covariance: Any=None, regimes: Any=None) -> PortfolioDecision:
+        if not isinstance(scenarios, Mapping) or not scenarios:
+            raise ValueError("Scenarios must map names to per-asset additive shocks.")
+        universe = AssetUniverse.production()
+        tickers = list(universe.tickers)
+        domain_portfolio = Portfolio(universe)
+        domain_portfolio.set_weights(weights)
+        domain_portfolio.set_expected_returns(
+            [float((expected_returns or {}).get(ticker, 0.0)) for ticker in tickers]
+        )
+        results: dict[str, Any] = {}
+        for name, shocks in scenarios.items():
+            if str(name) in self.scenario_engine.scenarios:
+                self.scenario_engine.remove_scenario(str(name))
+            self.scenario_engine.add_scenario(str(name), dict(shocks))
+            shocked = self.scenario_engine.apply(domain_portfolio, str(name))
+            comparison = self.scenario_engine.compare(domain_portfolio, shocked)
+            delta = comparison.get("expected_return_change")
+            if delta is None:
+                raise ValueError(f"Scenario {name!r} did not produce return changes.")
+            results[str(name)] = {
+                "portfolio_return": float(
+                    sum(
+                        float(weights.get(ticker, 0.0))
+                        * (float((expected_returns or {}).get(ticker, 0.0)) + float(delta[index]))
+                        for index, ticker in enumerate(tickers)
+                    )
+                ),
+                "weighted_return_change": float(
+                    sum(float(weights.get(ticker, 0.0)) * float(delta[index]) for index, ticker in enumerate(tickers))
+                ),
+                "assets_shocked": int(
+                    self.scenario_engine.last_report["assets_shocked"]
+                ),
+            }
+        return {"status": "COMPLETED", "results": results}
+
+    def _prepare_portfolio_returns(
+        self,
+        returns: Any,
+        weights: dict[str, float],
+        tickers: list[str],
+    ) -> Any:
+        """Build a one-dimensional historical portfolio return series.
+
+        Asset-level return histories are combined using the approved portfolio
+        weights. A supplied one-dimensional return series is passed through
+        unchanged. No synthetic returns are created.
+        """
+        if returns is None:
+            return None
+
+        import pandas as pd
+
+        if isinstance(returns, pd.DataFrame):
+            missing = [ticker for ticker in tickers if ticker not in returns.columns]
+            if missing:
+                raise ValueError(
+                    f"Returns are missing portfolio assets: {missing}."
+                )
+            frame = returns.loc[:, tickers].apply(
+                pd.to_numeric, errors="coerce"
+            )
+            if frame.empty or frame.isna().any().any():
+                raise ValueError(
+                    "Portfolio return history contains missing or non-numeric values."
+                )
+            vector = np.asarray(
+                [float(weights[ticker]) for ticker in tickers],
+                dtype=float,
+            )
+            values = frame.to_numpy(dtype=float) @ vector
+            return pd.Series(values, index=frame.index, name="portfolio_returns")
+
+        if isinstance(returns, Mapping):
+            missing = [ticker for ticker in tickers if ticker not in returns]
+            if missing:
+                raise ValueError(
+                    f"Returns are missing portfolio assets: {missing}."
+                )
+            series_map = {
+                ticker: pd.Series(returns[ticker], dtype=float).reset_index(drop=True)
+                for ticker in tickers
+            }
+            lengths = {len(series) for series in series_map.values()}
+            if not lengths or 0 in lengths or len(lengths) != 1:
+                raise ValueError(
+                    "Portfolio asset return histories must have equal non-zero length."
+                )
+            frame = pd.DataFrame(series_map)
+            if frame.isna().any().any():
+                raise ValueError(
+                    "Portfolio return history contains missing or non-numeric values."
+                )
+            vector = np.asarray(
+                [float(weights[ticker]) for ticker in tickers],
+                dtype=float,
+            )
+            return pd.Series(
+                frame.to_numpy(dtype=float) @ vector,
+                name="portfolio_returns",
+            )
+
+        series = pd.Series(returns, dtype=float).dropna()
+        if series.empty:
+            raise ValueError("Portfolio return history cannot be empty.")
+        return series
+
+    def _run_drawdown_risk(
+        self,
+        returns: Any,
+        weights: dict[str, float],
+        tickers: list[str],
+        *,
+        horizon: int | None = None,
+        simulations: int = 10_000,
+        initial_equity: float = 1.0,
+        ruin_threshold: float | None = None,
+        rng: Any = None,
+    ) -> dict[str, Any]:
+        """Run R3D drawdown/recovery analytics when return history is available."""
+        if returns is None or self.drawdown_risk_engine is None:
+            return {}
+
+        portfolio_returns = self._prepare_portfolio_returns(
+            returns, weights, tickers
+        )
+        analyze = getattr(self.drawdown_risk_engine, "analyze", None)
+        if not callable(analyze):
+            raise RuntimeError(
+                "DrawdownRiskEngine does not expose the required analyze() API."
+            )
+
+        result = analyze(
+            portfolio_returns,
+            horizon=horizon,
+            simulations=simulations,
+            initial_equity=initial_equity,
+            ruin_threshold=ruin_threshold,
+            rng=rng,
+        )
+        if not isinstance(result, dict):
+            raise RuntimeError(
+                "DrawdownRiskEngine returned an invalid analysis result."
+            )
+        return dict(result)
+
+    def decide(self, portfolio: Any, returns: Any=None, prices: Any = None, macro_data: Any=None, views: Any=None, market_weights: Any=None, scenarios: Any=None, expected_returns: Any=None, covariance: Any=None, regimes: Any=None, drawdown_horizon: int | None=None, drawdown_simulations: int=10_000, drawdown_initial_equity: float=1.0, drawdown_ruin_threshold: float | None=None, drawdown_rng: Any=None, tail_risk: Any=None) -> PortfolioDecision:
         """
         Execute one complete portfolio decision cycle.
         """
@@ -870,42 +1247,60 @@ class PortfolioDecisionEngine:
             posterior_returns = self._apply_black_litterman(normalized_expected_returns, normalized_covariance, views, market_weights)
             if views is not None:
                 self._audit('BLACK_LITTERMAN_APPLIED', message='Black-Litterman views incorporated.', component='BlackLittermanModel')
-            optimized_weights = self._optimize(posterior_returns, normalized_covariance, portfolio, regime, tickers, constraints=self.constraints, prices=prices)
-
-            # Preserve an authoritative Risk Governor reduction.
-            # The optimizer has already applied the governance decision;
-            # normalizing here would silently restore exposure removed by
-            # the risk governor.
-            optimizer_risk_diagnostics = getattr(
-                self.optimizer,
-                "last_volatility_diagnostics",
-                None,
+            optimized_weights = self._optimize(
+                posterior_returns,
+                normalized_covariance,
+                portfolio,
+                regime,
+                tickers,
+                constraints=self.constraints,
+                prices=prices,
+                tail_risk=tail_risk,
             )
-            governance_action = None
-            if isinstance(optimizer_risk_diagnostics, dict):
-                governance_action = optimizer_risk_diagnostics.get(
-                    "risk_governance_action"
+
+            # Preserve reduced exposure only when the optimizer explicitly
+            # reports an approved risk-governor REDUCE action.
+            governance_diagnostics = getattr(
+                self.optimizer, "last_volatility_diagnostics", None
+            )
+            governance_diagnostics = (
+                governance_diagnostics
+                if isinstance(governance_diagnostics, dict)
+                else {}
+            )
+            governance = governance_diagnostics.get("risk_governance", {})
+            governance = governance if isinstance(governance, dict) else {}
+            governance_action = str(
+                governance.get(
+                    "action",
+                    governance_diagnostics.get("risk_governance_action", ""),
                 )
-
-            risk_governed_output = (
-                str(governance_action).upper() == "REDUCE"
+            ).upper()
+            preserve_reduced_exposure = (
+                governance_action == "REDUCE"
+                and (
+                    governance.get("approved") is True
+                    or governance_diagnostics.get("risk_governance_approved") is True
+                )
             )
 
-            if not risk_governed_output:
+            if not preserve_reduced_exposure:
                 optimized_weights = self._normalize_weights(
-                    optimized_weights,
-                    tickers,
+                    optimized_weights, tickers
                 )
-            self._audit('PORTFOLIO_OPTIMIZED', message='Portfolio optimization completed.', component='PortfolioOptimizer', data={'weights': optimized_weights})
-            constrained_weights = self._apply_constraints(optimized_weights, tickers)
 
-            # Preserve the Risk Governor reduction through the constraint
-            # boundary. Constraints may modify individual weights, but the
-            # Decision Engine must not restore deliberately reduced exposure.
-            if not risk_governed_output:
+            self._audit(
+                'PORTFOLIO_OPTIMIZED',
+                message='Portfolio optimization completed.',
+                component='PortfolioOptimizer',
+                data={'weights': optimized_weights},
+            )
+            constrained_weights = self._apply_constraints(
+                optimized_weights, tickers
+            )
+            if not preserve_reduced_exposure:
                 constrained_weights = self._normalize_weights(
-                    constrained_weights,
-                    tickers,
+                    constrained_weights, tickers
                 )
             weight_warnings, weight_errors = self._validate_weights(constrained_weights, tickers)
             warnings.extend(weight_warnings)
@@ -924,14 +1319,81 @@ class PortfolioDecisionEngine:
             portfolio_variance = calculated_variance
             portfolio_volatility = calculated_volatility
             self._audit('PORTFOLIO_METRICS_CALCULATED', message='Portfolio return and exposure metrics calculated.', component='PortfolioAnalytics', data={'portfolio_return': portfolio_return, 'gross_exposure': gross_exposure, 'net_exposure': net_exposure, 'number_of_positions': number_of_positions})
-            scenario_results = self._run_scenarios(constrained_weights, scenarios, portfolio)
+            scenario_results = self._run_scenarios(
+                constrained_weights,
+                scenarios,
+                portfolio,
+                expected_returns=posterior_returns,
+            )
+            drawdown_risk = self._run_drawdown_risk(
+                returns,
+                constrained_weights,
+                tickers,
+                horizon=drawdown_horizon,
+                simulations=drawdown_simulations,
+                initial_equity=drawdown_initial_equity,
+                ruin_threshold=drawdown_ruin_threshold,
+                rng=(
+                    np.random.default_rng(DEFAULT_DRAWDOWN_RNG_SEED)
+                    if drawdown_rng is None
+                    else drawdown_rng
+                ),
+            )
+            if drawdown_risk:
+                self._audit(
+                    'DRAWDOWN_RISK_ANALYZED',
+                    message='R3D drawdown, recovery and survival-risk analysis completed.',
+                    component='DrawdownRiskEngine',
+                    data={
+                        'current_drawdown': drawdown_risk.get('drawdown_state', {}).get('current_drawdown'),
+                        'maximum_drawdown': drawdown_risk.get('drawdown_state', {}).get('maximum_drawdown'),
+                        'horizon': drawdown_horizon,
+                    },
+                )
+
+            # Preserve the authoritative optimizer risk provenance at the
+            # decision boundary. Native decision risk values remain
+            # backward compatible; annualized values live in diagnostics.
+            optimizer_risk_diagnostics = getattr(
+                self.optimizer,
+                "last_volatility_diagnostics",
+                None,
+            )
+
+            diagnostics_payload = (
+                dict(optimizer_risk_diagnostics)
+                if isinstance(
+                    optimizer_risk_diagnostics,
+                    Mapping,
+                )
+                else {}
+            )
+
+            diagnostics_payload.update(
+                {
+                    'regime': regime,
+                    'ticker_count': len(tickers),
+                    'tail_risk_supplied': tail_risk is not None,
+                    'warning_count': len(warnings),
+                    'error_count': len(errors),
+                    'portfolio_return': portfolio_return,
+                    'portfolio_variance': portfolio_variance,
+                    'portfolio_volatility': portfolio_volatility,
+                    'gross_exposure': gross_exposure,
+                    'net_exposure': net_exposure,
+                    'number_of_positions': number_of_positions,
+                    'drawdown_risk': drawdown_risk,
+                    'drawdown_risk_enabled': bool(drawdown_risk),
+                }
+            )
+
             approved = not errors
             status = PortfolioDecisionStatus.APPROVED.value if approved else PortfolioDecisionStatus.REJECTED.value
             if approved:
                 self.approved_count += 1
             else:
                 self.rejected_count += 1
-            decision = PortfolioDecision(decision_id=decision_id, status=status, approved=approved, regime=regime, tickers=tuple(tickers), weights=dict(constrained_weights), expected_returns=dict(posterior_returns), covariance=dict(normalized_covariance), portfolio_return=portfolio_return, portfolio_volatility=portfolio_volatility, portfolio_variance=portfolio_variance, gross_exposure=gross_exposure, net_exposure=net_exposure, number_of_positions=number_of_positions, risk_contributions=dict(risk_contributions), risk_contribution_pct=dict(risk_contribution_pct), scenario_results=dict(scenario_results), diagnostics={'regime': regime, 'ticker_count': len(tickers), 'warning_count': len(warnings), 'error_count': len(errors), 'portfolio_return': portfolio_return, 'portfolio_variance': portfolio_variance, 'portfolio_volatility': portfolio_volatility, 'gross_exposure': gross_exposure, 'net_exposure': net_exposure, 'number_of_positions': number_of_positions}, warnings=tuple(warnings), errors=tuple(errors), timestamp=self._timestamp(), api_version=self.API_VERSION)
+            decision = PortfolioDecision(decision_id=decision_id, status=status, approved=approved, regime=regime, tickers=tuple(tickers), weights=dict(constrained_weights), expected_returns=dict(posterior_returns), covariance=dict(normalized_covariance), portfolio_return=portfolio_return, portfolio_volatility=portfolio_volatility, portfolio_variance=portfolio_variance, gross_exposure=gross_exposure, net_exposure=net_exposure, number_of_positions=number_of_positions, risk_contributions=dict(risk_contributions), risk_contribution_pct=dict(risk_contribution_pct), scenario_results=dict(scenario_results), diagnostics=diagnostics_payload, warnings=tuple(warnings), errors=tuple(errors), timestamp=self._timestamp(), api_version=self.API_VERSION)
             self._decisions.append(decision)
             self.last_decision = decision
             self.decision_count += 1
@@ -969,7 +1431,7 @@ class PortfolioDecisionEngine:
         The deterministic fallback paths remain available for regression
         testing and controlled development environments.
         """
-        components = {'asset_universe': self.asset_universe, 'regime_model': self.regime_model, 'expected_return_forecaster': self.expected_return_forecaster, 'covariance_engine': self.covariance_engine, 'regime_covariance': self.regime_covariance, 'ensemble_covariance': self.ensemble_covariance, 'black_litterman': self.black_litterman, 'optimizer': self.optimizer, 'constraints': self.constraints, 'risk_model': self.risk_model, 'risk_contribution_analyzer': self.risk_contribution_analyzer, 'scenario_engine': self.scenario_engine}
+        components = {'asset_universe': self.asset_universe, 'regime_model': self.regime_model, 'expected_return_forecaster': self.expected_return_forecaster, 'covariance_engine': self.covariance_engine, 'regime_covariance': self.regime_covariance, 'ensemble_covariance': self.ensemble_covariance, 'black_litterman': self.black_litterman, 'optimizer': self.optimizer, 'constraints': self.constraints, 'risk_model': self.risk_model, 'risk_contribution_analyzer': self.risk_contribution_analyzer, 'scenario_engine': self.scenario_engine, 'drawdown_risk_engine': self.drawdown_risk_engine}
         required = {'regime_model', 'expected_return_forecaster', 'covariance_engine', 'optimizer', 'risk_model'}
         component_health: dict[str, Any] = {}
         overall = bool(self._healthy)
@@ -1006,40 +1468,77 @@ class PortfolioDecisionEngine:
 
     def metadata(self) -> dict[str, Any]:
         """Return engine metadata."""
-        return {'module': 'portfoliodecisionengine', 'component': 'PortfolioDecisionEngine', 'api_version': self.API_VERSION, 'phase': 'IV-A', 'normalize_weights': self.normalize_weights, 'weight_tolerance': self.weight_tolerance, 'minimum_weight': self.minimum_weight, 'maximum_weight': self.maximum_weight, 'public_methods': list(self.PUBLIC_METHODS)}
+        return {'module': 'portfoliodecisionengine', 'component': 'PortfolioDecisionEngine', 'api_version': self.API_VERSION, 'phase': 'IV-A/R3D.3', 'drawdown_risk_engine': self.drawdown_risk_engine is not None, 'normalize_weights': self.normalize_weights, 'weight_tolerance': self.weight_tolerance, 'minimum_weight': self.minimum_weight, 'maximum_weight': self.maximum_weight, 'public_methods': list(self.PUBLIC_METHODS)}
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize complete engine state."""
-        return {'api_version': self.API_VERSION, 'sequence': self._sequence, 'normalize_weights': self.normalize_weights, 'weight_tolerance': self.weight_tolerance, 'minimum_weight': self.minimum_weight, 'maximum_weight': self.maximum_weight, 'healthy': self._healthy, 'decision_count': self.decision_count, 'approved_count': self.approved_count, 'rejected_count': self.rejected_count, 'failed_count': self.failed_count, 'decisions': [decision.to_dict() for decision in self._decisions], 'audit_history': [event.to_dict() for event in self.audit_history]}
+        return {'api_version': self.API_VERSION, 'identity_namespace': self._identity_namespace, 'sequence': self._sequence, 'normalize_weights': self.normalize_weights, 'weight_tolerance': self.weight_tolerance, 'minimum_weight': self.minimum_weight, 'maximum_weight': self.maximum_weight, 'healthy': self._healthy, 'decision_count': self.decision_count, 'approved_count': self.approved_count, 'rejected_count': self.rejected_count, 'failed_count': self.failed_count, 'decisions': [decision.to_dict() for decision in self._decisions], 'audit_history': [event.to_dict() for event in self.audit_history]}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any], **dependencies: Any) -> 'PortfolioDecisionEngine':
-        """Restore engine state from serialized data."""
+        """Restore engine state strictly from serialized state.
+
+        Restoration is fail-closed: malformed decision or audit records are
+        rejected rather than silently discarded.  This prevents a partial
+        lifecycle history from being presented as a valid production state.
+        """
+        if not isinstance(data, dict):
+            raise TypeError("data must be a dictionary.")
+
+        raw_decisions = data.get('decisions', [])
+        raw_audit = data.get('audit_history', [])
+        if not isinstance(raw_decisions, list):
+            raise ValueError("Serialized decisions must be a list.")
+        if not isinstance(raw_audit, list):
+            raise ValueError("Serialized audit_history must be a list.")
+
+        namespace = str(data.get('identity_namespace', '')).strip().upper()
+        if not namespace:
+            # Backward-compatible restoration of legacy state receives a new
+            # namespace so subsequent IDs cannot collide with fresh engines.
+            namespace = uuid4().hex[:16].upper()
+
         engine = cls(normalize_weights=bool(data.get('normalize_weights', True)), weight_tolerance=float(data.get('weight_tolerance', 1e-08)), minimum_weight=float(data.get('minimum_weight', 0.0)), maximum_weight=float(data.get('maximum_weight', 1.0)), **dependencies)
+        engine._identity_namespace = namespace
         engine._sequence = int(data.get('sequence', 0))
+        if engine._sequence < 0:
+            raise ValueError("Serialized sequence cannot be negative.")
         engine._healthy = bool(data.get('healthy', True))
+
         engine._decisions = []
-        for item in data.get('decisions', []):
-            try:
-                engine._decisions.append(PortfolioDecision.from_dict(item))
-            except (TypeError, ValueError, AttributeError):
-                continue
+        seen_ids: set[str] = set()
+        for item in raw_decisions:
+            if not isinstance(item, dict):
+                raise ValueError("Serialized decision entries must be dictionaries.")
+            decision = PortfolioDecision.from_dict(item)
+            if not decision.decision_id:
+                raise ValueError("Serialized decision must contain decision_id.")
+            if decision.decision_id in seen_ids:
+                raise ValueError(f"Duplicate decision_id in serialized state: {decision.decision_id}")
+            seen_ids.add(decision.decision_id)
+            engine._decisions.append(decision)
+
         engine.last_decision = engine._decisions[-1] if engine._decisions else None
         engine.decision_count = int(data.get('decision_count', len(engine._decisions)))
         engine.approved_count = int(data.get('approved_count', sum((decision.approved for decision in engine._decisions))))
         engine.rejected_count = int(data.get('rejected_count', sum((decision.status == PortfolioDecisionStatus.REJECTED.value for decision in engine._decisions))))
         engine.failed_count = int(data.get('failed_count', sum((decision.status == PortfolioDecisionStatus.FAILED.value for decision in engine._decisions))))
+
+        if engine.decision_count < len(engine._decisions):
+            raise ValueError("decision_count cannot be smaller than restored decisions.")
+
         engine.audit_history = []
-        for raw_event in data.get('audit_history', []):
-            try:
-                engine.audit_history.append(DecisionEvent(timestamp=str(raw_event.get('timestamp', '')), event=str(raw_event.get('event', '')), severity=str(raw_event.get('severity', DecisionSeverity.INFO.value)), message=str(raw_event.get('message', '')), component=raw_event.get('component'), data=dict(raw_event.get('data', {}))))
-            except (TypeError, ValueError):
-                continue
+        for raw_event in raw_audit:
+            if not isinstance(raw_event, dict):
+                raise ValueError("Serialized audit entries must be dictionaries.")
+            engine.audit_history.append(DecisionEvent(timestamp=str(raw_event.get('timestamp', '')), event=str(raw_event.get('event', '')), severity=str(raw_event.get('severity', DecisionSeverity.INFO.value)), message=str(raw_event.get('message', '')), component=raw_event.get('component'), data=dict(raw_event.get('data', {}))))
+
         return engine
 
     def reset(self) -> None:
-        """Reset all transient decision-engine state."""
-        self._sequence = 0
+        """Reset transient decision state without reusing decision identities."""
+        # The sequence is intentionally preserved.  Reset clears operational
+        # history but must never make a previously issued decision_id valid again.
         self._decisions.clear()
         self.audit_history.clear()
         self.last_decision = None
@@ -1483,12 +1982,78 @@ def test_portfolio_decision_engine_serialization_roundtrip() -> None:
     assert restored.risk_contributions == decision.risk_contributions
     assert restored.risk_contribution_pct == decision.risk_contribution_pct
     print('PortfolioDecision serialization tests passed.')
+
+
+def test_portfolio_decision_engine_drawdown_risk_integration() -> None:
+    """R3D.3 regression: decision diagnostics contain drawdown risk analytics."""
+    class _TestDrawdownRiskEngine:
+        def __init__(self) -> None:
+            self.received_returns = None
+
+        def analyze(self, returns, **kwargs):
+            self.received_returns = returns
+            return {
+                'api_version': '1.0.0',
+                'phase': 'R3D',
+                'component': 'DrawdownRiskEngine',
+                'drawdown_state': {
+                    'current_equity': 0.98,
+                    'peak_equity': 1.02,
+                    'current_drawdown': -0.039215686274509776,
+                    'maximum_drawdown': -0.05,
+                    'current_drawdown_duration': 3,
+                    'maximum_drawdown_duration': 5,
+                    'underwater': True,
+                    'recovered': False,
+                },
+                'recovery': {
+                    'drawdown_episodes': 1.0,
+                    'recovered_episodes': 0.0,
+                    'unrecovered_episodes': 1.0,
+                    'recovery_rate': 0.0,
+                },
+                'risk_of_ruin': None,
+            }
+
+    drawdown = _TestDrawdownRiskEngine()
+    engine = PortfolioDecisionEngine(
+        regime_model=_TestRegimeModel(),
+        expected_return_forecaster=_TestExpectedReturnForecaster(),
+        covariance_engine=_TestCovarianceEngine(),
+        regime_covariance=None,
+        ensemble_covariance=None,
+        black_litterman=None,
+        optimizer=_TestOptimizer(),
+        constraints=_TestConstraints(),
+        risk_model=_TestRiskModel(),
+        risk_contribution_analyzer=None,
+        scenario_engine=None,
+        drawdown_risk_engine=drawdown,
+    )
+    returns = {
+        'SPY': [0.01, -0.02, 0.005, -0.01],
+        'TLT': [0.005, -0.01, 0.002, -0.005],
+    }
+    decision = engine.decide(
+        portfolio={'weights': {'SPY': 0.5, 'TLT': 0.5}},
+        returns=returns,
+        expected_returns={'SPY': 0.05, 'TLT': 0.05},
+        covariance=np.eye(2) * 0.04,
+    )
+    assert decision.approved
+    assert decision.diagnostics['drawdown_risk_enabled']
+    assert decision.diagnostics['drawdown_risk']['phase'] == 'R3D'
+    assert drawdown.received_returns is not None
+    assert len(drawdown.received_returns) == 4
+    assert any(event.event == 'DRAWDOWN_RISK_ANALYZED' for event in engine.audit_history)
+
 if __name__ == '__main__':
     test_portfolio_decision_engine()
     test_portfolio_decision_engine_regime_covariance()
     test_portfolio_decision_engine_weight_validation()
     test_portfolio_decision_engine_reset()
     test_portfolio_decision_engine_failure_handling()
+    test_portfolio_decision_engine_drawdown_risk_integration()
     test_portfolio_decision_engine_serialization_roundtrip()
     print()
     print('==============================================================')

@@ -1,0 +1,11 @@
+[Unit]
+Description=Evaluate completed US market sessions after publication buffer
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 22:30:00 UTC
+Persistent=true
+RandomizedDelaySec=120
+Unit=strategy-validation.service
+
+[Install]
+WantedBy=timers.target

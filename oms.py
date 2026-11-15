@@ -75,7 +75,7 @@ Author: Michael Kazibwe
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Optional, Any
+from typing import Optional
 
 from authorizedorderintent import AuthorizedOrderIntent
 from authorizedexecutionhandoff import (
@@ -1633,6 +1633,9 @@ class OMS:
         return {
             "api_version": self.API_VERSION,
             "phase": self.PHASE,
+            "order_book": self.order_book.to_dict(),
+            "execution_engine": self.execution_engine.to_dict(),
+            "broker_execution_engine": self.broker_execution_engine.to_dict(),
             "order_history": list(
                 self.order_history
             ),
@@ -1667,6 +1670,22 @@ class OMS:
 
         oms = cls()
 
+        execution_engine_data = data.get("execution_engine")
+        broker_execution_data = data.get("broker_execution_engine")
+        if execution_engine_data is not None:
+            oms.execution_engine = ExecutionEngine.from_dict(execution_engine_data)
+        if broker_execution_data is not None:
+            oms.broker_execution_engine = BrokerExecutionEngine.from_dict(
+                broker_execution_data,
+                execution_engine=oms.execution_engine,
+            )
+
+        # Older snapshots only contained the OMS summary. New snapshots
+        # retain canonical orders in every lifecycle bucket so restart
+        # recovery does not lose open or completed order state.
+        if data.get("order_book") is not None:
+            oms.order_book = OrderBook.from_dict(data["order_book"])
+
         oms.order_history = list(
             data.get(
                 "order_history",
@@ -1679,12 +1698,11 @@ class OMS:
         )
 
         if last_order is not None:
-
-            oms.last_order = (
-                Order.from_dict(
-                    last_order
-                )
-            )
+            last_id = last_order.get("order_id")
+            if last_id is not None and oms.order_book.has_order(last_id):
+                oms.last_order = oms.order_book.get_order(last_id)
+            else:
+                oms.last_order = Order.from_dict(last_order)
 
         oms.last_rejection_reason = (
             data.get(
@@ -1978,9 +1996,18 @@ def test_oms():
 
     invalid_ticker = Order(
         order_id="OMS-INVALID-001",
-        ticker="",
+        ticker="SPY",
         side="BUY",
         quantity=10,
+    )
+    # Deliberately corrupt the canonical identity for this negative test.
+    # Order.__setattr__ correctly prevents normal mutation of identity
+    # fields, so object.__setattr__ is used only for this invalid-boundary
+    # regression fixture.
+    object.__setattr__(
+        invalid_ticker,
+        "ticker",
+        "",
     )
 
     rejected_invalid_ticker = (
@@ -2024,8 +2051,13 @@ def test_oms():
     invalid_side = Order(
         order_id="OMS-INVALID-002",
         ticker="SPY",
-        side="LONG",
+        side="BUY",
         quantity=10,
+    )
+    object.__setattr__(
+        invalid_side,
+        "side",
+        "LONG",
     )
 
     oms.submit_order(
@@ -2049,7 +2081,12 @@ def test_oms():
         order_id="OMS-INVALID-003",
         ticker="SPY",
         side="BUY",
-        quantity=0,
+        quantity=10,
+    )
+    object.__setattr__(
+        invalid_quantity,
+        "quantity",
+        0,
     )
 
     oms.submit_order(
@@ -2074,7 +2111,11 @@ def test_oms():
         ticker="SPY",
         side="BUY",
         quantity=10,
-        order_type="INVALID",
+    )
+    object.__setattr__(
+        invalid_type,
+        "order_type",
+        "INVALID",
     )
 
     oms.submit_order(
@@ -2100,8 +2141,9 @@ def test_oms():
         side="BUY",
         quantity=10,
         order_type="LIMIT",
-        limit_price=None,
+        limit_price=100.0,
     )
+    invalid_limit.limit_price = None
 
     oms.submit_order(
         invalid_limit

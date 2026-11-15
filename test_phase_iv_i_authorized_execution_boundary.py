@@ -126,8 +126,7 @@ def test_authorized_execution_preserves_decision_id():
     broker = PaperBroker()
 
     account = PortfolioAccount(
-        cash=100_000.0,
-        positions={},
+        initial_cash=100_000.0,
     )
 
     broker.submit_order(order)
@@ -161,8 +160,7 @@ def test_authorized_execution_preserves_regime():
     broker = PaperBroker()
 
     account = PortfolioAccount(
-        cash=100_000.0,
-        positions={},
+        initial_cash=100_000.0,
     )
 
     broker.submit_order(order)
@@ -194,8 +192,7 @@ def test_authorized_execution_preserves_exact_order_identity():
     broker = PaperBroker()
 
     account = PortfolioAccount(
-        cash=100_000.0,
-        positions={},
+        initial_cash=100_000.0,
     )
 
     broker.submit_order(order)
@@ -229,166 +226,6 @@ def test_authorized_execution_preserves_authorization_artifact():
     broker = PaperBroker()
 
     account = PortfolioAccount(
-        cash=100_000.0,
-        positions={},
-    )
-
-    broker.submit_order(order)
-
-    receipt = broker.fill_order(
-        order.order_id,
-        execution_price=100.0,
-    )
-
-    result = engine.execute_authorized_receipt(
-        handoff=handoff,
-        receipt=receipt,
-        account=account,
-    )
-
-    provenance = result.authorization_provenance
-
-    assert (
-        provenance["authorization"]
-        == handoff.authorization.to_dict()
-    )
-
-
-def test_authorized_execution_preserves_handoff_phase():
-    engine = BrokerExecutionEngine()
-
-    handoff = _make_handoff()
-
-    order = handoff.execution_order()
-
-    broker = PaperBroker()
-
-    account = PortfolioAccount(
-        initial_cash=100_000.0,
-        positions={},
-    )
-
-    broker.submit_order(order)
-
-    receipt = broker.fill_order(
-        order.order_id,
-        execution_price=100.0,
-    )
-
-    result = engine.execute_authorized_receipt(
-        handoff=handoff,
-        receipt=receipt,
-        account=account,
-    )
-
-    assert (
-        result.authorization_provenance["phase"]
-        == "PHASE IV-I-F"
-    )
-
-
-def test_authorized_execution_preserves_decision_id():
-    engine = BrokerExecutionEngine()
-
-    handoff = _make_handoff()
-    order = handoff.execution_order()
-
-    broker = PaperBroker()
-    account = PortfolioAccount(
-        initial_cash=100_000.0,
-    )
-
-    broker.submit_order(order)
-
-    receipt = broker.fill_order(
-        order.order_id,
-        execution_price=100.0,
-    )
-
-    result = engine.execute_authorized_receipt(
-        handoff=handoff,
-        receipt=receipt,
-        account=account,
-    )
-
-    assert result.approved is True
-
-    assert (
-        result.authorization_provenance["decision_id"]
-        == handoff.decision_id
-    )
-
-
-def test_authorized_execution_preserves_regime():
-    engine = BrokerExecutionEngine()
-
-    handoff = _make_handoff()
-    order = handoff.execution_order()
-
-    broker = PaperBroker()
-    account = PortfolioAccount(
-        initial_cash=100_000.0,
-    )
-
-    broker.submit_order(order)
-
-    receipt = broker.fill_order(
-        order.order_id,
-        execution_price=100.0,
-    )
-
-    result = engine.execute_authorized_receipt(
-        handoff=handoff,
-        receipt=receipt,
-        account=account,
-    )
-
-    assert (
-        result.authorization_provenance["regime"]
-        == handoff.regime
-    )
-
-
-def test_authorized_execution_preserves_exact_order_identity():
-    engine = BrokerExecutionEngine()
-
-    handoff = _make_handoff()
-    order = handoff.execution_order()
-
-    broker = PaperBroker()
-    account = PortfolioAccount(
-        initial_cash=100_000.0,
-    )
-
-    broker.submit_order(order)
-
-    receipt = broker.fill_order(
-        order.order_id,
-        execution_price=100.0,
-    )
-
-    result = engine.execute_authorized_receipt(
-        handoff=handoff,
-        receipt=receipt,
-        account=account,
-    )
-
-    provenance = result.authorization_provenance
-
-    assert provenance["order"]["order_id"] == order.order_id
-    assert provenance["order"]["ticker"] == order.ticker
-    assert provenance["order"]["side"] == order.side
-    assert provenance["order"]["quantity"] == order.quantity
-
-
-def test_authorized_execution_preserves_authorization_artifact():
-    engine = BrokerExecutionEngine()
-
-    handoff = _make_handoff()
-    order = handoff.execution_order()
-
-    broker = PaperBroker()
-    account = PortfolioAccount(
         initial_cash=100_000.0,
     )
 
@@ -417,9 +254,11 @@ def test_authorized_execution_preserves_handoff_phase():
     engine = BrokerExecutionEngine()
 
     handoff = _make_handoff()
+
     order = handoff.execution_order()
 
     broker = PaperBroker()
+
     account = PortfolioAccount(
         initial_cash=100_000.0,
     )

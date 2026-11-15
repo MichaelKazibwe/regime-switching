@@ -1,0 +1,16 @@
+[Unit]
+Description=Check daily shadow job completion and linked evidence
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=regime
+Group=regime
+WorkingDirectory=/opt/regime
+EnvironmentFile=/etc/regime/strategy-image.env
+ExecStart=/usr/bin/docker compose -f compose.strategy.yaml run --rm --entrypoint python validation strategy_healthcheck.py --root /app/var/strategy-operations-integrated-v1
+UMask=0077
+NoNewPrivileges=true
+TimeoutStartSec=120
+StandardOutput=journal
+StandardError=journal

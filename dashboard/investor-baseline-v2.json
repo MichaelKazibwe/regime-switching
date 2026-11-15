@@ -1,0 +1,16 @@
+{
+  "version": "INVESTOR_DASHBOARD_V2",
+  "design_status": "IMPLEMENTED_OWNER_REQUEST_PENDING_REVIEW",
+  "scope": "Presentation and conditional diagnostics; no public release or strategy approval",
+  "previous_baseline": "dashboard/investor-baseline-v1.json",
+  "source_sha256": {
+    "dashboard/investor.html": "1118a25dccce38a5938cebfd8d8748fabca70bd8eb8884c7107617323a1b778f",
+    "dashboard/investor.css": "3b25bd4e1c0a399856db216d6c1285eab2b4d11922b9f25700cee4354a953287",
+    "dashboard/investor.js": "ae0e214b6305632a0826d9eafce200c5f1c1dc04d085ca6c2824bc5bc623852e",
+    "investor_dashboard.py": "873f27242178e174f023685a100d43ec5c7e0b8d0fd992707dfcec585b368507",
+    "investor_analytics.py": "68d705748ad649e91de2931dff34312c2ad8a41de3f1fc3b96f0f541fdf9320e",
+    "investor_macro_feed.py": "9e6dc4b13446fb5dedd8e233f1d4ef6acf0447cc176efa9b787306b166683b93",
+    "investor_pdf.py": "95782896a0aa825eaa3a7eabd9b94fe1a9d914359253c16d7c0d2718f61f4a98",
+    "productreport.py": "57933e62258d6d7c6eec285f0eb43e49e72f59d8733849e016a90a0791a3415b"
+  }
+}

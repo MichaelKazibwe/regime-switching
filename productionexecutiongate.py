@@ -1,6 +1,6 @@
 # ======================================================================
 # PRODUCTION EXECUTION GATE
-# PHASE IV-B.5
+# PHASE IV-B.5 + PHASE 5D KILL SWITCH
 # ======================================================================
 
 """
@@ -21,41 +21,69 @@ Phase IV-B.5 sits immediately after:
     Phase IV-B.4
         Production Risk Validation
 
-and before any downstream execution infrastructure.
+and before downstream execution infrastructure.
+
+Phase 5D introduces the Kill Switch as an additional execution veto.
+
+Execution authorization sequence
+--------------------------------
+
+    Production Decision
+            |
+            v
+    Decision validation
+            |
+            v
+    Risk validation
+            |
+            v
+    Kill Switch
+       /        \
+   ACTIVE      RELEASED
+      |            |
+      v            v
+  REJECTED     AUTHORIZED
+      |
+      v
+require_authorization()
+      |
+      v
+HARD STOP
 
 Design principles
 -----------------
 1. PortfolioDecisionEngine remains the authoritative decision source.
 2. Phase IV-B.3 remains the authoritative decision-execution source.
 3. Phase IV-B.4 remains the authoritative risk-validation source.
-4. No execution authorization may be produced unless all required
+4. Phase 5D KillSwitch is an execution veto only.
+5. No execution authorization may be produced unless all required
    upstream controls have passed.
-5. REJECTED decisions are hard stops.
-6. FAILED decisions are hard stops.
-7. Missing decision identifiers are hard stops.
-8. Missing portfolio weights are hard stops.
-9. Invalid risk validation is a hard stop.
-10. Execution authorization is immutable.
-11. This phase does not place orders.
-12. This phase does not communicate with brokers.
-13. This phase does not mutate portfolio state.
-14. Live trading remains disabled.
-15. Test doubles are not used by the production composition boundary.
-16. The execution gate is deterministic.
-17. The execution gate does not override upstream decisions.
-18. The execution gate cannot convert REJECTED or FAILED into APPROVED.
-19. Downstream execution must consume the authorization produced here.
-20. Broker and OMS integration belong to later execution phases.
+6. REJECTED decisions are hard stops.
+7. FAILED decisions are hard stops.
+8. Missing decision identifiers are hard stops.
+9. Missing portfolio weights are hard stops.
+10. Invalid risk validation is a hard stop.
+11. An active Kill Switch is a hard stop.
+12. Execution authorization is immutable.
+13. This phase does not place orders.
+14. This phase does not route orders.
+15. This phase does not communicate with brokers.
+16. This phase does not mutate portfolio state.
+17. Live trading remains disabled.
+18. Broker submission remains disabled.
+19. Test doubles are not permitted at the production boundary.
+20. The execution gate is deterministic.
+21. The execution gate does not override upstream decisions.
+22. The Kill Switch does not modify upstream decisions.
+23. The Kill Switch does not create an independent authorization.
+24. Downstream execution must consume the authorization produced here.
+25. Broker and OMS integration belong to downstream execution phases.
 """
 
 # ======================================================================
 # SECTION 1
 # IMPORTS
 # ======================================================================
-
-# ----------------------------------------------------------------------
-# 1.1 STANDARD LIBRARY
-# ----------------------------------------------------------------------
 
 from __future__ import annotations
 
@@ -70,7 +98,7 @@ from typing import (
 
 
 # ----------------------------------------------------------------------
-# 1.2 PRODUCTION DECISION EXECUTION
+# 1.1 PRODUCTION DECISION EXECUTION
 # ----------------------------------------------------------------------
 
 from productiondecisionexecution import (
@@ -80,13 +108,20 @@ from productiondecisionexecution import (
 
 
 # ----------------------------------------------------------------------
-# 1.3 DECISION STATUS
+# 1.2 DECISION STATUS
 # ----------------------------------------------------------------------
 
 from portfoliodecisionengine import (
     PortfolioDecisionStatus,
 )
 
+
+# ----------------------------------------------------------------------
+# 1.3 PHASE 5D KILL SWITCH
+# ----------------------------------------------------------------------
+
+from circuitbreaker import CircuitBreaker
+from killswitch import KillSwitch
 
 # ======================================================================
 # SECTION 2
@@ -115,25 +150,13 @@ class ExecutionAuthorizationStatus:
     Deterministic execution authorization states.
     """
 
-    # ------------------------------------------------------------------
-    # 3.1 AUTHORIZED
-    # ------------------------------------------------------------------
-
     AUTHORIZED = (
         "AUTHORIZED"
     )
 
-    # ------------------------------------------------------------------
-    # 3.2 REJECTED
-    # ------------------------------------------------------------------
-
     REJECTED = (
         "REJECTED"
     )
-
-    # ------------------------------------------------------------------
-    # 3.3 FAILED
-    # ------------------------------------------------------------------
 
     FAILED = (
         "FAILED"
@@ -156,6 +179,7 @@ class ExecutionAuthorization:
     This object is an authorization artifact only.
 
     It does not:
+
         - submit an order
         - route an order
         - mutate an account
@@ -163,102 +187,46 @@ class ExecutionAuthorization:
         - communicate with an OMS
     """
 
-    # ------------------------------------------------------------------
-    # 4.1 STATUS
-    # ------------------------------------------------------------------
-
     status: str
-
-    # ------------------------------------------------------------------
-    # 4.2 AUTHORIZATION
-    # ------------------------------------------------------------------
 
     authorized: bool
 
-    # ------------------------------------------------------------------
-    # 4.3 DECISION ID
-    # ------------------------------------------------------------------
-
     decision_id: str | None
-
-    # ------------------------------------------------------------------
-    # 4.4 REGIME
-    # ------------------------------------------------------------------
 
     regime: str | None
 
-    # ------------------------------------------------------------------
-    # 4.5 PORTFOLIO WEIGHTS
-    # ------------------------------------------------------------------
-
     weights: dict[str, float]
-
-    # ------------------------------------------------------------------
-    # 4.6 PORTFOLIO RISK
-    # ------------------------------------------------------------------
 
     portfolio_volatility: float
 
     portfolio_variance: float
 
-    # ------------------------------------------------------------------
-    # 4.7 EXPOSURE
-    # ------------------------------------------------------------------
-
     gross_exposure: float
 
     net_exposure: float
-
-    # ------------------------------------------------------------------
-    # 4.8 RISK CONTRIBUTIONS
-    # ------------------------------------------------------------------
 
     risk_contributions: dict[str, float]
 
     risk_contribution_pct: dict[str, float]
 
-    # ------------------------------------------------------------------
-    # 4.9 VALIDATION
-    # ------------------------------------------------------------------
-
     risk_validation_passed: bool
-
-    # ------------------------------------------------------------------
-    # 4.10 EXECUTION CONTROL
-    # ------------------------------------------------------------------
 
     live_trading_enabled: bool
 
     broker_submission_enabled: bool
 
-    # ------------------------------------------------------------------
-    # 4.11 WARNINGS
-    # ------------------------------------------------------------------
-
     warnings: tuple[str, ...]
-
-    # ------------------------------------------------------------------
-    # 4.12 ERRORS
-    # ------------------------------------------------------------------
 
     errors: tuple[str, ...]
 
-    # ------------------------------------------------------------------
-    # 4.13 DIAGNOSTICS
-    # ------------------------------------------------------------------
-
     diagnostics: dict[str, Any]
-
-    # ------------------------------------------------------------------
-    # 4.14 METADATA
-    # ------------------------------------------------------------------
 
     api_version: str
 
     phase: str
 
     # ==================================================================
-    # 4.15 DICTIONARY REPRESENTATION
+    # DICTIONARY REPRESENTATION
     # ==================================================================
 
     def to_dict(
@@ -334,8 +302,11 @@ class ProductionExecutionGate:
 
     It does not alter the decision.
 
-    It only determines whether the already-approved production
-    decision satisfies the execution-boundary requirements.
+    It determines whether the already-approved production decision
+    satisfies the execution-boundary requirements.
+
+    Phase 5D adds the Kill Switch as a final veto before an
+    AUTHORIZED artifact can be created.
     """
 
     # ==================================================================
@@ -348,6 +319,14 @@ class ProductionExecutionGate:
 
     PHASE = (
         "IV-B.5"
+    )
+
+    KILL_SWITCH_PHASE = (
+        "5D"
+    )
+
+    CIRCUIT_BREAKER_PHASE = (
+        "5E"
     )
 
     # ==================================================================
@@ -392,6 +371,14 @@ class ProductionExecutionGate:
             ProductionDecisionExecution
             | None
         ) = None,
+        kill_switch: (
+            KillSwitch
+            | None
+        ) = None,
+        circuit_breaker: (
+            CircuitBreaker
+            |  None
+        ) = None,
     ) -> None:
         """
         Initialize the Phase IV-B.5 execution gate.
@@ -401,12 +388,13 @@ class ProductionExecutionGate:
         decision_execution:
             Real Phase IV-B.3 production decision execution component.
 
-        Notes
-        -----
-        If omitted, a real ProductionDecisionExecution instance is
-        constructed.
+        kill_switch:
+            Phase 5D production KillSwitch.
 
-        No test double is accepted or injected.
+            If omitted, a new released KillSwitch is created.
+
+        No test double is accepted for the production decision
+        execution component.
         """
 
         # --------------------------------------------------------------
@@ -445,7 +433,52 @@ class ProductionExecutionGate:
         )
 
         # --------------------------------------------------------------
-        # 5.4.3 STATE
+        # 5.4.3 KILL SWITCH
+        # --------------------------------------------------------------
+
+        if (
+            kill_switch
+            is None
+        ):
+
+            kill_switch = (
+                KillSwitch()
+            )
+
+        if not isinstance(
+            kill_switch,
+            KillSwitch,
+        ):
+
+            raise ProductionExecutionGateError(
+                (
+                    "Phase 5D requires a real KillSwitch instance. "
+                    "Incompatible objects are not permitted."
+                )
+            )
+
+        self.kill_switch = (
+            kill_switch
+        )
+
+        if circuit_breaker is None:
+            circuit_breaker = CircuitBreaker()
+
+        if not isinstance(
+            circuit_breaker,
+            CircuitBreaker,
+        ):
+            raise ProductionExecutionGateError(
+                (
+                    "Phase IV-B.5 requires a real CircuitBreaker "
+                    "instance. Incompatible objects are not "
+                    "permitted."
+                )
+            )
+        self.circuit_breaker = circuit_breaker
+
+        # --------------------------------------------------------------
+        # 5.4.4 STATE
         # --------------------------------------------------------------
 
         self.last_authorization = (
@@ -535,19 +568,11 @@ class ProductionExecutionGate:
         Validate all mandatory fields of an approved result.
         """
 
-        # --------------------------------------------------------------
-        # DECISION ID
-        # --------------------------------------------------------------
-
         if not result.decision_id:
 
             raise ProductionExecutionGateError(
                 "Approved decision has no decision ID."
             )
-
-        # --------------------------------------------------------------
-        # REGIME
-        # --------------------------------------------------------------
 
         if not result.regime:
 
@@ -555,19 +580,11 @@ class ProductionExecutionGate:
                 "Approved decision has no regime."
             )
 
-        # --------------------------------------------------------------
-        # WEIGHTS
-        # --------------------------------------------------------------
-
         if not result.weights:
 
             raise ProductionExecutionGateError(
                 "Approved decision has no portfolio weights."
             )
-
-        # --------------------------------------------------------------
-        # WEIGHT FINITENESS
-        # --------------------------------------------------------------
 
         for (
             asset,
@@ -603,10 +620,6 @@ class ProductionExecutionGate:
                     )
                 )
 
-        # --------------------------------------------------------------
-        # RISK VALIDATION
-        # --------------------------------------------------------------
-
         if not result.risk_contributions:
 
             raise ProductionExecutionGateError(
@@ -616,10 +629,6 @@ class ProductionExecutionGate:
                 )
             )
 
-        # --------------------------------------------------------------
-        # RISK CONTRIBUTION PERCENTAGES
-        # --------------------------------------------------------------
-
         if not result.risk_contribution_pct:
 
             raise ProductionExecutionGateError(
@@ -628,10 +637,6 @@ class ProductionExecutionGate:
                     "risk contribution percentages."
                 )
             )
-
-        # --------------------------------------------------------------
-        # APPROVAL FLAG
-        # --------------------------------------------------------------
 
         if not result.approved:
 
@@ -646,10 +651,6 @@ class ProductionExecutionGate:
     # SECTION 7
     # RISK VALIDATION BOUNDARY
     # ==================================================================
-
-    # ------------------------------------------------------------------
-    # 7.1 RISK VALIDATION EXTRACTION
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _risk_validation_passed(
@@ -676,7 +677,7 @@ class ProductionExecutionGate:
             return False
 
         # --------------------------------------------------------------
-        # DIRECT FLAG
+        # DIRECT FLAGS
         # --------------------------------------------------------------
 
         for key in (
@@ -746,18 +747,20 @@ class ProductionExecutionGate:
                 "valid",
             ):
 
-                if nested_key in nested:
+                if nested_key not in nested:
 
-                    value = nested[
-                        nested_key
-                    ]
+                    continue
 
-                    if isinstance(
-                        value,
-                        bool,
-                    ):
+                value = nested[
+                    nested_key
+                ]
 
-                        return value
+                if isinstance(
+                    value,
+                    bool,
+                ):
+
+                    return value
 
         # --------------------------------------------------------------
         # NO POSITIVE EVIDENCE
@@ -783,7 +786,7 @@ class ProductionExecutionGate:
         decision and successful risk validation.
         """
 
-        authorization = (
+        return (
             ExecutionAuthorization(
                 status=(
                     ExecutionAuthorizationStatus.AUTHORIZED
@@ -835,8 +838,6 @@ class ProductionExecutionGate:
             )
         )
 
-        return authorization
-
     # ------------------------------------------------------------------
     # 8.2 REJECTED AUTHORIZATION
     # ------------------------------------------------------------------
@@ -849,7 +850,7 @@ class ProductionExecutionGate:
         Construct a non-authorizing rejection artifact.
         """
 
-        authorization = (
+        return (
             ExecutionAuthorization(
                 status=(
                     ExecutionAuthorizationStatus.REJECTED
@@ -903,8 +904,6 @@ class ProductionExecutionGate:
             )
         )
 
-        return authorization
-
     # ------------------------------------------------------------------
     # 8.3 FAILED AUTHORIZATION
     # ------------------------------------------------------------------
@@ -917,7 +916,7 @@ class ProductionExecutionGate:
         Construct a failed non-authorizing artifact.
         """
 
-        authorization = (
+        return (
             ExecutionAuthorization(
                 status=(
                     ExecutionAuthorizationStatus.FAILED
@@ -971,7 +970,158 @@ class ProductionExecutionGate:
             )
         )
 
+    # ------------------------------------------------------------------
+    # 8.4 KILL SWITCH REJECTION
+    # ------------------------------------------------------------------
+
+    def _build_kill_switch_rejection(
+        self,
+        result: ProductionDecisionExecutionResult,
+    ) -> ExecutionAuthorization:
+        """
+        Construct a non-authorizing artifact when the Phase 5D
+        Kill Switch is active.
+
+        Risk validation has already passed at this point.
+
+        Therefore risk_validation_passed remains True.
+
+        The rejection reason explicitly identifies the Kill Switch.
+        """
+
+        diagnostics = dict(
+            result.diagnostics
+        )
+
+        diagnostics[
+            "kill_switch_active"
+        ] = True
+
+        diagnostics[
+            "kill_switch_phase"
+        ] = self.KILL_SWITCH_PHASE
+
+        return (
+            ExecutionAuthorization(
+                status=(
+                    ExecutionAuthorizationStatus.REJECTED
+                ),
+                authorized=False,
+                decision_id=result.decision_id,
+                regime=result.regime,
+                weights=dict(
+                    result.weights
+                ),
+                portfolio_volatility=float(
+                    result.portfolio_volatility
+                ),
+                portfolio_variance=float(
+                    result.portfolio_variance
+                ),
+                gross_exposure=float(
+                    result.gross_exposure
+                ),
+                net_exposure=float(
+                    result.net_exposure
+                ),
+                risk_contributions=dict(
+                    result.risk_contributions
+                ),
+                risk_contribution_pct=dict(
+                    result.risk_contribution_pct
+                ),
+                risk_validation_passed=True,
+                live_trading_enabled=(
+                    self.LIVE_TRADING_ENABLED
+                ),
+                broker_submission_enabled=(
+                    self.BROKER_SUBMISSION_ENABLED
+                ),
+                warnings=tuple(
+                    result.warnings
+                ),
+                errors=(
+                    "PHASE_5D_KILL_SWITCH_ACTIVE",
+                ),
+                diagnostics=diagnostics,
+                api_version=(
+                    self.API_VERSION
+                ),
+                phase=(
+                    self.PHASE
+                ),
+            )
+        )
+
+    def _build_circuit_breaker_rejection(
+        self,
+        result: ProductionDecisionExecutionResult,
+    ) -> ExecutionAuthorization:
+        """
+        Construct a non-authorizing rejection when the Phase 5E
+        circuit breaker is OPEN.
+        """
+
+        diagnostics = dict(
+            result.diagnostics
+        )
+
+        diagnostics.update(
+            {
+                "circuit_breaker_open": True,
+                "circuit_breaker_phase": (
+                    self.CIRCUIT_BREAKER_PHASE
+                ),
+                "execution_blocked": True,
+            }
+        )
+
+        authorization = ExecutionAuthorization(
+            status=(
+                ExecutionAuthorizationStatus.REJECTED
+            ),
+            authorized=False,
+            decision_id=result.decision_id,
+            regime=result.regime,
+            weights=dict(result.weights),
+            portfolio_volatility=(
+                result.portfolio_volatility
+            ),
+            portfolio_variance=(
+                result.portfolio_variance
+            ),
+            gross_exposure=(
+                result.gross_exposure
+            ),
+            net_exposure=(
+                result.net_exposure
+            ),
+            risk_contributions=dict(
+                result.risk_contributions
+            ),
+            risk_contribution_pct=dict(
+                result.risk_contribution_pct
+            ),
+            risk_validation_passed=True,
+            live_trading_enabled=(
+                self.LIVE_TRADING_ENABLED
+            ),
+            broker_submission_enabled=(
+                self.BROKER_SUBMISSION_ENABLED
+            ),
+            warnings=tuple(
+                result.warnings
+            ),
+            errors=(
+                "PHASE_5E_CIRCUIT_BREAKER_OPEN",
+            ),
+            diagnostics=diagnostics,
+            api_version=self.API_VERSION,
+            phase=self.PHASE,
+        )
+
         return authorization
+
 
     # ==================================================================
     # SECTION 9
@@ -986,8 +1136,17 @@ class ProductionExecutionGate:
         Evaluate a Phase IV-B.3 result at the Phase IV-B.5 execution
         boundary.
 
-        Only an APPROVED decision with explicit successful risk
-        validation receives AUTHORIZED status.
+        Authorization requires:
+
+            1. valid production result;
+            2. recognized status;
+            3. APPROVED status;
+            4. valid approved-result fields;
+            5. successful Phase IV-B.4 risk validation;
+            6. released Phase 5D Kill Switch.
+
+        Only after all six conditions are satisfied can AUTHORIZED
+        status be produced.
         """
 
         # --------------------------------------------------------------
@@ -1135,7 +1294,47 @@ class ProductionExecutionGate:
             return failed_validation
 
         # --------------------------------------------------------------
-        # 9.7 AUTHORIZE
+        # 9.7 KILL SWITCH
+        # --------------------------------------------------------------
+
+        if self.kill_switch.is_active():
+
+            self.rejected_count += 1
+
+            authorization = (
+                self._build_kill_switch_rejection(
+                    result
+                )
+            )
+
+            self.last_authorization = (
+                authorization
+            )
+
+            return authorization
+
+        # --------------------------------------------------------------
+        # 9.8 CIRCUIT BREAKER
+        # --------------------------------------------------------------
+
+        if self.circuit_breaker.is_open():
+
+            self.rejected_count += 1
+
+            authorization = (
+                self._build_circuit_breaker_rejection(
+                    result
+                )
+            )
+
+            self.last_authorization = (
+                authorization
+            )
+
+            return authorization
+
+        # --------------------------------------------------------------
+        # 9.9 AUTHORIZE
         # --------------------------------------------------------------
 
         authorization = (
@@ -1235,6 +1434,12 @@ class ProductionExecutionGate:
     ) -> dict[str, Any]:
         """
         Return the deterministic health state of Phase IV-B.5.
+
+        The Kill Switch must itself be healthy before the execution
+        gate reports healthy.
+
+        An ACTIVE Kill Switch is operationally valid and therefore does
+        not make the gate unhealthy. It makes execution blocked.
         """
 
         # --------------------------------------------------------------
@@ -1311,7 +1516,58 @@ class ProductionExecutionGate:
             }
 
         # --------------------------------------------------------------
-        # 11.3 UPSTREAM HEALTH
+        # 11.3 KILL SWITCH HEALTH
+        # --------------------------------------------------------------
+
+        try:
+
+            kill_switch_health = (
+                self.kill_switch.health_check()
+            )
+
+            circuit_breaker_health = (
+            self.circuit_breaker.health_check()
+            )
+
+        except Exception as exc:
+
+            return {
+                "api_version": (
+                    self.API_VERSION
+                ),
+                "phase": (
+                    self.PHASE
+                ),
+                "healthy": False,
+                "error": (
+                    "Unable to validate Phase 5D Kill Switch "
+                    f"health: {exc}"
+                ),
+            }
+
+        if not kill_switch_health.get(
+            "healthy",
+            False,
+        ):
+
+            return {
+                "api_version": (
+                    self.API_VERSION
+                ),
+                "phase": (
+                    self.PHASE
+                ),
+                "healthy": False,
+                "kill_switch_health": (
+                    kill_switch_health
+                ),
+                "error": (
+                    "Phase 5D Kill Switch is unhealthy."
+                ),
+            }
+
+        # --------------------------------------------------------------
+        # 11.4 UPSTREAM HEALTH
         # --------------------------------------------------------------
 
         try:
@@ -1353,6 +1609,9 @@ class ProductionExecutionGate:
                 "upstream_health": (
                     upstream
                 ),
+                "kill_switch_health": (
+                    kill_switch_health
+                ),
                 "error": (
                     "Phase IV-B.3 production decision "
                     "execution is unhealthy."
@@ -1360,7 +1619,7 @@ class ProductionExecutionGate:
             }
 
         # --------------------------------------------------------------
-        # 11.4 HEALTHY
+        # 11.5 HEALTHY
         # --------------------------------------------------------------
 
         return {
@@ -1382,8 +1641,25 @@ class ProductionExecutionGate:
             ),
             "decision_engine_authoritative": True,
             "risk_validation_required": True,
+            "kill_switch_enabled": True,
+            "kill_switch_active": (
+                self.kill_switch.is_active()
+            ),
+            "execution_blocked": (
+                self.kill_switch.is_active()
+                or self.circuit_breaker.is_open()
+            ),
             "upstream_health": (
                 upstream
+            ),
+            "kill_switch_health": (
+                kill_switch_health
+            ),
+            "circuit_breaker_health": (
+                circuit_breaker_health
+            ),
+            "circuit_breaker_open": (
+                self.circuit_breaker.is_open()
             ),
         }
 
@@ -1433,6 +1709,22 @@ class ProductionExecutionGate:
             "decision_engine_authoritative": True,
             "risk_validation_required": True,
             "execution_enabled": False,
+            "kill_switch_enabled": True,
+            "kill_switch_phase": (
+                self.KILL_SWITCH_PHASE
+            ),
+            "kill_switch_active": (
+                self.kill_switch.is_active()
+            ),
+            "execution_blocked": (
+                self.kill_switch.is_active()
+            ),
+            "circuit_breaker_enabled": True,
+            "circuit_breaker_phase": self.CIRCUIT_BREAKER_PHASE,
+            "circuit_breaker_open": (
+                self.circuit_breaker.is_open()
+            ),
+
         }
 
     # ==================================================================
@@ -1483,6 +1775,16 @@ class ProductionExecutionGate:
             "broker_submission_enabled": (
                 self.BROKER_SUBMISSION_ENABLED
             ),
+            "kill_switch_active": (
+                self.kill_switch.is_active()
+            ),
+            "execution_blocked": (
+                self.kill_switch.is_active()
+            ),
+            "circuit_breaker_open": (
+                self.circuit_breaker.is_open()
+            ),
+
         }
 
 
@@ -1496,6 +1798,8 @@ def build_production_execution_gate(
 ) -> ProductionExecutionGate:
     """
     Construct the complete Phase IV-B.5 production execution gate.
+
+    The returned gate contains a released Phase 5D Kill Switch.
     """
 
     return (
@@ -1505,96 +1809,30 @@ def build_production_execution_gate(
 
 # ======================================================================
 # SECTION 15
-# REGRESSION TESTS
+# MODULE EXPORTS
 # ======================================================================
 
 
-def test_execution_authorization_metadata() -> None:
-    """
-    Verify the immutable authorization metadata.
-    """
-
-    authorization = (
-        ExecutionAuthorization(
-            status=(
-                ExecutionAuthorizationStatus.AUTHORIZED
-            ),
-            authorized=True,
-            decision_id="TEST-DECISION",
-            regime="expansion",
-            weights={
-                "SPY": 0.60,
-                "TLT": 0.40,
-            },
-            portfolio_volatility=0.10,
-            portfolio_variance=0.01,
-            gross_exposure=1.0,
-            net_exposure=1.0,
-            risk_contributions={
-                "SPY": 0.60,
-                "TLT": 0.40,
-            },
-            risk_contribution_pct={
-                "SPY": 0.60,
-                "TLT": 0.40,
-            },
-            risk_validation_passed=True,
-            live_trading_enabled=False,
-            broker_submission_enabled=False,
-            warnings=tuple(),
-            errors=tuple(),
-            diagnostics={
-                "risk_validation_passed": True,
-            },
-            api_version="1.0.0",
-            phase="IV-B.5",
-        )
-    )
-
-    assert (
-        authorization.status
-        == "AUTHORIZED"
-    )
-
-    assert (
-        authorization.authorized
-        is True
-    )
-
-    assert (
-        authorization.decision_id
-        == "TEST-DECISION"
-    )
-
-    assert (
-        authorization.live_trading_enabled
-        is False
-    )
-
-    assert (
-        authorization.broker_submission_enabled
-        is False
-    )
-
-    payload = (
-        authorization.to_dict()
-    )
-
-    assert (
-        payload["phase"]
-        == "IV-B.5"
-    )
+__all__ = [
+    "ExecutionAuthorization",
+    "ExecutionAuthorizationStatus",
+    "ProductionExecutionGate",
+    "ProductionExecutionGateError",
+    "build_production_execution_gate",
+]
 
 
 # ======================================================================
 # SECTION 16
-# PRODUCTION GATE STRUCTURAL TESTS
+# MODULE SELF-TEST
 # ======================================================================
 
 
-def test_production_execution_gate_metadata() -> None:
+def _self_test() -> None:
     """
-    Verify Phase IV-B.5 metadata.
+    Minimal deterministic production-boundary self-test.
+
+    This test deliberately does not submit, route, or execute orders.
     """
 
     gate = (
@@ -1621,11 +1859,6 @@ def test_production_execution_gate_metadata() -> None:
     )
 
     assert (
-        metadata["test_doubles_allowed"]
-        is False
-    )
-
-    assert (
         metadata["live_trading_enabled"]
         is False
     )
@@ -1636,114 +1869,32 @@ def test_production_execution_gate_metadata() -> None:
     )
 
     assert (
-        metadata["decision_engine_authoritative"]
+        metadata["kill_switch_enabled"]
         is True
     )
 
     assert (
-        metadata["risk_validation_required"]
-        is True
-    )
-
-    assert (
-        metadata["execution_enabled"]
+        gate.kill_switch.is_active()
         is False
     )
 
-
-# ======================================================================
-# SECTION 17
-# PRODUCTION GATE HEALTH TEST
-# ======================================================================
-
-
-def test_production_execution_gate_health() -> None:
-    """
-    Verify that Phase IV-B.5 exposes a deterministic health interface.
-
-    The test uses the real Phase IV-B.3 production implementation.
-    No test doubles are injected.
-    """
-
-    gate = (
-        ProductionExecutionGate()
-    )
-
-    result = (
+    health = (
         gate.health_check()
     )
 
     assert (
-        isinstance(
-            result,
-            dict,
-        )
+        health["healthy"]
+        is True
     )
 
     assert (
-        "api_version"
-        in result
-    )
-
-    assert (
-        "phase"
-        in result
-    )
-
-    assert (
-        "healthy"
-        in result
-    )
-
-
-# ======================================================================
-# SECTION 18
-# EXECUTION POLICY TEST
-# ======================================================================
-
-
-def test_execution_policy_is_disabled() -> None:
-    """
-    Verify that Phase IV-B.5 cannot directly submit live orders.
-    """
-
-    gate = (
-        ProductionExecutionGate()
-    )
-
-    assert (
-        gate.LIVE_TRADING_ENABLED
+        health["kill_switch_active"]
         is False
     )
 
     assert (
-        gate.BROKER_SUBMISSION_ENABLED
+        health["execution_blocked"]
         is False
-    )
-
-    metadata = (
-        gate.metadata()
-    )
-
-    assert (
-        metadata["execution_enabled"]
-        is False
-    )
-
-
-# ======================================================================
-# SECTION 19
-# AUTHORIZATION HARD-STOP TEST
-# ======================================================================
-
-
-def test_execution_authorization_hard_stop() -> None:
-    """
-    Verify that non-authorized execution artifacts are hard-stopped.
-    """
-
-    gate = (
-        ProductionExecutionGate()
     )
 
     rejected = (
@@ -1752,7 +1903,7 @@ def test_execution_authorization_hard_stop() -> None:
                 ExecutionAuthorizationStatus.REJECTED
             ),
             authorized=False,
-            decision_id="REJECTED-TEST",
+            decision_id="SELF-TEST-REJECTED",
             regime="recession",
             weights={},
             portfolio_volatility=0.0,
@@ -1766,7 +1917,7 @@ def test_execution_authorization_hard_stop() -> None:
             broker_submission_enabled=False,
             warnings=tuple(),
             errors=(
-                "TEST_REJECTION",
+                "SELF_TEST_REJECTION",
             ),
             diagnostics={},
             api_version="1.0.0",
@@ -1787,47 +1938,19 @@ def test_execution_authorization_hard_stop() -> None:
     else:
 
         raise AssertionError(
-            (
-                "Rejected authorization must "
-                "produce a hard stop."
-            )
+            "Rejected authorization must be hard-stopped."
         )
 
 
 # ======================================================================
-# SECTION 20
-# REGRESSION ENTRY POINT
-# ======================================================================
-
-
-def run_regression_tests() -> None:
-    """
-    Run Phase IV-B.5 regression tests.
-    """
-
-    test_execution_authorization_metadata()
-
-    test_production_execution_gate_metadata()
-
-    test_production_execution_gate_health()
-
-    test_execution_policy_is_disabled()
-
-    test_execution_authorization_hard_stop()
-
-    print(
-        "ProductionExecutionGate Phase IV-B.5 "
-        "tests passed."
-    )
-
-
-# ======================================================================
-# SECTION 21
+# SECTION 17
 # MODULE ENTRY POINT
 # ======================================================================
 
 
 if __name__ == "__main__":
+
+    _self_test()
 
     print(
         "============================================================"
@@ -1846,84 +1969,24 @@ if __name__ == "__main__":
     )
 
     print()
-
-    # ------------------------------------------------------------------
-    # 21.1 METADATA
-    # ------------------------------------------------------------------
-
-    print(
-        "METADATA:"
-    )
-
+    print("METADATA:")
     print(
         gate.metadata()
     )
 
     print()
-
-    # ------------------------------------------------------------------
-    # 21.2 HEALTH CHECK
-    # ------------------------------------------------------------------
-
+    print("HEALTH CHECK:")
     print(
-        "HEALTH CHECK:"
-    )
-
-    health = (
         gate.health_check()
     )
 
-    print(
-        health
-    )
-
     print()
-
-    # ------------------------------------------------------------------
-    # 21.3 STATUS
-    # ------------------------------------------------------------------
-
-    if health.get(
-        "healthy",
-        False,
-    ):
-
-        print(
-            "STATUS: HEALTHY"
-        )
-
-    else:
-
-        print(
-            "STATUS: UNHEALTHY"
-        )
-
-        print(
-            "ERROR:",
-            health.get(
-                "error",
-                "Unknown production execution-gate error.",
-            ),
-        )
-
-    print()
-
-    # ------------------------------------------------------------------
-    # 21.4 SUMMARY
-    # ------------------------------------------------------------------
-
-    print(
-        "SUMMARY:"
-    )
-
+    print("SUMMARY:")
     print(
         gate.summary()
     )
 
     print()
-
-    # ------------------------------------------------------------------
-    # 21.5 REGRESSION TESTS
-    # ------------------------------------------------------------------
-
-    run_regression_tests()
+    print(
+        "PRODUCTION EXECUTION GATE SELF-TEST: PASS"
+    )

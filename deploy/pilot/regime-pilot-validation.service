@@ -1,0 +1,12 @@
+[Unit]
+Description=Regime invited-pilot completed-session collection
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/regime-pilot
+ExecStart=/usr/bin/docker compose --env-file .env.pilot -f compose.pilot.yaml --profile jobs run --rm validation
+TimeoutStartSec=10800
+UMask=0077

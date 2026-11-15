@@ -1,0 +1,492 @@
+{
+  "schema_version": 1,
+  "mode": "RESEARCH_ONLY",
+  "reviewed_on": "2026-10-30",
+  "scope": "Selected publicly documented asset classes and business exposures, not complete or real-time company holdings. Proxy choices are project research assumptions.",
+  "sources": {
+    "bw_model": {
+      "url": "https://www.ssga.com/us/en/intermediary/etfs/state-street-bridgewater-all-weather-etf-allw",
+      "scope": "Public All Weather asset-class model, not all Bridgewater funds"
+    },
+    "bw_story": {
+      "url": "https://www.bridgewater.com/resources/all-weather-story.pdf",
+      "scope": "All Weather framework, January 2012"
+    },
+    "bh_annual": {
+      "url": "https://www.berkshirehathaway.com/2025ar/2025ar.pdf",
+      "scope": "2025 annual report; listed investment examples as of 2025-12-31, not current holdings"
+    },
+    "bh_businesses": {
+      "url": "https://www.berkshirehathaway.com/subs/sublinks.html",
+      "scope": "Official subsidiary directory, reviewed 2026-10-30"
+    },
+    "tip": {
+      "url": "https://www.ishares.com/us/products/239467/ishares-tips-bond-etf",
+      "scope": "Candidate inflation-linked fund mandate, not a company holding"
+    },
+    "igov": {
+      "url": "https://www.ishares.com/us/products/239830/ishares-international-treasury-bond-etf",
+      "scope": "Non-US developed sovereign bond proxy; unhedged FX risk"
+    },
+    "sgov": {
+      "url": "https://www.ishares.com/us/products/314116/sgov",
+      "scope": "Treasury-bill fund mandate; ETF is distinct from cash"
+    },
+    "sectors": {
+      "url": "https://www.ssga.com/us/en/intermediary/capabilities/equities/sector-investing/select-sector-etfs",
+      "scope": "Sector fund mandates; not Berkshire holdings"
+    },
+    "kie": {
+      "url": "https://www.ssga.com/us/en/intermediary/etfs/state-street-spdr-sp-insurance-etf-kie",
+      "scope": "Listed insurance equity proxy; no access to Berkshire float"
+    },
+    "itb": {
+      "url": "https://www.ishares.com/us/products/239512/ishares-us-home-construction-etf",
+      "scope": "Home construction equity proxy"
+    },
+    "ewj": {
+      "url": "https://www.msci.com/indexes/index/939200/msci-japan-index",
+      "scope": "Japan index and linked EWJ fund; not a trading-house basket"
+    }
+  },
+  "exposures": [
+    {
+      "id": "bw_us_equities",
+      "company": "Bridgewater",
+      "exposure": "US equities",
+      "examples": [],
+      "source": "bw_model",
+      "canonical_proxies": [
+        "SPY",
+        "QQQ",
+        "IWM"
+      ],
+      "mapping": "asset_class_proxy",
+      "gap": null,
+      "gap_scope": "Production canonical mapping; research proxies, when present, improve category coverage without replicating businesses"
+    },
+    {
+      "id": "bw_developed_equities",
+      "company": "Bridgewater",
+      "exposure": "Developed international equities",
+      "examples": [],
+      "source": "bw_model",
+      "canonical_proxies": [
+        "VEA"
+      ],
+      "mapping": "asset_class_proxy",
+      "gap": null,
+      "gap_scope": "Production canonical mapping; research proxies, when present, improve category coverage without replicating businesses"
+    },
+    {
+      "id": "bw_emerging_equities",
+      "company": "Bridgewater",
+      "exposure": "Emerging-market equities",
+      "examples": [],
+      "source": "bw_model",
+      "canonical_proxies": [
+        "VWO"
+      ],
+      "mapping": "asset_class_proxy",
+      "gap": null,
+      "gap_scope": "Production canonical mapping; research proxies, when present, improve category coverage without replicating businesses"
+    },
+    {
+      "id": "bw_us_nominal_bonds",
+      "company": "Bridgewater",
+      "exposure": "US nominal government bonds",
+      "examples": [],
+      "source": "bw_model",
+      "canonical_proxies": [
+        "TLT",
+        "IEF",
+        "SHY"
+      ],
+      "mapping": "asset_class_proxy",
+      "gap": null,
+      "gap_scope": "Production canonical mapping; research proxies, when present, improve category coverage without replicating businesses"
+    },
+    {
+      "id": "bw_global_nominal_bonds",
+      "company": "Bridgewater",
+      "exposure": "Non-US nominal government bonds",
+      "examples": [],
+      "source": "bw_model",
+      "canonical_proxies": [],
+      "mapping": "missing",
+      "gap": "Non-US sovereign duration and currency exposure are absent",
+      "research_proxies": [
+        "IGOV"
+      ],
+      "research_mapping": "asset_class_proxy",
+      "gap_scope": "Production canonical mapping; research proxies, when present, improve category coverage without replicating businesses"
+    },
+    {
+      "id": "bw_inflation_linked_bonds",
+      "company": "Bridgewater",
+      "exposure": "Inflation-linked government bonds",
+      "examples": [],
+      "source": "bw_model",
+      "canonical_proxies": [],
+      "mapping": "missing",
+      "gap": "No explicit inflation-linked bond instrument",
+      "research_proxies": [
+        "TIP"
+      ],
+      "research_mapping": "asset_class_proxy",
+      "gap_scope": "Production canonical mapping; research proxies, when present, improve category coverage without replicating businesses"
+    },
+    {
+      "id": "bw_gold",
+      "company": "Bridgewater",
+      "exposure": "Gold",
+      "examples": [],
+      "source": "bw_story",
+      "canonical_proxies": [
+        "GLD"
+      ],
+      "mapping": "asset_class_proxy",
+      "gap": null,
+      "gap_scope": "Production canonical mapping; research proxies, when present, improve category coverage without replicating businesses"
+    },
+    {
+      "id": "bw_commodities",
+      "company": "Bridgewater",
+      "exposure": "Broad commodities",
+      "examples": [],
+      "source": "bw_model",
+      "canonical_proxies": [
+        "DBC"
+      ],
+      "mapping": "asset_class_proxy",
+      "gap": null,
+      "gap_scope": "Production canonical mapping; research proxies, when present, improve category coverage without replicating businesses"
+    },
+    {
+      "id": "bh_liquidity",
+      "company": "Berkshire Hathaway",
+      "exposure": "Liquidity and Treasury bills",
+      "examples": [
+        "Cash",
+        "US Treasury bills"
+      ],
+      "source": "bh_annual",
+      "canonical_proxies": [
+        "USD_CASH"
+      ],
+      "mapping": "partial_proxy",
+      "gap": "Uninvested cash does not reproduce Treasury-bill yield; SHY is not a cash equivalent",
+      "research_proxies": [
+        "USD_CASH",
+        "SGOV"
+      ],
+      "research_mapping": "partial_proxy",
+      "gap_scope": "Production canonical mapping; research proxies, when present, improve category coverage without replicating businesses"
+    },
+    {
+      "id": "bh_fixed_income",
+      "company": "Berkshire Hathaway",
+      "exposure": "Fixed-maturity investments",
+      "examples": [],
+      "source": "bh_annual",
+      "canonical_proxies": [
+        "IEF",
+        "LQD"
+      ],
+      "mapping": "partial_proxy",
+      "gap": "Treasury and investment-grade ETFs do not replicate issuer, maturity or insurance-liability matching",
+      "gap_scope": "Production canonical mapping; research proxies, when present, improve category coverage without replicating businesses"
+    },
+    {
+      "id": "bh_technology",
+      "company": "Berkshire Hathaway",
+      "exposure": "Technology businesses",
+      "examples": [
+        "Apple (AAPL)"
+      ],
+      "source": "bh_annual",
+      "canonical_proxies": [
+        "SPY",
+        "QQQ"
+      ],
+      "mapping": "broad_equity_proxy",
+      "gap": "No direct stock selection or verified constituent weights",
+      "gap_scope": "Production canonical mapping; research proxies, when present, improve category coverage without replicating businesses"
+    },
+    {
+      "id": "bh_financials",
+      "company": "Berkshire Hathaway",
+      "exposure": "Financial services",
+      "examples": [
+        "American Express (AXP)",
+        "Bank of America (BAC)",
+        "Moody's (MCO)"
+      ],
+      "source": "bh_annual",
+      "canonical_proxies": [
+        "SPY"
+      ],
+      "mapping": "broad_equity_proxy",
+      "gap": "No dedicated financial-services allocation",
+      "research_proxies": [
+        "XLF"
+      ],
+      "research_mapping": "sector_equity_proxy",
+      "gap_scope": "Production canonical mapping; research proxies, when present, improve category coverage without replicating businesses"
+    },
+    {
+      "id": "bh_consumer",
+      "company": "Berkshire Hathaway",
+      "exposure": "Consumer brands",
+      "examples": [
+        "Coca-Cola (KO)"
+      ],
+      "source": "bh_annual",
+      "canonical_proxies": [
+        "SPY"
+      ],
+      "mapping": "broad_equity_proxy",
+      "gap": "Broad equity exposure is not a consumer-quality screen",
+      "research_proxies": [
+        "XLP"
+      ],
+      "research_mapping": "sector_equity_proxy",
+      "gap_scope": "Production canonical mapping; research proxies, when present, improve category coverage without replicating businesses"
+    },
+    {
+      "id": "bh_energy_equity",
+      "company": "Berkshire Hathaway",
+      "exposure": "Energy producers",
+      "examples": [
+        "Chevron (CVX)",
+        "Occidental (OXY)"
+      ],
+      "source": "bh_annual",
+      "canonical_proxies": [
+        "SPY"
+      ],
+      "mapping": "broad_equity_proxy",
+      "gap": "DBC commodity futures are not energy-producer equity",
+      "research_proxies": [
+        "XLE"
+      ],
+      "research_mapping": "sector_equity_proxy",
+      "gap_scope": "Production canonical mapping; research proxies, when present, improve category coverage without replicating businesses"
+    },
+    {
+      "id": "bh_insurance",
+      "company": "Berkshire Hathaway",
+      "exposure": "Insurance and reinsurance",
+      "examples": [
+        "GEICO",
+        "General Re",
+        "National Indemnity"
+      ],
+      "source": "bh_businesses",
+      "canonical_proxies": [],
+      "mapping": "missing",
+      "gap": "Owned subsidiaries and insurance float cannot be reproduced through broad ETFs",
+      "research_proxies": [
+        "KIE"
+      ],
+      "research_mapping": "sector_equity_proxy",
+      "gap_scope": "Production canonical mapping; research proxies, when present, improve category coverage without replicating businesses"
+    },
+    {
+      "id": "bh_railroad",
+      "company": "Berkshire Hathaway",
+      "exposure": "Rail transport",
+      "examples": [
+        "BNSF"
+      ],
+      "source": "bh_businesses",
+      "canonical_proxies": [
+        "SPY"
+      ],
+      "mapping": "broad_equity_proxy",
+      "gap": "Sector exposure only; no ownership of BNSF",
+      "research_proxies": [
+        "XLI"
+      ],
+      "research_mapping": "sector_equity_proxy",
+      "gap_scope": "Production canonical mapping; research proxies, when present, improve category coverage without replicating businesses"
+    },
+    {
+      "id": "bh_utilities",
+      "company": "Berkshire Hathaway",
+      "exposure": "Utilities and energy infrastructure",
+      "examples": [
+        "Berkshire Hathaway Energy"
+      ],
+      "source": "bh_businesses",
+      "canonical_proxies": [
+        "SPY"
+      ],
+      "mapping": "broad_equity_proxy",
+      "gap": "No dedicated regulated-utility or infrastructure sleeve",
+      "research_proxies": [
+        "XLU"
+      ],
+      "research_mapping": "sector_equity_proxy",
+      "gap_scope": "Production canonical mapping; research proxies, when present, improve category coverage without replicating businesses"
+    },
+    {
+      "id": "bh_manufacturing",
+      "company": "Berkshire Hathaway",
+      "exposure": "Industrial manufacturing",
+      "examples": [
+        "Precision Castparts",
+        "Marmon",
+        "Lubrizol"
+      ],
+      "source": "bh_businesses",
+      "canonical_proxies": [
+        "SPY",
+        "IWM"
+      ],
+      "mapping": "broad_equity_proxy",
+      "gap": "No direct subsidiary exposure",
+      "research_proxies": [
+        "XLI"
+      ],
+      "research_mapping": "sector_equity_proxy",
+      "gap_scope": "Production canonical mapping; research proxies, when present, improve category coverage without replicating businesses"
+    },
+    {
+      "id": "bh_housing",
+      "company": "Berkshire Hathaway",
+      "exposure": "Housing and building products",
+      "examples": [
+        "Clayton Homes",
+        "Shaw Industries",
+        "Benjamin Moore"
+      ],
+      "source": "bh_businesses",
+      "canonical_proxies": [
+        "SPY",
+        "IWM"
+      ],
+      "mapping": "broad_equity_proxy",
+      "gap": "VNQ real-estate securities are not equivalent to homebuilding and building products",
+      "research_proxies": [
+        "ITB"
+      ],
+      "research_mapping": "sector_equity_proxy",
+      "gap_scope": "Production canonical mapping; research proxies, when present, improve category coverage without replicating businesses"
+    },
+    {
+      "id": "bh_retail_services",
+      "company": "Berkshire Hathaway",
+      "exposure": "Retail, distribution and services",
+      "examples": [
+        "McLane",
+        "NetJets",
+        "Dairy Queen"
+      ],
+      "source": "bh_businesses",
+      "canonical_proxies": [
+        "SPY",
+        "IWM"
+      ],
+      "mapping": "broad_equity_proxy",
+      "gap": "Broad listed-sector exposure only",
+      "research_proxies": [
+        "XLY"
+      ],
+      "research_mapping": "sector_equity_proxy",
+      "gap_scope": "Production canonical mapping; research proxies, when present, improve category coverage without replicating businesses"
+    },
+    {
+      "id": "bh_japan",
+      "company": "Berkshire Hathaway",
+      "exposure": "Japanese trading houses",
+      "examples": [
+        "Mitsubishi",
+        "ITOCHU",
+        "Mitsui",
+        "Marubeni",
+        "Sumitomo"
+      ],
+      "source": "bh_annual",
+      "canonical_proxies": [
+        "VEA"
+      ],
+      "mapping": "broad_equity_proxy",
+      "gap": "Developed-market equity is not a five-company Japan allocation or a yen funding hedge",
+      "research_proxies": [
+        "EWJ"
+      ],
+      "research_mapping": "broad_equity_proxy",
+      "gap_scope": "Production canonical mapping; research proxies, when present, improve category coverage without replicating businesses"
+    }
+  ],
+  "expansion_candidates": [],
+  "interpretation": [
+    "Proxies are our economic mappings, not verified holdings of either firm.",
+    "Rows overlap; never sum mapped portfolio capital across rows or infer constituent-level weights.",
+    "Watchlist symbols are never made investable by this catalogue.",
+    "Production remains the canonical 14-ETF profile. Expanded research instruments require qualification before paper activation."
+  ],
+  "research_extensions": [
+    {
+      "symbol": "TIP",
+      "source": "tip",
+      "status": "RESEARCH_ENABLED"
+    },
+    {
+      "symbol": "IGOV",
+      "source": "igov",
+      "status": "RESEARCH_ENABLED"
+    },
+    {
+      "symbol": "SGOV",
+      "source": "sgov",
+      "status": "RESEARCH_ENABLED"
+    },
+    {
+      "symbol": "XLF",
+      "source": "sectors",
+      "status": "RESEARCH_ENABLED"
+    },
+    {
+      "symbol": "XLP",
+      "source": "sectors",
+      "status": "RESEARCH_ENABLED"
+    },
+    {
+      "symbol": "XLE",
+      "source": "sectors",
+      "status": "RESEARCH_ENABLED"
+    },
+    {
+      "symbol": "XLU",
+      "source": "sectors",
+      "status": "RESEARCH_ENABLED"
+    },
+    {
+      "symbol": "XLI",
+      "source": "sectors",
+      "status": "RESEARCH_ENABLED"
+    },
+    {
+      "symbol": "KIE",
+      "source": "kie",
+      "status": "RESEARCH_ENABLED"
+    },
+    {
+      "symbol": "ITB",
+      "source": "itb",
+      "status": "RESEARCH_ENABLED"
+    },
+    {
+      "symbol": "EWJ",
+      "source": "ewj",
+      "status": "RESEARCH_ENABLED"
+    },
+    {
+      "symbol": "XLY",
+      "source": "sectors",
+      "status": "RESEARCH_ENABLED"
+    }
+  ]
+}

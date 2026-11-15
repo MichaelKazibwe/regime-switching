@@ -1,0 +1,7 @@
+(async()=>{try{
+const pilotSessionResponse=await fetch('/api/session');if(!pilotSessionResponse.ok){location.assign('/login');return;}
+window.addEventListener('pageshow',event=>{if(event.persisted)location.reload();});
+const pilotSession=await pilotSessionResponse.json();if(pilotSession.must_change){location.assign('/password');return;}
+const pilotNativeFetch=window.fetch.bind(window);window.fetch=async(input,options={})=>{const url=new URL(typeof input==='string'?input:input.url,location.href),updated={...options};if(url.origin===location.origin&&url.pathname.startsWith('/api/')){updated.headers=new Headers(options.headers||{});if((options.method||'GET').toUpperCase()!=='GET')updated.headers.set('X-CSRF-Token',pilotSession.csrf);}const response=await pilotNativeFetch(input,updated);if(response.status===401)location.assign('/login');return response;};
+const pilotDataResponse=await fetch('/api/dashboard');if(!pilotDataResponse.ok)throw Error('Verified workspace unavailable');
+const pilotMeta=document.createElement('meta');pilotMeta.name='strategy-api-token';pilotMeta.content='cookie-session';document.head.append(pilotMeta);document.getElementById('investor-data').textContent=JSON.stringify(await pilotDataResponse.json());document.getElementById('pilot-account').textContent=pilotSession.username+' · '+pilotSession.role;document.getElementById('pilot-logout').addEventListener('click',async()=>{await fetch('/api/logout',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});location.assign('/login');});

@@ -1,0 +1,29 @@
+{
+  "status": "RESEARCH_ONLY",
+  "total_smart_variant_runs": 16,
+  "prior_project_experiments_not_included": true,
+  "revisions": [
+    {
+      "revision": "smart-portfolio",
+      "variant_runs": 4,
+      "cagr": 0.0188523004707517,
+      "max_drawdown": -0.1005525418107498,
+      "report": "var/research/smart-portfolio/research-model.json"
+    },
+    {
+      "revision": "smart-portfolio-v2",
+      "variant_runs": 4,
+      "cagr": 0.0281860618500005,
+      "max_drawdown": -0.1067988706546044,
+      "report": "var/research/smart-portfolio-v2/research-model.json"
+    },
+    {
+      "revision": "smart-portfolio-v3",
+      "variant_runs": 8,
+      "cagr": 0.0291544565520538,
+      "max_drawdown": -0.107311569628527,
+      "report": "var/research/smart-portfolio-v3/research-model.json"
+    }
+  ],
+  "caveat": "Later revisions were informed by earlier development results. All are research; none is an untouched holdout."
+}

@@ -1,0 +1,17 @@
+{
+  "client_id": "replace-with-private-account-id",
+  "profile": "preservation",
+  "base_currency": "USD",
+  "tax_residence": "",
+  "jurisdiction": "",
+  "horizon_years": 3,
+  "account_value": 100000,
+  "financial_loss_capacity": 0.05,
+  "drawdown_preference": 0.05,
+  "target_total_return": 0.5,
+  "near_term_liquidity": 0,
+  "investment_experience": "unspecified",
+  "allow_alternatives": false,
+  "tax_account_type": "unspecified",
+  "annual_platform_fee": 0
+}

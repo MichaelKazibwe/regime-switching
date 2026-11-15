@@ -1,0 +1,21 @@
+{
+  email {$ACME_EMAIL}
+}
+{$PILOT_DOMAIN} {
+  encode zstd gzip
+  request_body {
+    max_size 16KB
+  }
+  header {
+    -Server
+    X-Content-Type-Options nosniff
+    X-Frame-Options DENY
+    Referrer-Policy no-referrer
+  }
+  reverse_proxy pilot:8780 {
+    transport http {
+      dial_timeout 5s
+      response_header_timeout 120s
+    }
+  }
+}
