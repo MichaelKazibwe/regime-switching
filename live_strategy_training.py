@@ -11,6 +11,7 @@ from copy import deepcopy
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
 import platform
 
@@ -408,6 +409,8 @@ def train(capture_path, output, *, test_sessions=252):
         raise ValueError("Evaluation requires 126-504 sessions")
     capture_path = Path(capture_path)
     capture = json.loads(capture_path.read_text())
+    if capture.get('synthetic_fixture') and os.environ.get('PILOT_ALLOW_SYNTHETIC_QA') != '1':
+        raise ValueError('Synthetic data is restricted to explicitly isolated QA')
     capture_root = capture_path.parent.resolve()
     if capture["status"] != "CAPTURED_FOR_SHADOW_TRAINING":
         raise ValueError("Complete immutable capture required")

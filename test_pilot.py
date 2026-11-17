@@ -251,3 +251,33 @@ def test_pilot_scripts_have_content_bound_csp():
         digest = base64.b64encode(hashlib.sha256(scripts[0].encode()).digest()).decode()
         assert "sha256-" + digest in html
         assert "sessionStorage" not in html
+
+
+def test_duplicate_invitation_preserves_existing_credentials(tmp_path):
+    store=AuthStore(tmp_path/'auth.sqlite3')
+    store.add_user('test-user',PASSWORD,must_change=False)
+    with pytest.raises(ValueError,match='already exists'):
+        store.add_user('test-user',PASSWORD+'different')
+    assert store.login('test-user',PASSWORD,'synthetic-peer')
+    assert len(store.list_users())==1
+
+
+def test_viewer_cannot_record_research_approval(service):
+    _,request=service
+    cookie,csrf=sign_in(request,'viewer@example.test')
+    assert request('/api/review',{},cookie=cookie,csrf=csrf)[0]==403
+
+
+def test_overloaded_server_returns_bounded_service_unavailable():
+    class Request:
+        sent=b''
+        closed=False
+        def settimeout(self,_):pass
+        def sendall(self,value):self.sent=value
+        def close(self):self.closed=True
+    server=BoundedServer.__new__(BoundedServer)
+    server.slots=threading.BoundedSemaphore(0)
+    request=Request()
+    server.process_request(request,('127.0.0.1',0))
+    assert request.sent.startswith(b'HTTP/1.1 503') and b'Retry-After: 1' in request.sent
+    assert request.closed

@@ -33,6 +33,7 @@ PRODUCT_SOURCES = (
     "productsimulation.py",
     "productrelease.py",
     "recommendationservice.py",
+    "portfolio_exposures.py",
     "investment_product.py",
     "productreport.py",
     "investor_dashboard.py",

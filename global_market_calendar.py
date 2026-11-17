@@ -4,7 +4,7 @@ from datetime import timedelta
 import pandas as pd
 import pandas_market_calendars as mcal
 
-VENUES = {"XNYS": "NYSE", "XLON": "LSE", "XHKG": "HKEX", "XJSE": "XJSE"}
+VENUES = {"XNYS": "NYSE", "XNAS": "NASDAQ", "XTKS": "JPX", "XLON": "LSE", "XHKG": "HKEX", "XJSE": "XJSE"}
 
 
 def aware(value):

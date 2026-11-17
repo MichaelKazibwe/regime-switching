@@ -16,7 +16,7 @@ DEFAULT_LIMITS = dict(
 )
 
 
-def assess(weights, returns, *, pending_buys=None, limits=None):
+def assess(weights, returns, *, pending_buys=None, limits=None, lookthrough_records=None):
     limits = {**DEFAULT_LIMITS, **(limits or {})}
     if set(limits) != set(DEFAULT_LIMITS) or any(
         isinstance(v, bool) or not np.isfinite(v) or not 0 < v <= 1
@@ -45,7 +45,10 @@ def assess(weights, returns, *, pending_buys=None, limits=None):
     if not np.isfinite(history).all().all() or (history <= -1).any().any():
         raise ValueError("Incomplete held risk history")
     w = np.array([combined[s] for s in held], dtype=float)
-    cov = history.cov().to_numpy() * 252
+    periods = returns.attrs.get('periods_per_year',252)
+    if type(periods) is not int or not 1 <= periods <= 366:
+        raise ValueError('Qualified annual valuation-session count required')
+    cov = history.cov().to_numpy() * periods
     variance = max(float(w @ cov @ w), 0)
     rc = w * (cov @ w) / variance if variance > 1e-15 else np.zeros(len(w))
     pnl = history.to_numpy() @ w
@@ -69,6 +72,7 @@ def assess(weights, returns, *, pending_buys=None, limits=None):
             np.abs(w) @ np.sqrt(np.maximum(np.diag(cov), 0))
         ),
         covariance_min_eigenvalue=float(np.linalg.eigvalsh(cov).min()) if held else 0,
+        lookthrough=__import__('portfolio_exposures').assess_exposures(combined,lookthrough_records,str(history.index[-1].date())) if lookthrough_records is not None else dict(status='NOT_SUPPLIED',covered_risky_fraction=0.,execution_qualified=False),
         measured_exposures_status="BLOCKED_UNTIL_VERIFIED_HOLDINGS_FX_DURATION_LIQUIDITY",
         execution_enabled=False,
         promotion_enabled=False,

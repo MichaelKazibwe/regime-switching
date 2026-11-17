@@ -131,12 +131,15 @@ def snapshot(source_root, destination, pointer, benchmark=None):
                 capture="market/capture.json", training_report="training/training-report.json"))
     if benchmark:
         private_copy(benchmark, destination / "benchmark.json")
-    from macro_alpha import build as macro_build
+    from macro_forecast_store import build as macro_build
     alpha = macro_build(b['capture'], b['training_report'])
-    recorded = source_root / 'var/macro-alpha/latest.json'
+    recorded = Path(__import__('os').environ.get('PILOT_MACRO_ALPHA_STATE_ROOT',source_root / 'var/macro-alpha')) / 'latest.json'
     monitored = strict_json(recorded) if recorded.is_file() else {}
     atomic_json(destination / 'macro-alpha.json', dict(forecast=alpha,
                 monitoring=monitored.get('monitoring') if monitored.get('forecast', {}).get('forecast_id') == alpha['forecast_id'] else None))
+    coverage=source_root/'var/forecast-coverage/latest-summary.json'
+    if coverage.is_file():
+        private_copy(coverage,destination/'forecast-coverage.json')
     from dashboard_runtime import runtime
     atomic_json(destination / "monitoring-runtime.json", runtime(source_root / "var"))
     files = {str(p.relative_to(destination)): file_hash(p) for p in destination.rglob("*") if p.is_file()}
@@ -182,7 +185,20 @@ def seed_runtime(source_root, runtime, input_root):
         if events:
             imports[name] = dict(session=events[-1][0]["session"], chain_head=events[-1][1],
                                  database_sha256=file_hash(new / selected.name))
+    monitoring_streams = {}
+    for name in ["macro-alpha", "forecast-coverage"]:
+        source = source_root / "var" / name
+        if not source.is_dir():
+            continue
+        for path in sorted(source.rglob("*")):
+            if path.is_symlink():
+                raise ValueError("Monitoring stream symlinks forbidden")
+            if path.is_file() and path.suffix == ".json":
+                target = runtime / name / path.relative_to(source)
+                private_copy(path, target)
+                monitoring_streams[str(target.relative_to(runtime))] = file_hash(target)
     atomic_json(input_root / "cohort-import.json", dict(schema_version=1, cohorts=imports,
+                monitoring_streams=monitoring_streams,
                 intent="Preserve previously sealed sessions; never count imports as new observations"))
     manifest = strict_json(input_root / "snapshot-manifest.json")
     manifest["files"]["cohort-import.json"] = file_hash(input_root / "cohort-import.json")
@@ -208,10 +224,11 @@ def stage(root, destination, *, allow_dirty=False, pointer=None, benchmark=None,
         b = strict_json(p["bundle"])
         report = strict_json(b["training_report"])
         seal = strict_json(Path(p["document"]).parent / "artifact-manifest.json")
-    paths = runtime_sources(root, entries=("pilot_server", "pilot_admin", "pilot_release", "pilot_verify", "pilot_preflight",
-                    "local_observation_scheduler", "pilot_collect", "observation_watchdog", "investment_product",
+    paths = runtime_sources(root, entries=("pilot_server", "pilot_admin", "pilot_release", "pilot_verify", "pilot_preflight", "pilot_pipeline",
+                    "local_observation_scheduler", "live_observation_cycle", "pilot_collect", "observation_watchdog", "investment_product",
                     "recommendation_api", "managed_api", "cycle_benchmark", "execute_performance_improvements",
-                    "shadow_bundle_backup", "integrated_strategy_comparison", "strategy_monthly_report", "weekly_portfolios"))
+                    "shadow_bundle_backup", "integrated_strategy_comparison", "strategy_monthly_report", "weekly_portfolios",
+                    "capture_growth_inputs", "refresh_strategy_dashboard", "scheduled_strategy_validation", "strategy_operations"))
     paths |= set(report.get("source_hashes", {})) | set(seal.get("source_hashes", {}))
     paths |= {str(x.relative_to(root)) for folder in ["dashboard", "pilot", "research"]
               for x in (root / folder).glob("*") if x.is_file() and x.suffix in {".json", ".html", ".css", ".js"}}

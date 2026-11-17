@@ -13,6 +13,9 @@ services:
     environment:
       PILOT_PUBLIC_ORIGIN: ${PILOT_PUBLIC_ORIGIN:?Set the HTTPS pilot origin}
       PILOT_TRUSTED_PROXY: proxy
+      PILOT_DAILY_ROOT: /app/var/pilot-daily/published
+      PILOT_WEEKLY_ROOT: /app/var/weekly-portfolios/published
+      PILOT_TELEMETRY_ROOT: /app/var/pilot-telemetry
     volumes:
       - ./runtime:/app/var:ro
       - ./runtime/pilot:/app/var/pilot:rw
@@ -46,7 +49,11 @@ services:
     cpus: 2
     env_file:
       - ./.secrets/market.env
-    entrypoint: [python, pilot_collect.py]
+    environment:
+      PILOT_DAILY_PUBLISH_ROOT: /app/var/pilot-daily/published
+      PILOT_WEEKLY_PUBLISH_ROOT: /app/var/weekly-portfolios/published
+      PILOT_TELEMETRY_ROOT: /app/var/pilot-telemetry
+    entrypoint: [python, pilot_pipeline.py]
     volumes:
       - ./runtime:/app/var
       - ./output:/app/output

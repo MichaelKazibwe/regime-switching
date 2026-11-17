@@ -14,7 +14,7 @@ import time
 from urllib.parse import urlsplit
 from urllib.request import urlopen
 
-from strategy_integrity import file_hash
+from strategy_integrity import file_hash, strict_json
 from strategy_receipts import atomic_json
 
 
@@ -155,6 +155,11 @@ def run(origin, output, *, browsers=("chromium", "firefox", "webkit")):
                 page.screenshot(path=str(root / f'{name}-weekly-mobile.png'), full_page=True)
                 page.set_viewport_size(dict(width=1440, height=1000))
             page.locator('#section-jump').select_option('benchmark')
+            if os.environ.get('PILOT_REQUIRE_RESEARCH_REVIEW') == '1':
+                page.locator('#section-jump').select_option('weekly')
+                page.locator('#weekly-review-rationale').fill('Synthetic reviewer requests validation of risk assumptions')
+                page.locator('#weekly-review-submit').click()
+                expect(page.locator('#weekly-review-status')).to_contain_text('Recorded',timeout=30000)
             if os.environ.get("PILOT_REQUIRE_MACRO_MONITOR") == "1":
                 page.locator('#section-jump').select_option('macro')
                 expect(page.locator('#macro-monitor-status')).to_contain_text('Market session', timeout=90000)
@@ -287,7 +292,10 @@ def run(origin, output, *, browsers=("chromium", "firefox", "webkit")):
                 page.locator(f"#lab-prob-{i}").fill("25")
             expect(page.locator("#lab-preset")).to_have_value("custom", timeout=90000)
             with page.expect_download() as event:
-                page.locator("#lab-pdf").click()
+                with page.expect_response(lambda response: response.url.endswith('/api/scenario-pdf')) as pdf_response:
+                    page.locator("#lab-pdf").click()
+                response = pdf_response.value
+                assert response.status == 200, dict(status=response.status, error=response.text(), lab_status=page.locator('#lab-status').inner_text())
             event.value.save_as(root / f"{name}-scenario.pdf")
             assert (root / f"{name}-scenario.pdf").read_bytes().startswith(b"%PDF-")
             page.locator("#pilot-logout").click()
@@ -300,6 +308,8 @@ def run(origin, output, *, browsers=("chromium", "firefox", "webkit")):
             page.locator("#section-jump").select_option("macro")
             expect(page.locator("#lab-prob-0")).to_be_disabled()
             expect(page.locator("#lab-quarters")).to_be_disabled()
+            if os.environ.get('PILOT_REQUIRE_RESEARCH_REVIEW') == '1':
+                expect(page.locator('#weekly-review-submit')).to_be_disabled()
             page.locator("#pilot-logout").click()
             expect(page).to_have_url(origin + "/login")
             assert not errors, errors
@@ -318,7 +328,15 @@ def run(origin, output, *, browsers=("chromium", "firefox", "webkit")):
     receipt = dict(status="PASSED_BROWSER_ACCEPTANCE", checked_at=datetime.now(timezone.utc).isoformat(),
                    browsers=evidence, execution_enabled=False,
                    source_hashes={p: file_hash(p) for p in ["pilot_server.py", "pilot_auth.py", "pilot_browser_test.py",
-                                                           "pilot/bootstrap.js", "pilot/login.js", "pilot/benchmark.js", "pilot/pilot.css"]})
+                                                           "pilot/bootstrap.js", "pilot/login.js", "pilot/benchmark.js", "pilot/pilot.css",
+                                                           "pilot/workspace.js", "pilot/weekly.js", "pilot/macro-monitor.js",
+                                                           "pilot/weekly.html", "pilot/macro-monitor.html", "dashboard/investor.js",
+                                                           "dashboard/investor.html", "dashboard/investor.css"]})
+    if Path('pilot-release.json').is_file():
+        release = strict_json('pilot-release.json')
+        receipt['source_release_id'] = release['release_id']
+        receipt['source_commit'] = release['source_commit']
+    receipt['image_digest'] = os.environ.get('PILOT_QA_IMAGE_DIGEST')
     atomic_json(root / "acceptance.json", receipt)
     print(json.dumps(dict(status=receipt["status"], browsers=list(evidence))))
     return receipt

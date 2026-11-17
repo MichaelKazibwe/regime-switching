@@ -1,5 +1,7 @@
 # MODULE REGISTRY — REGIME SWITCHING PORTFOLIO FRAMEWORK
 
+> **Current review (17 November 2026):** [Execution register](PROJECT_REVIEW_EXECUTION.md). Generate the current source map with `python project_catalogue.py --output var/project-review/MODULE_CATALOGUE_CURRENT.md`. The current tree has 433 root Python files: 142 test files, 289 runtime/research entries and two compatibility/historical tools. These are static roles, not deployment counts. `rewrite.py` is a retained historical reference with optional dependencies; the active legacy import registry contains 100 modules. Ownership remains explicitly unassigned where no human owner has been identified.
+
 > **Universe policy update (2026-11-17):** Current portfolios and strategies resolve a configurable global instrument registry, with no fixed ETF-count limit. Numeric universe counts below describe this document's historical implementation or experiment. See [the current global-universe policy](GLOBAL_ASSET_UNIVERSE.md).
 
 > **15 November 2026 source cleanup:** Start with [README.md](README.md) and the current local-pilot guides. Superseded source copies and duplicate tests were removed from the source tree; recoverable local copies remain in ignored cleanup storage. Runtime data, trained artifacts and generated output are excluded from the commit. The historical phase counts below are preserved as history.

@@ -4,6 +4,9 @@ Python portfolio research, chronological regime forecasting, risk controls, pape
 
 ## Start here
 
+- [Current project review](PROJECT_REVIEW_20261117.md) and [execution evidence](PROJECT_REVIEW_EXECUTION.md)
+- [Free pilot, official data and recovery plan](OFFICIAL_DATA_AND_BACKUP_PLAN.md) — no paid resources are authorized.
+
 - [Global migration verification](GLOBAL_UNIVERSE_MIGRATION_RESULTS.md)
 - [Open global asset universe](GLOBAL_ASSET_UNIVERSE.md) — current policy for every portfolio, benchmark and strategy; historical fixed-count descriptions are archived experiment context.
 

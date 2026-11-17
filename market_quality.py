@@ -22,8 +22,14 @@ def read_capture(path):
             raise ValueError("Capture lineage/hash mismatch")
     prices = pd.read_csv(path.parent / "prices.csv", index_col=0, parse_dates=True)
     contract = doc.get("universe_contract")
-    symbols = [i["symbol"] for i in contract["instruments"] if i["research_enabled"]] if contract else list(prices)
-    return doc, validate_prices(prices, pd.Timestamp(doc["price_session"]), required_symbols=symbols)
+    symbols = (
+        [i["symbol"] for i in contract["instruments"] if i["research_enabled"]]
+        if contract
+        else list(prices)
+    )
+    return doc, validate_prices(
+        prices, pd.Timestamp(doc["price_session"]), required_symbols=symbols
+    )
 
 
 def review(current, previous=None, secondary=None):
@@ -81,15 +87,22 @@ def review(current, previous=None, secondary=None):
         ):
             raise ValueError("Independent source integrity failure")
         panel = pd.read_csv(path, index_col=0, parse_dates=True)
-        panel = validate_prices(panel, pd.Timestamp(doc["price_session"]))
+        panel = validate_prices(
+            panel,
+            pd.Timestamp(doc["price_session"]),
+            required_symbols=list(prices.columns),
+        )
         if list(panel.columns) != list(prices.columns):
             raise ValueError("Complete aligned independent universe required")
-        a, b = (
-            prices.pct_change(fill_method=None).iloc[-1],
-            panel.pct_change(fill_method=None).iloc[-1],
-        )
+        a = prices.pct_change(fill_method=None).tail(252)
+        b = panel.pct_change(fill_method=None).reindex(a.index)
         difference = (a - b).abs()
-        mismatch = [s for s, v in difference.items() if not np.isfinite(v) or v > 0.002]
+        mismatch = [
+            s
+            for s in prices
+            if ((a[s].notna() != b[s].notna()) | (difference[s] > 0.002)).any()
+        ]
+        compared = np.isfinite(a.to_numpy()) & np.isfinite(b.to_numpy())
         result["independent_provider"] = (
             "DISCREPANCY_REVIEW_REQUIRED"
             if mismatch
@@ -100,6 +113,11 @@ def review(current, previous=None, secondary=None):
             manifest_sha256=file_hash(manifest),
             tolerance_absolute_return=0.002,
             mismatches=mismatch,
+            comparison_sessions=len(a),
+            compared_return_cells=int(compared.sum()),
+            maximum_absolute_return_difference=float(np.nanmax(difference.to_numpy()))
+            if compared.any()
+            else None,
             limitation="Locally reviewed independent file; vendor authenticity and licensing are not independently certified by this comparison.",
         )
     return result

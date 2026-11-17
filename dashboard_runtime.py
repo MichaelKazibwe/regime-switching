@@ -62,3 +62,25 @@ def runtime(root=Path("var"), *, now=None):
         except (OSError, ValueError, KeyError, TypeError, IndexError, sqlite3.Error):
             result["cohorts"][name] = dict(status="UNAVAILABLE")
     return result
+
+
+def age_runtime(evidence, *, now=None):
+    """Recompute liveness at read time without modifying frozen research evidence."""
+    from copy import deepcopy
+    now = now or datetime.now(timezone.utc)
+    result = deepcopy(evidence)
+    result['served_at'] = now.isoformat()
+    scheduler = result.setdefault('scheduler', {})
+    try:
+        stamp = datetime.fromisoformat(scheduler['checked_at'])
+        if stamp.tzinfo is None:
+            raise ValueError('Aware heartbeat required')
+        age = (now-stamp).total_seconds()
+        scheduler['heartbeat_age_seconds'] = max(0.,age)
+        scheduler['heartbeat_recent'] = 0 <= age <= 7200
+    except (KeyError, TypeError, ValueError):
+        scheduler['heartbeat_recent'] = False
+        scheduler['heartbeat_age_seconds'] = None
+    scheduler['healthy'] = scheduler['heartbeat_recent'] and scheduler.get('status') not in {
+        'FAILED','RETRY_BUDGET_EXHAUSTED','UNAVAILABLE'}
+    return result

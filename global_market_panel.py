@@ -60,10 +60,18 @@ def base_currency_panel(registry, observations, valuations, *, base_currency="US
                 raise ValueError("Observation availability precedes its local close")
             rate, fx_stamp = 1., None
             if rates is not None:
-                known_fx = rates.loc[rates.available_at <= stamp]
+                # Observation session and release time are distinct causal clocks.
+                # A newly published old quote is not a current FX observation.
+                valuation_date = stamp.tz_convert("UTC").tz_localize(None).normalize()
+                known_fx = rates.loc[(rates.available_at <= stamp) & (rates.session <= valuation_date)]
                 if known_fx.empty or stamp - known_fx.available_at.iloc[-1] > pd.Timedelta(hours=max_fx_age_hours):
                     raise ValueError("Missing or stale FX; no FX fill permitted")
-                rate, fx_stamp = float(known_fx.rate.iloc[-1]), known_fx.available_at.iloc[-1].isoformat()
+                chosen = known_fx.iloc[-1]
+                if valuation_date - chosen.session > pd.Timedelta(hours=max_fx_age_hours):
+                    raise ValueError("Stale FX observation session; recent publication cannot refresh an old quote")
+                if chosen.available_at.tz_convert("UTC").tz_localize(None).normalize() < chosen.session:
+                    raise ValueError("FX availability precedes its observation session")
+                rate, fx_stamp = float(chosen.rate), chosen.available_at.isoformat()
             values.append(float(bar.close) * item.price_multiplier * rate)
             evidence.append(dict(local_session=str(expected.date()), available_at=bar.available_at.isoformat(),
                 fx_available_at=fx_stamp, unchanged_closed_market_mark=bool(stamp.date() != expected.date())))

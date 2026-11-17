@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "purpose": "Post-hoc availability explanation; never a historical model input",
+  "primary_sources_retrieved_on": "2026-11-17",
+  "gaps": [
+    {
+      "series": "CPIAUCSL",
+      "period": "2025-10",
+      "classification": "OFFICIAL_NONCOLLECTION",
+      "source": "https://www.bls.gov/cpi/additional-resources/2025-federal-government-shutdown-impact-cpi.htm",
+      "summary": "BLS reports suspended CPI collection during the 2025 shutdown and missing October 2025 data. No synthetic observation is substituted."
+    },
+    {
+      "series": "UNRATE",
+      "period": "2025-10",
+      "classification": "OFFICIAL_NONCOLLECTION",
+      "source": "https://www.bls.gov/cps/methods/2025-federal-government-shutdown-impact-cps.htm",
+      "summary": "BLS reports no October 2025 CPS estimates and no retrospective collection for that month."
+    }
+  ]
+}

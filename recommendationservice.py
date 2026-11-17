@@ -33,6 +33,7 @@ def recommend(
     annual_tax_drag=None,
     annual_fund_expenses=None,
     clock=None,
+    lookthrough_records=None,
 ):
     mandate.validate()
     now = aware_time(decision_time)
@@ -192,6 +193,7 @@ def recommend(
                 "trend_confirmed": trend_confirmed,
                 "historical_preview": historical_preview,
                 "paths": paths,
+                "lookthrough_records": lookthrough_records,
                 "qualification": gate,
             },
             sort_keys=True,
@@ -200,6 +202,7 @@ def recommend(
     return {
         "schema_version": 1,
         "kind": "NON_EXECUTABLE_PORTFOLIO_RECOMMENDATION",
+        "economic_exposures": __import__('portfolio_exposures').assess_exposures(allocation['weights'],lookthrough_records,now.date().isoformat()) if lookthrough_records is not None else dict(status='NOT_SUPPLIED',execution_qualified=False),
         "universe_contract": __import__("global_asset_registry").load_registry().payload(),
         "recommendation_id": fingerprint,
         "service_mode": manifest["service_mode"],

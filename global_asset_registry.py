@@ -106,6 +106,33 @@ def load_registry(path=None):
     return AssetRegistry(json.loads(path.read_text()))
 
 
+def capability_matrix(registry=None, *, base_currency='USD'):
+    """Metadata support is distinct from data, mandate and execution qualification."""
+    from global_market_calendar import VENUES
+    registry = registry or load_registry()
+    rows = []
+    for symbol,item in registry.instruments.items():
+        reasons=[]
+        calendar = VENUES.get(item.venue) == item.calendar
+        accounting = item.pricing_model in {'adjusted_close','total_return','net_asset_value'}
+        if not calendar:
+            reasons.append('VENUE_CALENDAR_NOT_QUALIFIED')
+        if not accounting:
+            reasons.append('RETURN_ACCOUNTING_ADAPTER_REQUIRED')
+        if item.listing_currency != base_currency:
+            reasons.append('TIMESTAMPED_NATIVE_FX_REQUIRED')
+        if not item.research_enabled:
+            reasons.append('RESEARCH_ADMISSION_NOT_GRANTED')
+        if not item.paper_qualified:
+            reasons.append('PAPER_EXECUTION_NOT_QUALIFIED')
+        rows.append(dict(symbol=symbol, asset_type=item.asset_type, venue=item.venue,
+                         calendar=item.calendar, calendar_supported=calendar,
+                         return_accounting_supported=accounting, fx_required=item.listing_currency!=base_currency,
+                         research_enabled=item.research_enabled,paper_qualified=item.paper_qualified,
+                         live_execution_qualified=False,admission_requirements=reasons))
+    return dict(registry_id=registry.identity,instruments=rows,execution_enabled=False)
+
+
 def research_symbols():
     return load_registry().symbols("research")
 

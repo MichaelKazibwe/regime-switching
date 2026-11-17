@@ -37,9 +37,12 @@ def run(snapshot, state, *, local_preview=False):
                   private_auth_database=(state / "auth.sqlite3").stat().st_mode & 0o777 == 0o600,
                   disk_reserve=shutil.disk_usage(state).free >= 1024**3,
                   linux_runtime=platform.system() == "Linux", non_root=os.geteuid() != 0)
+    from pilot_readiness import inspect_features
+    readiness=inspect_features(snapshot.parent,weekly_root=os.environ.get('PILOT_WEEKLY_ROOT'))
+    checks['required_feature_readiness']=readiness['ready']
     required = {k: v for k, v in checks.items() if not (local_preview and k == "linux_runtime")}
     return dict(status="PASSED_LOCAL_RUNTIME_CHECKS" if all(required.values()) else "BLOCKED_RUNTIME_CHECKS",
-                checks=checks, source_release_id=source["release_id"], source_qualification=source["qualification"],
+                checks=checks, capabilities=readiness["capabilities"], source_release_id=source["release_id"], source_qualification=source["qualification"],
                 market_session=app.payload["training"]["market_session"], local_preview=local_preview,
                 remaining_external_checks=["Exact Linux image build, vulnerability scan and digest",
                                            "DNS and valid external HTTPS", "Host firewall and resource qualification",

@@ -1,5 +1,7 @@
 """Publish a complete verified viewer separately from immutable cohort evidence."""
 
+from strategy_eligibility import eligible_prices
+
 from pathlib import Path
 import fcntl
 import shutil
@@ -49,7 +51,7 @@ def _publish(operations, root):
                 "dashboard/investor.js",
                 "dashboard/investor.html",
                 "dashboard/investor.css",
-                "dashboard_publication.py",
+                "dashboard_publication.py", "strategy_eligibility.py", "research/dynamic_eligibility.json",
                 "strategy_dashboard_server.py",
             )
         }
@@ -91,9 +93,7 @@ def _publish(operations, root):
             break
     else:
         evaluate(bundle, evaluation)
-    prices = extended_prices(b["capture"], b["benchmark_extension"]).drop(
-        columns=["XLV"]
-    )
+    prices = eligible_prices(extended_prices(b["capture"], b["benchmark_extension"]))
     checks = {}
     for key, rate in (("0bps", 0.0), ("15bps", 0.0015), ("30bps", 0.003)):
         frame = pd.read_csv(evaluation / (key + ".csv"), index_col=0, parse_dates=True)

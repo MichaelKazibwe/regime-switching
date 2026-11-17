@@ -1,6 +1,8 @@
 """Exact-design retrospective dynamic replay; no promotion or forward evidence."""
 
 import argparse
+from strategy_eligibility import eligible_prices
+
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -86,9 +88,7 @@ def evaluate(bundle, output):
     report = load_training_report(b["training_report"])
     if not report["current_numerical_source_match"]:
         raise ValueError("Source-matched verified report required")
-    prices = extended_prices(b["capture"], b["benchmark_extension"]).drop(
-        columns=["XLV"]
-    )
+    prices = eligible_prices(extended_prices(b["capture"], b["benchmark_extension"]))
     features = {
         r["date"]: r
         for r in strict_json(Path(b["training_report"]).parent / "features.json")
@@ -129,7 +129,7 @@ def evaluate(bundle, output):
             for p in (
                 str(bundle),
                 __file__,
-                "dynamic_portfolio.py",
+                "dynamic_portfolio.py", "strategy_eligibility.py", "research/dynamic_eligibility.json",
                 "institutional_return_engines.py",
                 "evaluate_institutional_engines.py",
             )

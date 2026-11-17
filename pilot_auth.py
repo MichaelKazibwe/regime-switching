@@ -65,8 +65,13 @@ class AuthStore:
         hashed = password_hash(password, salt)
         user_id = secrets.token_hex(16)
         with self.connection() as db:
-            db.execute("INSERT INTO users(id,username,salt,password_hash,role,must_change) VALUES(?,?,?,?,?,?)",
-                       (user_id, username, salt.hex(), hashed, role, int(must_change)))
+            try:
+                db.execute("INSERT INTO users(id,username,salt,password_hash,role,must_change) VALUES(?,?,?,?,?,?)",
+                           (user_id, username, salt.hex(), hashed, role, int(must_change)))
+            except sqlite3.IntegrityError:
+                if db.execute("SELECT 1 FROM users WHERE username=?", (username,)).fetchone():
+                    raise ValueError("Account already exists; use explicit reset-password to reset credentials") from None
+                raise
             db.execute("INSERT INTO audit(time,event,user_id) VALUES(?,?,?)",
                        (self.clock(), "ACCOUNT_INVITED", user_id))
         return user_id

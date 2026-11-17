@@ -95,3 +95,11 @@ def test_paper_factory_accepts_qualified_members_beyond_seed_count(tmp_path):
         'u=AssetUniverse.production(); assert u.size==15; assert "MSFT" in ProductionDecisionExecution.production_tickers()'],
         env={**os.environ, 'REGIME_UNIVERSE_CONFIG': str(path)}, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
+
+
+def test_admission_capabilities_do_not_confuse_calendars_with_execution():
+    from global_asset_registry import capability_matrix
+    rows={r['symbol']:r for r in capability_matrix()['instruments']}
+    assert rows['MSFT']['calendar_supported'] and not rows['MSFT']['paper_qualified']
+    assert rows['7203.T']['calendar_supported'] and rows['7203.T']['fx_required']
+    assert not rows['7203.T']['live_execution_qualified']

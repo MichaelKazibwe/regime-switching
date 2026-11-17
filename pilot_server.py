@@ -190,7 +190,16 @@ class BoundedServer(ThreadingHTTPServer):
 
     def process_request(self, request, address):
         if not self.slots.acquire(blocking=False):
-            request.close()
+            try:
+                request.settimeout(0.25)
+                body = b'{"error":"Service busy; retry shortly"}'
+                request.sendall(b"HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\n"
+                                b"Connection: close\r\nRetry-After: 1\r\nContent-Length: "
+                                + str(len(body)).encode() + b"\r\n\r\n" + body)
+            except OSError:
+                pass
+            finally:
+                request.close()
             return
         try:
             super().process_request(request, address)
@@ -321,13 +330,23 @@ def handler(pilot):
                 elif self.path == "/api/news":
                     self.json(app.news.get())
                 elif self.path == "/api/observations":
-                    from dashboard_runtime import runtime
+                    from dashboard_runtime import runtime, age_runtime
                     with app.lock:
                         pilot.refresh()
                         source = Path(pilot.daily_root) / pilot.daily_revision / "monitoring-runtime.json" if pilot.daily_root and pilot.daily_revision else None
-                        self.json({**(strict_json(source) if source and source.is_file() else runtime()), "macro_alpha": pilot.macro_alpha_payload()})
+                        telemetry = Path(os.environ['PILOT_TELEMETRY_ROOT']) / 'current.json' if os.environ.get('PILOT_TELEMETRY_ROOT') else Path(pilot.daily_root)/'telemetry.json' if pilot.daily_root else None
+                        if telemetry and telemetry.is_file():
+                            source = telemetry
+                        self.json({**age_runtime(strict_json(source) if source and source.is_file() else runtime()), "macro_alpha": pilot.macro_alpha_payload()})
                 elif self.path == "/api/benchmark":
                     self.json({**pilot.benchmark_payload(), "macro_alpha": pilot.macro_alpha_payload()})
+                elif self.path == '/api/forecast-calibration':
+                    root=Path(pilot.daily_root)/pilot.daily_revision if pilot.daily_root and pilot.daily_revision else pilot.snapshot_root
+                    source=root/'forecast-coverage.json' if root else None
+                    self.json(strict_json(source) if source and source.is_file() else dict(status='WAITING_FOR_ISSUED_FORECASTS',calibrated_intervals_established=False))
+                elif self.path == "/api/instrument-capabilities":
+                    from global_asset_registry import capability_matrix
+                    self.json(capability_matrix())
                 elif self.path == "/api/macro-alpha":
                     with app.lock:
                         pilot.refresh()
@@ -344,6 +363,10 @@ def handler(pilot):
                     else:
                         root, weekly = published(root)
                         weekly["stale"] = weekly["market_session"] != weekly_session(datetime.now(timezone.utc))
+                        from strategy_integrity import fingerprint
+                        weekly['review_revisions'] = {k:fingerprint(dict(recommendation_id=weekly['research_id']+':'+k,
+                            mandate=v['policy'],as_of=weekly['market_session'],release={'release_id':weekly['research_id']},allocation=v))
+                            for k,v in weekly['candidates'].items()}
                         if self.path.endswith("/pdf"):
                             self.send((root / "dashboard-report.pdf").read_bytes(), kind="application/pdf")
                         else:
@@ -356,10 +379,15 @@ def handler(pilot):
                         if self.path == "/api/dashboard":
                             self.json({**app.payload, "macro_alpha": pilot.macro_alpha_payload()})
                         else:
+                            readiness = None
+                            if self.path == '/readyz':
+                                from pilot_readiness import inspect_features
+                                root = Path(pilot.daily_root) / pilot.daily_revision if pilot.daily_root and pilot.daily_revision else pilot.snapshot_root
+                                readiness = inspect_features(root, weekly_root=os.environ.get('PILOT_WEEKLY_ROOT'), benchmark=pilot.benchmark)
                             self.json(dict(version=app.payload["training"]["run_id"],
                                            market_session=market_session, stale=stale,
-                                           error=app.refresh_error, execution_enabled=False),
-                                      503 if self.path == "/readyz" and (stale or app.refresh_error) else 200)
+                                           error=app.refresh_error, readiness=readiness, execution_enabled=False),
+                                      503 if self.path == "/readyz" and (stale or app.refresh_error or not readiness['ready']) else 200)
                 else:
                     self.json({"error": "Not found"}, 404)
             except Exception:
@@ -407,6 +435,25 @@ def handler(pilot):
                     return
                 if session["must_change"]:
                     self.json({"error": "Change your temporary password first"}, 403)
+                    return
+                if self.path == '/api/review':
+                    if session['role'] != 'tester':
+                        self.json({'error':'Research reviewer role required'},403)
+                        return
+                    if set(body) != {'research_id','horizon','decision','rationale','expected_revision'}:
+                        raise ValueError('Exact research review fields required')
+                    from weekly_portfolios import published
+                    from review_workflow import record_decision
+                    _, research = published(Path(os.environ.get('PILOT_WEEKLY_ROOT','var/weekly-portfolios/published')))
+                    if research['research_id'] != body['research_id'] or body['horizon'] not in research['candidates']:
+                        raise ValueError('Research revision changed; refresh before review')
+                    target = dict(recommendation_id=research['research_id']+':'+body['horizon'],
+                                  mandate=research['candidates'][body['horizon']]['policy'],
+                                  as_of=research['market_session'],release={'release_id':research['research_id']},
+                                  allocation=research['candidates'][body['horizon']])
+                    decision = record_decision(pilot.state/'reviews'/session['user_id'],target,
+                        reviewer=session['user_id'],decision=body['decision'],rationale=body['rationale'],expected_revision=body['expected_revision'])
+                    self.json(decision)
                     return
                 if self.path not in {"/api/reallocate", "/api/scenario-pdf", "/api/portfolio-pdf"}:
                     self.json({"error": "Not found"}, 404)

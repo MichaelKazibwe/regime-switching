@@ -40,3 +40,16 @@ def test_conditional_simulation_never_fills_unavailable_cycle_pools():
     assert len(allowed["fan"][0]) == 253
     assert allowed["median_return"] == pytest.approx(-.0009/1.0009, abs=1e-9)
     assert simulate(blocks, transition, np.array([.6]), None, None, paths=20)["status"] == "UNAVAILABLE"
+
+
+@pytest.mark.parametrize('weights', [{'SPY':.6,'IEF':.4}, {'MSFT':.5,'IEF':.4}, {'MSFT':-1}, {'MSFT':float('nan')}, {'MSFT':1.1}])
+def test_reference_never_silently_drops_holdings_or_accepts_invalid_weights(weights):
+    returns = pd.DataFrame({'MSFT':[.01,-.01,.005,.002]}, index=pd.bdate_range('2026-11-09',periods=4))
+    with pytest.raises(ValueError):
+        account(returns,weights)
+
+
+def test_explicit_cash_reference_is_valid():
+    returns = pd.DataFrame({'MSFT':[.01,-.01,.005,.002]}, index=pd.bdate_range('2026-11-09',periods=4))
+    _, result = account(returns,{'USD_CASH':1.})
+    assert result['total_return'] == 0

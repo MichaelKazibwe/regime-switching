@@ -14,6 +14,7 @@ import hashlib
 import hmac
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import os
 from pathlib import Path
 import secrets
 import threading
@@ -53,6 +54,9 @@ def read_payload(document):
 
 class Application:
     def __init__(self, document, capture, training, output):
+        captured = json.loads(Path(capture).read_text())
+        if captured.get('synthetic_fixture') and os.environ.get('PILOT_ALLOW_SYNTHETIC_QA') != '1':
+            raise ValueError('Synthetic research snapshots cannot serve a normal pilot')
         self.dashboard_root = Path(document).resolve().parent
         self.payload = read_payload(document)
         self.lab = prepare_lab(capture, training)

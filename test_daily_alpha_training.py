@@ -78,7 +78,7 @@ def test_scheduler_trains_once_per_source_bound_session(tmp_path, monkeypatch):
         return SimpleNamespace(returncode=0)
     monkeypatch.setattr(daily, "run_bounded", worker)
     assert daily.tick(tmp_path, now=now)["status"] == "COMPLETED_DAILY_RESEARCH_TRAINING"
-    assert daily.tick(tmp_path, now=now)["status"] == "ALREADY_TRAINED_OR_RETRY_LIMIT"
+    assert daily.tick(tmp_path, now=now)["status"] == "ALREADY_TRAINED"
     assert len(calls) == 1
 
 
@@ -88,4 +88,4 @@ def test_scheduler_limits_failed_attempts(tmp_path, monkeypatch):
     for _ in range(2):
         with pytest.raises(RuntimeError):
             daily.tick(tmp_path, now=now)
-    assert daily.tick(tmp_path, now=now)["status"] == "ALREADY_TRAINED_OR_RETRY_LIMIT"
+    assert daily.tick(tmp_path, now=now)["status"] == "RETRY_LIMIT_REACHED"

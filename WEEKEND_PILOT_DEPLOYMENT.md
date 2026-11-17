@@ -1,3 +1,5 @@
+> Current owner instruction (17 November 2026): use the existing local Linux VM and free options only. Paid cloud, domain, storage and data steps below are deferred. See [the free pilot and recovery plan](OFFICIAL_DATA_AND_BACKUP_PLAN.md). Keep the service on loopback until remote security and access checks pass.
+
 # Invited Linux pilot: deployment sequence
 
 Prepared 14 November 2026 for a small invited group with individual logins. The application is a research pilot with shared example portfolios, no brokerage access and no trading. Local tests do not establish financial production qualification. The source tree contains extensive uncommitted work; the staged package is explicitly a candidate until reviewed.

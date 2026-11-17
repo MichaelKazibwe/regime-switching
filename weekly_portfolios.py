@@ -68,10 +68,12 @@ def statistics(values):
                 annualized_volatility=float(values.std(ddof=1) * np.sqrt(52)),
                 max_drawdown=float(np.min(wealth / np.maximum.accumulate(wealth) - 1)),
                 worst_week=float(values.min()),
-                weekly_expected_shortfall=float(values[values <= np.quantile(values, .05)].mean()))
+                weekly_expected_shortfall=max(0.,-float(values[values <= np.quantile(values, .05)].mean())),
+                weekly_tail_mean_return=float(values[values <= np.quantile(values, .05)].mean()),
+                tail_convention="Expected shortfall is a nonnegative loss; tail mean is a signed return")
 
 
-def allocate(history, policy):
+def allocate(history, policy, *, return_estimator="incumbent", previous_weights=None, turnover_penalty=.01):
     """Constrained utility fit; momentum is a noisy estimate, not an alpha claim."""
     cat = catalogue()
     h = history.tail(104)
@@ -80,6 +82,14 @@ def allocate(history, policy):
     annual_mean = h.mean().to_numpy() * 52
     momentum = (1 + h.tail(26)).prod().to_numpy() ** 2 - 1
     expected = np.clip(.25 * annual_mean + .25 * momentum, -.08, .12)
+    if return_estimator == 'uncertainty_shrink':
+        sampling_variance=h.var(ddof=1).to_numpy()/len(h)*52**2
+        expected=expected*(.03**2/(.03**2+sampling_variance))
+    elif return_estimator != 'incumbent':
+        raise ValueError('Declared return estimator required')
+    prior=np.zeros(len(h.columns)) if previous_weights is None else np.asarray(previous_weights,float)
+    if prior.shape!=(len(h.columns),) or not np.isfinite(prior).all() or (prior<0).any() or not 0<=turnover_penalty<=.1:
+        raise ValueError('Qualified prior weights and bounded turnover penalty required')
     groups = {g: np.array([cat[s].bucket == g for s in h], float)
               for g in ("equity", "credit", "real_assets", "alternative", "government")}
     caps = dict(equity=policy["equity"], credit=.15, real_assets=.25, alternative=.15, government=.80)
@@ -91,22 +101,40 @@ def allocate(history, policy):
     broad_floor = .50 if core.any() else 0.
     international_floor = .20 if international.any() else 0.
     satellite_cap = .25 if core.any() else policy["equity"]
-    def objective(w):
-        returns = h.to_numpy() @ w
-        tail = np.sort(returns)[:max(1, int(len(h) * .05))].mean()
-        wealth = np.r_[1., np.cumprod(1 + returns)]
-        drawdown = -np.min(wealth / np.maximum.accumulate(wealth) - 1)
-        return float(-expected @ w + policy["aversion"] * (w @ cov @ w)
-                     + .10 * max(0., -tail) + .05 * drawdown + .01 * np.sum(w ** 2))
+    matrix=h.to_numpy()
+    def utility(w):
+        returns=matrix@w
+        tail_ids=np.argsort(returns)[:max(1,int(len(matrix)*.05))]
+        tail=float(returns[tail_ids].mean())
+        wealth=np.r_[1.,np.cumprod(1+returns)]
+        peaks=np.maximum.accumulate(wealth)
+        worst=int(np.argmax(1-wealth/peaks))
+        peak=int(np.argmax(wealth[:worst+1]))
+        drawdown=float(1-wealth[worst]/wealth[peak])
+        value=float(-expected@w+policy['aversion']*(w@cov@w)+.10*max(0.,-tail)
+                    +.05*drawdown+.01*np.sum(w**2)
+                    +(turnover_penalty*np.abs(w-prior).sum() if previous_weights is not None else 0.))
+        gradient=-expected+2*policy['aversion']*(cov@w)+.02*w
+        if tail<0:
+            gradient-=.10*matrix[tail_ids].mean(axis=0)
+        derivative=np.zeros((len(matrix)+1,len(w)))
+        for i in range(worst):
+            derivative[i+1]=derivative[i]*(1+returns[i])+wealth[i]*matrix[i]
+        gradient-=.05*(derivative[worst]*wealth[peak]-wealth[worst]*derivative[peak])/wealth[peak]**2
+        if previous_weights is not None:
+            gradient+=turnover_penalty*np.sign(w-prior)
+        return value,gradient
     def residual(w):
         return np.r_[1 - policy["cash"] - w.sum(),
                      [caps[g] - groups[g] @ w for g in groups],
                      satellite_cap - sectors @ w, .15 - financials @ w,
                      international @ w - international_floor * groups["equity"] @ w,
                      core @ w - broad_floor * groups["equity"] @ w]
-    fit = minimize(objective, np.zeros(len(h.columns)), method="SLSQP",
+    constraint_jac=np.vstack([-np.ones(len(h.columns)),*[-groups[g] for g in groups],-sectors,-financials,
+                              international-international_floor*groups['equity'],core-broad_floor*groups['equity']])
+    fit = minimize(utility, np.zeros(len(h.columns)), method="SLSQP", jac=True,
                    bounds=[(0., .20)] * len(h.columns),
-                   constraints={"type": "ineq", "fun": residual},
+                   constraints={"type": "ineq", "fun": residual, "jac":lambda _:constraint_jac},
                    options=dict(maxiter=500, ftol=1e-10))
     if not fit.success or min(residual(fit.x)) < -1e-7:
         raise ValueError(f"Constrained allocation failed: {fit.message}")
@@ -321,6 +349,9 @@ def run(bundle, output, now=None):
         files={n: file_hash(output / n) for n in ("recommendations.json", "dashboard-report.pdf")},
         source_hashes={n: file_hash(n) for n in SOURCES}))
     verify(output)
+    if now is None and not strict_json(b['capture']).get('synthetic_fixture'):
+        from forecast_coverage import issue
+        issue(data, Path('var/forecast-coverage'))
     return data["research_id"]
 
 

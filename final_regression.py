@@ -204,7 +204,6 @@ REQUIRED_MODULES = (
     "regimesimulation.py",
     "regression_suite.py",
     "restartrecovery.py",
-    "rewrite.py",
     "riskbudgetengine.py",
     "riskcontributionanalyzer.py",
     "riskgovernor.py",
@@ -308,7 +307,9 @@ SUPPLEMENTAL_TEST_MODULES = (
     "test_tradeanalytics.py",
 )
 
-HISTORICAL_OR_DAMAGED_MODULES = ()
+# Historical monolith: retained and compiled, but not an active service/import
+# contract. Its optional plotting/web/database stack is not a pilot dependency.
+HISTORICAL_OR_DAMAGED_MODULES = ("rewrite.py",)
 
 INVENTORY_CATEGORIES = {
     "registered modules": REQUIRED_MODULES,
@@ -782,9 +783,16 @@ def imported_local_modules(
 
     found: set[str] = set()
 
-    for node in ast.walk(
-        tree
-    ):
+    def eager_nodes(node):
+        # Deferred function imports are intentional runtime dependency edges,
+        # not simultaneous module-initialization cycles.
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            return
+        yield node
+        for child in ast.iter_child_nodes(node):
+            yield from eager_nodes(child)
+
+    for node in eager_nodes(tree):
 
         if isinstance(
             node,
@@ -1152,7 +1160,7 @@ class FinalRegression:
             for filename, count in Counter(REQUIRED_MODULES).items()
             if count > 1
         )
-        production_count_ok = len(REQUIRED_MODULES) == 101
+        production_count_ok = len(REQUIRED_MODULES) == 100
 
         passed = all((
             not unclassified,
@@ -1202,7 +1210,7 @@ class FinalRegression:
             )
         if not production_count_ok:
             reasons.append(
-                f"production registry count changed: expected 101, found {len(REQUIRED_MODULES)}"
+                f"production registry count changed: expected 100, found {len(REQUIRED_MODULES)}"
             )
 
         return self.record(TestResult(

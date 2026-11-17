@@ -37,3 +37,4 @@ pre_rewrite_backup_*/
 !shadow_bundle_backup.py
 test_*.py
 *_test.py
+!pilot_browser_test.py

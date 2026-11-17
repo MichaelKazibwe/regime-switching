@@ -179,6 +179,8 @@ REQUIRED_MODULES = (
     "ensemblecovariance.py",
     "expectedreturnforecaster.py",
     "factorcovariance.py",
+    "atr.py",
+    "positionsizing.py",
 
     # --------------------------------------------------------------
     # PRODUCTION PORTFOLIO CONSTRUCTION

@@ -44,3 +44,8 @@ print_inventory.txt
 pre_rewrite_backup_*/
 .stamp=*
 
+
+# Local coverage diagnostics
+.coverage
+.coverage.*
+htmlcov/

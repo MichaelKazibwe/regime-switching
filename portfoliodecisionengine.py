@@ -1672,12 +1672,8 @@ class _TestRiskModel:
         marginal = covariance @ vector
         return {ticker: float(vector[index] * marginal[index]) for index, ticker in enumerate(tickers)}
 
-class _TestScenarioEngine:
-    """Deterministic scenario engine."""
-
-    def compare(self, weights: dict[str, float], scenarios: Any, **kwargs: Any) -> dict[str, Any]:
-        count = len(scenarios) if hasattr(scenarios, '__len__') else 1
-        return {'scenario_count': count, 'status': 'COMPLETED'}
+class _TestScenarioEngine(ScenarioEngine):
+    """Exercise the real additive-shock protocol with deterministic inputs."""
 
 def _build_test_prices(
     tickers: tuple[str, ...] = ("SPY", "TLT"),
@@ -1744,7 +1740,7 @@ def test_portfolio_decision_engine() -> None:
     portfolio = {'weights': {'SPY': 0.5, 'TLT': 0.5}}
     prices = _build_test_prices()
     returns = {'SPY': [0.01, 0.02, -0.01], 'TLT': [0.005, -0.002, 0.004]}
-    decision = engine.decide(portfolio=portfolio, prices=prices, returns=returns, macro_data={'growth': 1.0, 'inflation': 2.0, 'unemployment': 4.0, 'yield_spread': 1.0}, scenarios=['BASE', 'RECESSION'])
+    decision = engine.decide(portfolio=portfolio, prices=prices, returns=returns, macro_data={'growth': 1.0, 'inflation': 2.0, 'unemployment': 4.0, 'yield_spread': 1.0}, scenarios={'BASE': {'SPY': 0.0, 'TLT': 0.0}, 'RECESSION': {'SPY': -0.2, 'TLT': 0.05}})
     assert decision.status == PortfolioDecisionStatus.APPROVED.value
     assert decision.approved
     assert decision.regime == 'EXPANSION'

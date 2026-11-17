@@ -25,6 +25,8 @@ def main():
     backup.add_argument("destination", type=Path)
     args = parser.parse_args()
     auth = AuthStore(args.database)
+    if args.action == 'add-user' and any(u['username'] == args.username.strip().lower() for u in auth.list_users()):
+        parser.error('Account already exists. Use list-users or explicit reset-password; no credentials changed.')
     if args.action in {"add-user", "reset-password"}:
         password = getpass.getpass("Temporary password (12–256 characters): ")
         if password != getpass.getpass("Repeat temporary password: "):

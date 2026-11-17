@@ -757,8 +757,8 @@ class ProductionIntegration:
                     )
             except ProductionIntegrationError:
                 raise
-            except Exception:
-                pass
+            except Exception as exc:
+                raise ProductionIntegrationError("Unable to validate regime missing-value status") from exc
     # ------------------------------------------------------------------
     # 8.5 MACRO SERIES VALIDATION
     # ------------------------------------------------------------------

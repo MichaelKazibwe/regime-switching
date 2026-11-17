@@ -126,7 +126,7 @@ def build(capture_path, training_path):
     prediction = predict(features,current)
     protocol = fingerprint(dict(sources={p:file_hash(p) for p in SOURCES},settings=SETTINGS,
                                 feature_names=prediction['feature_names']))
-    result = dict(schema_version=1, status=('MONITORING_PARTIAL_INPUTS' if missing else 'MONITORING_FULL_INPUTS')
+    result = dict(schema_version=1, synthetic_fixture=bool(capture.get('synthetic_fixture',False)), status=('MONITORING_PARTIAL_INPUTS' if missing else 'MONITORING_FULL_INPUTS')
                   if prediction['probabilities'] else 'MONITORING_WAITING_FOR_INPUTS_OR_HISTORY',
                   monitoring_enabled=True, market_session=report['market_session'], as_of=stamp.isoformat(),
                   protocol_id=protocol, components=current, missing_components=missing, required_periods=periods,
@@ -143,6 +143,9 @@ def build(capture_path, training_path):
                                'Training uses only full-valid historical rows and matured labels strictly before origin; missing components are excluded, never filled.',
                                'Fixed parameters, 25% model / 75% frequency shrinkage; no demonstrated predictive or portfolio advantage.',
                                'Reconstructed history is training evidence, not live-issued observations.'])
+    evidence=strict_json('research/macro_gap_evidence.json')
+    result['availability_diagnostics']=[{**gap,'use':'POST_HOC_CONTEXT_NOT_MODEL_INPUT'}
+        for gap in evidence['gaps'] if any(gap['series'] in reason and gap['period'] in reason for reason in missing.values())]
     result['forecast_id'] = fingerprint(result)
     return result
 
@@ -150,6 +153,8 @@ def build(capture_path, training_path):
 def record(result, features, root, *, now=None):
     """Issue one immutable genuine-session prediction and score only matured origins."""
     now = now or datetime.now(timezone.utc)
+    if result.get('synthetic_fixture') and __import__('os').environ.get('PILOT_ALLOW_SYNTHETIC_QA') != '1':
+        raise ValueError('Synthetic forecasts cannot enter genuine observation streams')
     if now.tzinfo is None or result['market_session'] != str(usable_session(now).date()) or pd.Timestamp(result['as_of']) > pd.Timestamp(now):
         raise ValueError('Macro alpha must be observed on the genuine completed session')
     if fingerprint({k:v for k,v in result.items() if k != 'forecast_id'}) != result['forecast_id']:
@@ -165,9 +170,8 @@ def record(result, features, root, *, now=None):
         else:
             atomic_json(path,dict(issued_at=now.isoformat(),forecast=result),exclusive=True)
         sessions={r['date']:i for i,r in enumerate(features)}
-        outcomes=[]
-        pending=0
-        unscorable=0
+        groups = {}
+        groups[result['protocol_id']] = dict(pending=0, matured_unscorable=0, outcomes=[])
         for p in sorted(root.glob('????-??-??-*.json')):
             issued=strict_json(p)
             r=issued['forecast']
@@ -175,23 +179,32 @@ def record(result, features, root, *, now=None):
                 raise ValueError('Stored macro alpha forecast integrity mismatch')
             if datetime.fromisoformat(issued['issued_at']) > now:
                 raise ValueError('Future macro alpha receipt')
-            if r['protocol_id'] != result['protocol_id'] or r['prediction']['probabilities'] is None:
+            if r['prediction']['probabilities'] is None:
                 continue
+            group = groups.setdefault(r['protocol_id'], dict(pending=0, matured_unscorable=0, outcomes=[]))
             i=sessions.get(r['market_session'])
             h=r['prediction']['settings']['horizon_sessions']
             if i is None or i+h >= len(features):
-                pending+=1
+                group["pending"]+=1
                 continue
-            if not features[i+h].get('macro_valid',False):
-                unscorable+=1
+            target_compatible = all(r.get('source_hashes', {}).get(k) == result.get('source_hashes', {}).get(k)
+                                    for k in ('macro_feature_contract.py', 'fourregimestrategies.py'))
+            if not target_compatible or not features[i+h].get('macro_valid',False):
+                group["matured_unscorable"]+=1
                 continue
             target=np.eye(4)[quadrant(features[i+h])]
-            outcomes.append(dict(origin=r['market_session'],outcome_session=features[i+h]['date'],
+            group["outcomes"].append(dict(origin=r['market_session'],outcome_session=features[i+h]['date'], outcome_evidence_sha256=fingerprint(features[i+h]),
                                  brier_model=float(np.square(np.array(r['prediction']['probabilities'])-target).sum()),
                                  brier_baseline=float(np.square(np.array(r['prediction']['baseline'])-target).sum())))
-        summary=dict(protocol_id=result['protocol_id'],observed_forecasts=pending+len(outcomes)+unscorable,pending=pending,
-                     matured_unscorable=unscorable,
-                     matured=len(outcomes),outcomes=outcomes,alpha_established=False,execution_enabled=False)
+        summaries = {}
+        for protocol, group in groups.items():
+            outcomes = group['outcomes']
+            summaries[protocol] = dict(protocol_id=protocol,
+                observed_forecasts=group['pending']+len(outcomes)+group['matured_unscorable'],
+                pending=group['pending'], matured_unscorable=group['matured_unscorable'],
+                matured=len(outcomes), outcomes=outcomes, alpha_established=False, execution_enabled=False)
+        summary = summaries[result['protocol_id']]
+        summary['archived_protocols'] = [v for k,v in summaries.items() if k != result['protocol_id']]
         atomic_json(root/'latest.json',dict(forecast=result,monitoring=summary))
         return summary
 

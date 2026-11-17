@@ -77,3 +77,16 @@ def test_receipts_idempotent_no_backfill_no_rewrite_and_mature_only(tmp_path):
     unavailable=record(second,rows,tmp_path,now=datetime(2026,11,16,22,tzinfo=timezone.utc))
     assert unavailable['matured']==0 and unavailable['matured_unscorable']==1
     assert unavailable['observed_forecasts']==2
+
+
+def test_archived_protocol_matures_without_entering_current_window(tmp_path):
+    rows=[{**history()[i], 'date':str(d.date())} for i,d in enumerate(pd.bdate_range('2026-11-10','2026-11-16'))]
+    a=forecast('2026-11-10')
+    record(a,rows[:1],tmp_path,now=datetime(2026,11,10,22,tzinfo=timezone.utc))
+    b=forecast('2026-11-16')
+    b['protocol_id']='b'*64
+    b['forecast_id']=fingerprint({k:v for k,v in b.items() if k!='forecast_id'})
+    result=record(b,rows,tmp_path,now=datetime(2026,11,16,22,tzinfo=timezone.utc))
+    assert result['observed_forecasts']==1 and result['matured']==0
+    assert result['archived_protocols'][0]['matured']==1
+    assert result['archived_protocols'][0]['protocol_id']==a['protocol_id']

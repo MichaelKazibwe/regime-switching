@@ -24,3 +24,7 @@ body{background:#f4f6fb;color:var(--terminal-ink);font-size:14px;letter-spacing:
 .macro-monitor-quarter-scroll table{min-width:1250px;table-layout:auto}
 
 .research-alpha-banner{display:block;max-width:100%;white-space:normal;text-align:left;margin:12px 0;line-height:1.5}
+#weekly-review-rationale{display:block;width:100%;max-width:100%;box-sizing:border-box;margin:8px 0 14px;padding:12px;border:1px solid #dce2ed;border-radius:10px;font:inherit;color:inherit;background:transparent}
+.workspace-evidence{margin:0 0 1rem;padding:.7rem 1rem;border:1px solid var(--line,#64748b);border-radius:.7rem;background:var(--surface,#101d2e)}
+.workspace-evidence summary{cursor:pointer;font-weight:600}
+.workspace-evidence summary:focus-visible{outline:3px solid #65d6c2;outline-offset:4px}

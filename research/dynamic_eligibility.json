@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "policy": "DYNAMIC_RESEARCH_ELIGIBILITY_V1",
+  "exclude": {
+    "XLV": "Preserve the frozen dynamic strategy's healthcare exclusion as an explicit strategy contract; other research portfolios may hold XLV."
+  }
+}

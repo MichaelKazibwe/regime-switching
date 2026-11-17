@@ -20,6 +20,22 @@ from strategy_healthcheck import health
 from prospective_strategy_ledger import apply_close, next_fill
 
 
+def test_independent_recalculation_allows_only_machine_precision_float_changes():
+    from strategy_integrity import numerically_equivalent
+
+    expected = {"weight": 0.25, "paths": 500, "active": False, "fan": [1.01]}
+    assert numerically_equivalent({**expected, "weight": 0.25 + 1e-14}, expected)
+    for invalid in [
+        {**expected, "weight": 0.250001},
+        {**expected, "paths": 500.0},
+        {**expected, "active": 0},
+        {**expected, "fan": [1.01, 1.02]},
+        {**expected, "weight": float("nan")},
+        {**expected, "extra": 0},
+    ]:
+        assert not numerically_equivalent(invalid, expected)
+
+
 def resign(result):
     result.pop("result_id", None)
     result["result_id"] = hashlib.sha256(

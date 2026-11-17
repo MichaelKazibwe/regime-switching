@@ -13,6 +13,36 @@ def canonical(value):
     return json.dumps(value, sort_keys=True, allow_nan=False, separators=(",", ":"))
 
 
+def numerically_equivalent(actual, expected):
+    """Strict schema/identity comparison with 1e-12 float arithmetic tolerance.
+
+    BLAS and platform reduction order can differ at machine precision. Hashes
+    remain byte-exact; only independently recalculated floating values use this
+    tolerance. Booleans, integer counts, strings, nulls and collection shapes
+    must match exactly.
+    """
+    if isinstance(expected, dict):
+        return (
+            isinstance(actual, dict)
+            and actual.keys() == expected.keys()
+            and all(numerically_equivalent(actual[k], v) for k, v in expected.items())
+        )
+    if isinstance(expected, list):
+        return (
+            isinstance(actual, list)
+            and len(actual) == len(expected)
+            and all(numerically_equivalent(a, b) for a, b in zip(actual, expected))
+        )
+    if isinstance(expected, float):
+        return (
+            isinstance(actual, float)
+            and np.isfinite(actual)
+            and np.isfinite(expected)
+            and bool(np.isclose(actual, expected, rtol=1e-12, atol=1e-12))
+        )
+    return type(actual) is type(expected) and actual == expected
+
+
 def fingerprint(value):
     return hashlib.sha256(canonical(value).encode()).hexdigest()
 
@@ -100,7 +130,7 @@ def validate_scenario(result, lab):
     for item in [result, expected]:
         for key in ["result_id", "calculated_at", "forecast_supplied_at"]:
             item.pop(key, None)
-    if canonical(result) != canonical(expected):
+    if not numerically_equivalent(result, expected):
         raise ValueError("Scenario disagrees with independent recalculation")
     # Recalculation reconciles covariance, Euler shares, cash-only None shares,
     # forecasts, fan quantiles, finite metrics, resource bounds and account peaks.

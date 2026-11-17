@@ -1,6 +1,7 @@
 """Bounded weekly research generation and atomic, verified local-VM publication."""
 
 import argparse
+import os
 from datetime import datetime, timezone
 import fcntl
 from pathlib import Path
@@ -14,18 +15,21 @@ from strategy_receipts import atomic_json
 from observation_process import run_bounded, install_cancellation
 from weekly_portfolios import weekly_session, SOURCES, verify
 
+from research_publisher import docker_command, installed_image, filesystem_publish
+
 ROOT = Path(__file__).resolve().parent
-DOCKER = ["/opt/homebrew/bin/docker", "--context", "colima-regime-pilot"]
 
 
 def publish(directory, image=None):
     """Never expose partial artifacts; require the installed image to verify source hashes."""
+    if os.environ.get('PILOT_WEEKLY_PUBLISH_ROOT'):
+        return filesystem_publish(directory, os.environ['PILOT_WEEKLY_PUBLISH_ROOT'], kind='weekly')
+    DOCKER = docker_command()
     directory = Path(directory).resolve()
     data = verify(directory)
     revision = data["research_id"]
     if image is None:
-        image = subprocess.run(DOCKER + ["inspect", "regime-pilot-local-pilot-1", "--format", "{{.Image}}"],
-                               check=True, capture_output=True, text=True, timeout=30).stdout.strip()
+        image = installed_image()
     with tempfile.TemporaryDirectory(prefix="weekly-publish-") as tmp:
         archive = Path(tmp) / "artifacts.tar"
         with tarfile.open(archive, "w") as tar:
@@ -36,6 +40,7 @@ def publish(directory, image=None):
 import os, shutil, sys, tarfile, tempfile
 from pathlib import Path
 from weekly_portfolios import verify
+from research_publisher import prior_weekly_session
 from strategy_receipts import atomic_json
 root = Path('/weekly/published')
 root.mkdir(parents=True, exist_ok=True)
@@ -43,7 +48,11 @@ temporary = Path(tempfile.mkdtemp(prefix='.staging-', dir=root))
 try:
     tarfile.open(fileobj=sys.stdin.buffer, mode='r|').extractall(temporary, filter='data')
     staged, target = temporary / '{revision}', root / '{revision}'
-    verify(staged)
+    data = verify(staged)
+    previous = root / 'latest.json'
+    if previous.is_file():
+        if prior_weekly_session(root) > data['market_session']:
+            raise ValueError('Weekly session rollback forbidden')
     if target.exists():
         verify(target)
     else:
@@ -73,7 +82,10 @@ def tick(root=Path("var/weekly-portfolios"), now=None, publish_vm=False):
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     with (root / "worker.lock").open("a") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return dict(status="ALREADY_RUNNING", market_session=session)
         latest = strict_json(root / "latest.json") if (root / "latest.json").exists() else {}
         if latest.get("key") == key and latest.get("status") == "COMPLETED_REVIEW_ONLY":
             verify(latest["directory"])
@@ -86,19 +98,28 @@ def tick(root=Path("var/weekly-portfolios"), now=None, publish_vm=False):
         directory = root / "runs" / f"{session}-{key[:12]}-{attempt}"
         record = dict(key=key, attempt=attempt, market_session=session, directory=str(directory.resolve()), status="RUNNING")
         atomic_json(root / "latest.json", record)
-        with (root / "worker.log").open("ab") as log:
-            code = run_bounded([sys.executable, "weekly_portfolios.py", "--bundle", pointer["bundle"],
-                                "--output", str(directory)], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, timeout=1800)
-        if code.returncode != 0:
-            record["status"] = "FAILED"
-            atomic_json(root / "latest.json", record)
-            raise RuntimeError("Weekly research failed; inspect worker.log")
-        verify(directory)
-        record["status"] = "COMPLETED_REVIEW_ONLY"
-        atomic_json(root / "latest.json", record)
-        if publish_vm:
-            publish(directory)
-        return record
+        try:
+            record['stage'] = 'GENERATION'
+            with (root / "worker.log").open("ab") as log:
+                code = run_bounded([sys.executable, "weekly_portfolios.py", "--bundle", pointer["bundle"],
+                                    "--output", str(directory)], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, timeout=1800)
+            if code.returncode != 0:
+                raise RuntimeError("Weekly research failed; inspect worker.log")
+            record['stage'] = 'VERIFY_ARTIFACTS'
+            verify(directory)
+            if publish_vm:
+                record['stage'] = 'PUBLICATION'
+                publish(directory)
+            record.update(status="COMPLETED_REVIEW_ONLY", stage="COMPLETE")
+            return record
+        except Exception as error:
+            record.update(status="FAILED", error_type=type(error).__name__,
+                          failure_class="PUBLICATION" if record['stage'] == 'PUBLICATION' else 'GENERATION_OR_INTEGRITY')
+            raise
+        finally:
+            record['finished_at'] = datetime.now(timezone.utc).isoformat()
+            atomic_json(root / 'latest.json', record)
+
 
 
 if __name__ == "__main__":

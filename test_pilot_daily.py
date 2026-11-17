@@ -65,3 +65,48 @@ def test_revision_binds_the_complete_manifest(tmp_path, monkeypatch):
     atomic_json(tmp_path / "latest.json", dict(revision=revision))
     monkeypatch.setattr(pilot_daily, "verify_snapshot", lambda _: manifest)
     assert pilot_daily.revision_directory(tmp_path) == (revision, tmp_path / revision)
+
+
+def test_frozen_green_heartbeat_expires_without_republishing():
+    from datetime import datetime, timezone
+    from dashboard_runtime import age_runtime
+    original=dict(scheduler=dict(status='COMPLETED',checked_at='2026-11-16T20:00:00+00:00',heartbeat_recent=True))
+    result=age_runtime(original,now=datetime(2026,11,17,0,tzinfo=timezone.utc))
+    assert not result['scheduler']['heartbeat_recent']
+    assert not result['scheduler']['healthy']
+    assert original['scheduler']['heartbeat_recent']
+
+
+def test_failed_daily_publish_keeps_revision_and_writes_failure(tmp_path, monkeypatch):
+    atomic_json(tmp_path/'heartbeat.json',dict(status='PUBLISHED',revision='a'*64))
+    def fail(*args, **kwargs):
+        raise RuntimeError('Synthetic failure')
+    monkeypatch.setattr(pilot_daily,'_tick',fail)
+    with pytest.raises(RuntimeError):
+        pilot_daily.tick(tmp_path)
+    data=__import__('json').loads((tmp_path/'heartbeat.json').read_text())
+    assert data['status']=='FAILED' and data['retained_revision']=='a'*64
+
+
+def test_linux_filesystem_publication_is_verified_before_pointer(tmp_path, monkeypatch):
+    from research_publisher import filesystem_publish
+    import research_publisher
+    monkeypatch.setattr(research_publisher,'historical_weekly_session',lambda _: '2026-11-13')
+    import weekly_portfolios
+    source=tmp_path/'source'
+    source.mkdir()
+    (source/'sample').write_text('verified')
+    monkeypatch.setattr(weekly_portfolios,'verify',lambda _:dict(research_id='b'*64,market_session='2026-11-13'))
+    result=filesystem_publish(source,tmp_path/'published',kind='weekly')
+    assert result=='b'*64
+    assert (tmp_path/'published'/result/'sample').read_text()=='verified'
+    assert __import__('json').loads((tmp_path/'published/latest.json').read_text())['research_id']==result
+    assert filesystem_publish(source,tmp_path/'published',kind='weekly')==result
+
+
+def test_readiness_distinguishes_missing_capabilities(tmp_path):
+    from pilot_readiness import inspect_features
+    result=inspect_features(tmp_path)
+    assert not result['ready']
+    assert set(result['capabilities'])=={'research_snapshot','cycle_benchmark','macro_alpha','weekly_portfolios'}
+    assert not result['production_approval'] and not result['execution_enabled']

@@ -1,0 +1,10 @@
+ARG PILOT_BASE_IMAGE
+FROM ${PILOT_BASE_IMAGE}
+USER root
+COPY requirements-browser.hashed.lock /app/requirements-browser.hashed.lock
+RUN python -m pip install --no-cache-dir --no-deps --require-hashes -r /app/requirements-browser.hashed.lock
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+RUN python -m playwright install --with-deps chromium webkit && chmod -R a+rX /ms-playwright
+COPY pilot_browser_test.py /app/pilot_browser_test.py
+USER 10001:10001
+ENTRYPOINT ["python", "pilot_browser_test.py"]

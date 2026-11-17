@@ -20,7 +20,7 @@ from strategy_report import load_training_report
 from strategy_training_data import usable_session
 
 ROOT = Path(__file__).resolve().parent
-SOURCES = ("daily_alpha_training.py", "macro_alpha.py", "performance_forecast_calendar.py", "performance_forecasts.py",
+SOURCES = ("daily_alpha_training.py", "macro_alpha.py", "macro_forecast_store.py", "macro_alpha_research.py", "performance_forecast_calendar.py", "performance_forecasts.py",
            "global_asset_registry.py", "research/global_asset_registry.json",
            "live_strategy_training.py", "forecast_calibration.py", "fourregimestrategies.py",
            "research/four_macro_strategies.json")
@@ -70,9 +70,11 @@ def train(bundle, output):
     settings = strict_json("research/four_macro_strategies.json")["macro_forecast"]
     model = fit_latest(features, settings, evaluation["selected_on_validation"])
     atomic_json(output / "model.json", model, exclusive=True)
-    from macro_alpha import build as macro_build
+    from macro_forecast_store import build as macro_build
     macro_monitor = macro_build(b['capture'], b['training_report'])
     atomic_json(output / 'macro-alpha.json', macro_monitor, exclusive=True)
+    from macro_alpha_research import evaluate_masks
+    atomic_json(output / 'macro-alpha-mask-evaluation.json', evaluate_masks(features), exclusive=True)
     if any(file_hash(p) != h for p, h in sources.items()):
         raise ValueError("Training source changed during run")
     result = dict(status="COMPLETED_DAILY_RESEARCH_TRAINING", completed_at=datetime.now(timezone.utc).isoformat(),
@@ -122,7 +124,7 @@ def tick(root=ROOT, *, now=None):
                 for name, digest in strict_json(assessment_path)["artifacts"].items():
                     if Path(name).name != name or file_hash(assessment_path.parent / name) != digest:
                         raise ValueError("Previously trained model artifact changed")
-            result = dict(**heartbeat, status="ALREADY_TRAINED_OR_RETRY_LIMIT", assessment=last.get("assessment"))
+            result = dict(**heartbeat, status="ALREADY_TRAINED" if last.get("status") == "COMPLETED_DAILY_RESEARCH_TRAINING" else "RETRY_LIMIT_REACHED", assessment=last.get("assessment"))
             atomic_json(state / "heartbeat.json", result)
             return result
         attempt = last.get("attempt", 0) + 1 if last.get("key") == key else 1

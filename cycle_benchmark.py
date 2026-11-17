@@ -82,6 +82,13 @@ def allocate(history, budget, volatility):
 
 def account(returns, weights, *, guard=None, cost=0.0015):
     symbols = list(returns)
+    if (not isinstance(weights, dict) or not weights
+            or any(isinstance(w, bool) or not np.isfinite(w) or w < 0 for w in weights.values())
+            or sum(weights.values()) > 1 + 1e-9):
+        raise ValueError("Finite long-only benchmark weights with total at most one required")
+    missing = {s for s,w in weights.items() if w > 0 and s != "USD_CASH"} - set(symbols)
+    if missing:
+        raise ValueError("Missing declared benchmark holdings: " + ", ".join(sorted(missing)))
     base = np.array([weights.get(s, 0) for s in symbols])
     w, nav, peak, factor = np.zeros(len(symbols)), 1.0, 1.0, 1.0
     rows, targets = [], {}
@@ -233,8 +240,13 @@ def run(bundle, output):
     references = {}
     for name, weights in {"balanced_60_40": {"SPY": .6, "IEF": .4}, "growth_resilience": WEIGHTS,
                           "all_weather_proxy": dict(SPY=.3, TLT=.4, IEF=.15, GLD=.075, DBC=.075)}.items():
-        _, value = account(daily.iloc[validation_end:][eligible], weights)
-        references[name] = value
+        missing = sorted({s for s,w in weights.items() if w > 0 and s != "USD_CASH"} - set(eligible))
+        if missing:
+            references[name] = dict(status="UNAVAILABLE", missing_symbols=missing,
+                                    reason="Declared reference holdings lack qualified observations")
+        else:
+            _, value = account(daily.iloc[validation_end:][eligible], weights)
+            references[name] = dict(status="AVAILABLE", **value)
     current = daily[eligible].tail(1260)
     latest = allocate(current, BUDGETS[selected["budget"]], selected["volatility"])
     blocks = [[] for _ in range(4)]

@@ -1,6 +1,7 @@
 """Publish verified daily data to the local VM without rebuilding or restarting it."""
 
 import argparse
+import os
 from datetime import datetime, timezone
 import fcntl
 import json
@@ -15,7 +16,7 @@ from strategy_integrity import strict_json, fingerprint, file_hash
 from strategy_receipts import atomic_json
 from strategy_training_data import usable_session
 
-DOCKER = ["/opt/homebrew/bin/docker", "--context", "colima-regime-pilot"]
+from research_publisher import docker_command, installed_image, filesystem_publish
 FIELDS = ("dashboard_root", "document", "payload", "lab", "results", "news")
 
 
@@ -62,11 +63,13 @@ def refresh(application, root, state, active_revision):
 
 
 def publish(directory, image=None):
+    if os.environ.get('PILOT_DAILY_PUBLISH_ROOT'):
+        return filesystem_publish(directory, os.environ['PILOT_DAILY_PUBLISH_ROOT'], kind='daily')
+    DOCKER = docker_command()
     directory = Path(directory).resolve()
     revision = fingerprint(verify_snapshot(directory))
     if image is None:
-        image = subprocess.run(DOCKER + ["inspect", "regime-pilot-local-pilot-1", "--format", "{{.Image}}"],
-                               check=True, capture_output=True, text=True, timeout=30).stdout.strip()
+        image = installed_image()
     with tempfile.TemporaryDirectory(prefix="pilot-daily-") as tmp:
         archive = Path(tmp) / "snapshot.tar"
         with tarfile.open(archive, "w") as tar:
@@ -110,7 +113,7 @@ finally:
     return revision
 
 
-def tick(root=Path("var/pilot-daily"), now=None, publish_vm=False):
+def _tick(root=Path("var/pilot-daily"), now=None, publish_vm=False):
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     with (root / "publish.lock").open("a") as lock:
@@ -125,11 +128,17 @@ def tick(root=Path("var/pilot-daily"), now=None, publish_vm=False):
                           retained_session=pointer["market_session"])
             atomic_json(root / "heartbeat.json", result)
             return result
-        from macro_alpha import build as macro_build, record as macro_record
+        from macro_forecast_store import build as macro_build
+        from macro_alpha import record as macro_record
         bundle = strict_json(pointer['bundle'])
         alpha = macro_build(bundle['capture'], bundle['training_report'])
         macro_record(alpha, strict_json(Path(bundle['training_report']).parent / 'features.json'),
-                     'var/macro-alpha', now=now)
+                     Path(os.environ.get('PILOT_MACRO_ALPHA_STATE_ROOT','var/macro-alpha')), now=now)
+        from forecast_coverage import evaluate as evaluate_coverage
+        import pandas as pd
+        observed_prices=pd.read_csv(Path(bundle['capture']).parent/'prices.csv',index_col=0,parse_dates=True)
+        atomic_json(Path('var/forecast-coverage/latest-summary.json'),
+                    evaluate_coverage('var/forecast-coverage',observed_prices,as_of=now or datetime.now(timezone.utc)))
         benchmark_pointer = Path("var/cycle-benchmark/latest.json")
         benchmark = None
         if benchmark_pointer.is_file():
@@ -143,7 +152,8 @@ def tick(root=Path("var/pilot-daily"), now=None, publish_vm=False):
         key = fingerprint(dict(document=pointer["document_sha256"], bundle=pointer["bundle_sha256"],
                                benchmark=file_hash(benchmark) if benchmark else None,
                                macro_alpha_source=file_hash("macro_alpha.py"),
-                               macro_alpha_forecast=alpha["forecast_id"]))
+                               macro_alpha_forecast=alpha["forecast_id"],
+                               coverage=fingerprint({k:v for k,v in strict_json("var/forecast-coverage/latest-summary.json").items() if k != "as_of"})))
         directory = root / "snapshots" / key
         if not directory.exists():
             directory.parent.mkdir(parents=True, exist_ok=True)
@@ -158,11 +168,28 @@ def tick(root=Path("var/pilot-daily"), now=None, publish_vm=False):
         previous = strict_json(root / "heartbeat.json") if (root / "heartbeat.json").exists() else {}
         if publish_vm and (previous.get("revision") != revision or previous.get("status") != "PUBLISHED"):
             publish(directory)
+        if publish_vm:
+            from research_publisher import publish_runtime
+            from dashboard_runtime import runtime
+            publish_runtime(runtime())
         result = dict(status="PUBLISHED" if publish_vm else "PREPARED", market_session=expected,
                       revision=revision, directory=str(directory.resolve()),
                       checked_at=datetime.now(timezone.utc).isoformat(), execution_enabled=False)
         atomic_json(root / "heartbeat.json", result)
         return result
+
+
+def tick(root=Path("var/pilot-daily"), now=None, publish_vm=False):
+    try:
+        return _tick(root, now=now, publish_vm=publish_vm)
+    except Exception as error:
+        root = Path(root)
+        previous = strict_json(root / 'heartbeat.json') if (root / 'heartbeat.json').is_file() else {}
+        record = dict(status='FAILED', checked_at=datetime.now(timezone.utc).isoformat(),
+                      error_type=type(error).__name__, execution_enabled=False,
+                      retained_revision=previous.get('revision') or previous.get('retained_revision'))
+        atomic_json(root / 'heartbeat.json', record)
+        raise
 
 
 if __name__ == "__main__":
