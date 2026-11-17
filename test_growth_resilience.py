@@ -61,7 +61,7 @@ def test_news_refresh_failure_preserves_dated_snapshot_and_ttl():
         "sources": [],
     }
     cache = NewsCache(old)
-    with patch(
+    with patch("market_news.time.monotonic", return_value=10.0), patch(
         "market_news.fetch_news",
         return_value={
             "headlines": [],

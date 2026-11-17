@@ -145,11 +145,11 @@ class NewsCache:
     def __init__(self, initial=None):
         self.lock = threading.Lock()
         self.value = initial
-        self.updated = 0.0
+        self.updated = None
 
     def get(self):
         with self.lock:
-            if self.value is None or time.monotonic() - self.updated >= 300:
+            if self.updated is None or time.monotonic() - self.updated >= 300:
                 fresh = fetch_news()
                 if not fresh["headlines"] and self.value and self.value["headlines"]:
                     fresh["headlines"] = self.value["headlines"]
