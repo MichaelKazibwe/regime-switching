@@ -1,5 +1,7 @@
 """Daily handoff from a qualified validation receipt to isolated shadow cohorts."""
 
+from forward_cohort import observations as cohort_observations
+
 import argparse
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,7 +20,7 @@ def current_bundle(root):
     job = strict_json(root / "latest-job.json")
     bundle = Path(job["job"]) / "dashboard" / "latest-strategy-run.json"
     receipt = read_observation(
-        root / "observations" / (job["market_session"] + ".json")
+        cohort_observations(root) / (job["market_session"] + ".json")
     )
     if file_hash(bundle) != receipt["evidence"]["bundle_sha256"]:
         raise ValueError("Candidate bundle/receipt mismatch")

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "expected_root_python_files": 399,
+  "expected_root_python_files": 411,
   "additional_research_and_pilot_modules": [
     "assess_return_engine_robustness.py",
     "assetroles.py",
@@ -33,7 +33,9 @@
     "forward_cohort.py",
     "fourregimestrategies.py",
     "fourstrategysimulation.py",
+    "global_asset_registry.py",
     "global_market_calendar.py",
+    "global_market_panel.py",
     "goalportfolio.py",
     "growth_resilience.py",
     "hybridportfoliopolicy.py",
@@ -60,6 +62,7 @@
     "macro_availability_diagnosis.py",
     "macro_feature_contract.py",
     "macro_lab_pdf.py",
+    "macro_monitor.py",
     "macrovintage.py",
     "managed_accounts.py",
     "managed_adapters.py",
@@ -109,6 +112,7 @@
     "pilot_auth.py",
     "pilot_browser_test.py",
     "pilot_collect.py",
+    "pilot_daily.py",
     "pilot_preflight.py",
     "pilot_release.py",
     "pilot_server.py",
@@ -147,6 +151,7 @@
     "run_return_engine_cycle.py",
     "scheduled_p1_research.py",
     "scheduled_strategy_validation.py",
+    "scheduled_weekly_portfolios.py",
     "secretredaction.py",
     "shadow_bundle_backup.py",
     "shadow_challenger_experiment.py",
@@ -165,6 +170,8 @@
     "stress_test_models.py",
     "training_macro.py",
     "verify_live_dashboard.py",
+    "weekly_portfolio_report.py",
+    "weekly_portfolios.py",
     "writer_fencing.py"
   ],
   "additional_test_modules": [
@@ -181,7 +188,9 @@
     "test_economic_design_assessment.py",
     "test_economic_p0_p1.py",
     "test_four_macro_strategies.py",
+    "test_global_asset_registry.py",
     "test_global_market_calendar.py",
+    "test_global_market_panel.py",
     "test_goal_benchmarks.py",
     "test_goal_portfolio.py",
     "test_growth_resilience.py",
@@ -200,6 +209,7 @@
     "test_local_observation_scheduler.py",
     "test_macro_allocation_lab.py",
     "test_macro_feature_contract.py",
+    "test_macro_monitor.py",
     "test_macrovintage.py",
     "test_managed_accounts.py",
     "test_managed_adapters.py",
@@ -226,6 +236,7 @@
     "test_paperstore.py",
     "test_performance_improvements.py",
     "test_pilot.py",
+    "test_pilot_daily.py",
     "test_product_api_replay.py",
     "test_product_build.py",
     "test_product_state.py",
@@ -237,6 +248,7 @@
     "test_smart_regime_portfolio.py",
     "test_strategy_operations.py",
     "test_strategy_repair_integrity.py",
-    "test_stress_test_models.py"
+    "test_stress_test_models.py",
+    "test_weekly_portfolios.py"
   ]
 }

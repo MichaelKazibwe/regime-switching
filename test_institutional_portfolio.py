@@ -24,9 +24,8 @@ def fixture():
         "SGOV",
     ]
     rng = np.random.default_rng(72)
-    values = rng.normal(size=(260, len(symbols))) * np.array(
-        [0.012, 0.013, 0.015, 0.012, 0.005, 0.007, 0.004, 0.012, 0.018, 0.001, 0.0002]
-    )
+    scales = {"SPY":.012,"VEA":.013,"VWO":.015,"TLT":.012,"IEF":.005,"IGOV":.007,"TIP":.004,"GLD":.012,"DBC":.018,"SHY":.001,"SGOV":.0002}
+    values = rng.normal(size=(260,len(symbols))) * np.array([scales.get(s,.013) for s in symbols])
     returns = pd.DataFrame(
         values, index=pd.bdate_range("2020-01-01", periods=260), columns=symbols
     )

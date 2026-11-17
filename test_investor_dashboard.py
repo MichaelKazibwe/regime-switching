@@ -73,13 +73,13 @@ def test_dashboard_preserves_archive_status_omits_private_identity_and_is_self_c
     assert data["plans"][0]["release_id"] == "old-release"
     assert data["plans"][0]["qualification"]["status"] == "OPERATOR_PREVIEW_ONLY"
     assert "PRIVATE-IDENTITY" not in html and "PRIVATE-EVIDENCE" not in html
-    assert "<canvas" in html and "https://" not in html and "http://" not in html
+    assert "<canvas" in html and 'src="https://' not in html and 'href="https://' not in html and "http://" not in html
     assert not re.search(r"<script[^>]+src=", html)
     script = re.findall(r"<script>(.*?)</script>", html, re.S)[0]
     digest = base64.b64encode(hashlib.sha256(script.encode()).digest()).decode()
     assert f"'sha256-{digest}'" in html
     assert destination.stat().st_mode & 0o777 == 0o600
-    assert len(data["catalogue"]) == 28
+    assert len(data["catalogue"]) == len(__import__("investmentcatalog").catalogue())
 
 
 def test_untrusted_text_cannot_close_data_script(tmp_path):
@@ -123,9 +123,9 @@ def test_market_snapshot_uses_no_future_prices_or_forward_fill():
         index=pd.to_datetime(["2025-10-28", "2025-10-29", "2025-10-30"]),
     )
     snapshot = market_payload(prices, {"2025-10-29"})["2025-10-29"]["instruments"]
-    assert snapshot["SPY"] == {"close": None, "history": [["2025-10-28", 100.0]]}
+    assert snapshot["SPY"] == {"close": None, "history": [["2025-10-28", 100.0]], "currency": "USD"}
     assert snapshot["TIP"]["close"] == 11
-    assert snapshot["ALLW"] == {"close": None, "history": []}
+    assert snapshot["ALLW"] == {"close": None, "history": [], "currency": "USD"}
 
 
 def test_manifest_cannot_read_another_client_folder(tmp_path):

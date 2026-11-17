@@ -1,5 +1,7 @@
 # Fresh-data strategy training and macro-driven allocations
 
+> **Universe policy update (2026-11-17):** Current portfolios and strategies resolve a configurable global instrument registry, with no fixed ETF-count limit. Numeric universe counts below describe this document's historical implementation or experiment. See [the current global-universe policy](GLOBAL_ASSET_UNIVERSE.md).
+
 ## Dynamic portfolio extension — 31 October 2026
 
 See [DYNAMIC_PORTFOLIO.md](DYNAMIC_PORTFOLIO.md). The four institutional-method engines already update their underlying allocations from market and macro inputs. `dynamic_portfolio.py` adds a separately identified blend with independent aggregate risk projection. The 1 November follow-through adds a separate dashboard view, contract-bound PDF and unapproved prospective cohort, with this exact blend's reconciled historical replay. Forecast simulation qualification and independent acceptance remain open. The fixed benchmark remains a reference; component performance must not be presented as the blend's performance. Current verification: 1,415 full-suite tests passed; see [LIVE_UPGRADE_EXECUTION.md](LIVE_UPGRADE_EXECUTION.md).

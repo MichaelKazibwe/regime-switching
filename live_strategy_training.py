@@ -39,6 +39,9 @@ from training_macro import TrainingMacro
 from strategy_training_data import validate_prices
 
 SOURCES = (
+    "global_asset_registry.py",
+    "global_market_panel.py",
+    "research/global_asset_registry.json",
     "live_strategy_training.py",
     "strategy_training_data.py",
     "training_macro.py",
@@ -408,6 +411,9 @@ def train(capture_path, output, *, test_sessions=252):
     capture_root = capture_path.parent.resolve()
     if capture["status"] != "CAPTURED_FOR_SHADOW_TRAINING":
         raise ValueError("Complete immutable capture required")
+    contract = capture.get("universe_contract")
+    if contract is not None and contract.get("registry_id") != __import__("global_asset_registry").load_registry().identity:
+        raise ValueError("Capture registry differs from the current research universe")
     for name, digest in capture["files"].items():
         p = capture_root / name
         if (
@@ -650,6 +656,7 @@ def train(capture_path, output, *, test_sessions=252):
         ),
         "latest_macro_available": features[-1].get("macro_valid", True),
         "core_universe": list(DIVERSIFIED_ASSETS),
+        "universe_contract": __import__("global_asset_registry").load_registry().payload(),
         "evaluation": {
             "start": str(dates[0].date()),
             "end": str(dates[-1].date()),
@@ -687,7 +694,7 @@ def train(capture_path, output, *, test_sessions=252):
             "Chronological frozen-model evaluation of predeclared strategies; the history and universe are not pristine prospective evidence.",
             "63-session outcomes overlap; forecast scores do not establish calibrated recession or loss probabilities.",
             "Latest candidate refit consumes more recent labels after evaluation; it is a different model from the one evaluated.",
-            "The latest 26-asset maps belong to hypothetical evaluation accounts; no investor account state or approved allocation is changed.",
+            "The registry-resolved allocation maps belong to hypothetical evaluation accounts; no investor account state or approved allocation is changed.",
             "No fixed return target, maximum account drawdown or automatic drawdown cash lock. Allocation/volatility/data-quality controls remain.",
             "15 bps adjusted-next-close fill proxies; doubled-cost sensitivity; zero uninvested cash yield; before investor taxes and platform fees.",
             "All Weather-style proxy is not official Bridgewater or ALLW fund performance.",

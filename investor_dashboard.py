@@ -111,7 +111,8 @@ def market_payload(prices, sessions):
                     if np.isfinite(value) and value > 0:
                         points.append([str(d.date()), float(value)])
             close = points[-1][1] if points and points[-1][0] == session else None
-            instruments[symbol] = {"close": close, "history": points}
+            instruments[symbol] = {"close": close, "history": points,
+                                   "currency": prices.attrs.get("base_currency", item["listing_currency"])}
         data[session] = {
             "session": session,
             "kind": "HISTORICAL_ADJUSTED_CLOSE_NOT_EXECUTABLE_QUOTES",
@@ -133,6 +134,7 @@ def render_dashboard(
         "viewer_version": 2,
         "context": context or {},
         "core_symbols": __import__("assetuniverse").DIVERSIFIED_ASSETS,
+        "universe_contract": __import__("global_asset_registry").load_registry().payload(),
         "pdf_links": pdf_links or {},
     }
     render_payload(payload, destination)

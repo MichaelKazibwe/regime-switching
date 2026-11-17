@@ -16,6 +16,7 @@ def policy():
 def covariance(policy):
     volatility = np.array([.18,.24,.25,.20,.25,.16,.07,.02,.08,.14,.15,.30,.20,.22,
                            .07,.09,.003,.20,.15,.25,.15,.20,.22,.25,.20,.20])
+    volatility = np.r_[volatility, np.full(max(0,len(policy.assets)-len(volatility)),.20)][:len(policy.assets)]
     n=len(policy.assets)
     correlation = .25*np.ones((n,n))+.75*np.eye(n)
     return pd.DataFrame(correlation*np.outer(volatility,volatility),index=policy.assets,columns=policy.assets)
@@ -135,7 +136,7 @@ def test_company_diversity_reports_gaps_without_claiming_exact_sector_holdings(p
     assert coverage["bh_energy_equity"]["mapping"] == "sector_equity_proxy"
     assert coverage["bh_energy_equity"]["allocated_proxies"] == ["XLE"]
     assert result["capital_weights"]["TIP"] > 0
-    assert len(result["capital_weights"]) == 26
+    assert len(result["capital_weights"]) == len(policy.assets)
 
 
 @pytest.mark.parametrize("problem",["unknown_proxy","duplicate_id","live_candidate","unknown_source"])
@@ -189,7 +190,7 @@ def test_expanded_allocation_round_trips_through_portfolio_and_constraints(polic
     ordered=policy.universe.tickers
     portfolio.set_covariance(cov.loc[ordered,ordered].to_numpy())
     assert portfolio.validate()
-    assert portfolio.universe.size == 26
+    assert portfolio.universe.size == len(policy.assets)
     assert portfolio.weights.sum()+result["cash_weight"] == pytest.approx(1)
     variance=float(portfolio.weights@portfolio.covariance@portfolio.weights)
     assert variance == pytest.approx(result["estimated_annual_volatility"]**2)

@@ -291,7 +291,7 @@ def render_investor_pdf(result, context, destination):
             "InvestorSmall",
         ),
         p(
-            f"{sum(v > 1e-8 for k, v in weights.items() if k != 'USD_CASH')} invested ETFs; full 26-ETF core below. Zero weight is a deliberate absence, not a missing holding."
+            f"{sum(v > 1e-8 for k, v in weights.items() if k != 'USD_CASH')} invested instruments; registered research universe below. Zero weight is a deliberate absence, not a missing holding."
         ),
         p(
             f"Full-horizon scenario median return: {percent(summary.get('median_total_return'))} / P95 drawdown: {percent(summary.get('p95_drawdown_magnitude'))} / horizon: {result['mandate']['horizon_years']} years",

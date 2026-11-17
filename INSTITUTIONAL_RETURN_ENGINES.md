@@ -1,5 +1,7 @@
 # Institutional-method return engines
 
+> **Universe policy update (2026-11-17):** Current portfolios and strategies resolve a configurable global instrument registry, with no fixed ETF-count limit. Numeric universe counts below describe this document's historical implementation or experiment. See [the current global-universe policy](GLOBAL_ASSET_UNIVERSE.md).
+
 Implemented and evaluated 31 October 2026. Four separately versioned, unapproved long-only challengers. Historical profitability improved; a superior or reliably profitable investment product has not been established. Existing paper strategies, client plans and cohorts remain unchanged.
 
 ## Public institutional research translated into engineering

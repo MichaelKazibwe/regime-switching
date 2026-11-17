@@ -28,7 +28,7 @@ def usable_session(now, publication_minutes=15):
     return close.tz_convert("America/New_York").tz_localize(None).normalize()
 
 
-def validate_prices(prices, session):
+def validate_prices(prices, session, *, required_symbols=None):
     import pandas_market_calendars as mcal
 
     if (
@@ -39,10 +39,13 @@ def validate_prices(prices, session):
     ):
         raise ValueError("Ordered unique naive market sessions required")
     prices = prices.loc[prices.index <= pd.Timestamp(session)].copy()
-    missing = set(DIVERSIFIED_ASSETS) - set(prices)
+    symbols = list(DIVERSIFIED_ASSETS if required_symbols is None else required_symbols)
+    if not symbols or len(symbols) != len(set(symbols)):
+        raise ValueError("Explicit unique capture symbols required")
+    missing = set(symbols) - set(prices)
     if missing:
         raise ValueError("Missing core instruments: " + ",".join(sorted(missing)))
-    values = prices[list(DIVERSIFIED_ASSETS)].to_numpy(dtype=float)
+    values = prices[symbols].to_numpy(dtype=float)
     if np.isinf(values).any() or np.any(values[np.isfinite(values)] <= 0):
         raise ValueError("Invalid adjusted prices")
     if prices.empty or prices.index[-1] != pd.Timestamp(session):
@@ -50,14 +53,14 @@ def validate_prices(prices, session):
     expected = mcal.get_calendar("NYSE").schedule(prices.index[0], session).index
     if not prices.index.equals(expected):
         raise ValueError("Missing or extra exchange sessions; no filling permitted")
-    if prices[list(DIVERSIFIED_ASSETS)].iloc[-1].isna().any():
+    if prices[symbols].iloc[-1].isna().any():
         raise ValueError("Stale or missing latest core-instrument observation")
     if len(prices) < 1260:
         raise ValueError("At least five years of observed market sessions required")
     return prices
 
 
-def capture(output, base_macro_manifest, *, clock=None):
+def capture(output, base_macro_manifest, *, clock=None, global_panel_manifest=None):
     import yfinance as yf
     from fetch_strategy_macro import SERIES, fetch_series
 
@@ -66,19 +69,31 @@ def capture(output, base_macro_manifest, *, clock=None):
     root = Path(output) / now.strftime("%Y%m%dT%H%M%S%fZ")
     root.mkdir(parents=True, exist_ok=False, mode=0o700)
     yf.set_tz_cache_location(str(root / "provider-cache"))
-    symbols = [*DIVERSIFIED_ASSETS, "DBMF", "ALLW"]
-    raw = yf.download(
-        symbols,
-        start="2010-01-01",
-        end=str((session + pd.Timedelta(days=1)).date()),
-        auto_adjust=True,
-        threads=False,
-        progress=False,
-        timeout=20,
-    )
-    if raw.empty:
+    from investmentcatalog import catalogue
+    cat = catalogue()
+    if global_panel_manifest is None and any(cat[s].listing_currency != "USD" for s in DIVERSIFIED_ASSETS):
+        raise ValueError("Native-currency capture requires qualified global_market_panel prices and FX provenance")
+    symbols = list(dict.fromkeys([*DIVERSIFIED_ASSETS, *[s for s, i in cat.items() if i.listing_currency == "USD"]]))
+    extra_files = []
+    if global_panel_manifest is not None:
+        from global_market_panel import capture_manifest
+        from global_asset_registry import load_registry
+        prices, extra_files = capture_manifest(global_panel_manifest, root, load_registry())
+        raw = None
+    else:
+        raw = yf.download(
+            symbols,
+            start="2010-01-01",
+            end=str((session + pd.Timedelta(days=1)).date()),
+            auto_adjust=True,
+            threads=False,
+            progress=False,
+            timeout=20,
+        )
+    if raw is not None and raw.empty:
         raise RuntimeError("Market provider returned no data; capture is incomplete")
-    prices = raw["Close"] if isinstance(raw.columns, pd.MultiIndex) else raw[["Close"]]
+    if raw is not None:
+        prices = raw["Close"] if isinstance(raw.columns, pd.MultiIndex) else raw[["Close"]]
     prices.index = pd.DatetimeIndex(prices.index).tz_localize(None)
     prices = validate_prices(prices, session)
     private_write(root / "prices.csv", prices.to_csv())
@@ -132,12 +147,15 @@ def capture(output, base_macro_manifest, *, clock=None):
         root / "prices.csv",
         root / "macro-manifest.json",
         *[root / f"{k}.csv" for k in SERIES],
+        *extra_files,
     ]
     ready = {
         "status": "CAPTURED_FOR_SHADOW_TRAINING",
         "captured_at": now.isoformat(),
         "price_session": str(session.date()),
         "publication_buffer_minutes": 15,
+        "base_currency": "USD",
+        "universe_contract": __import__("global_asset_registry").load_registry().payload(),
         "prices": str(root / "prices.csv"),
         "macro_manifest": str(root / "macro-manifest.json"),
         "files": {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in files},
@@ -167,8 +185,10 @@ def main():
         type=Path,
         default=Path("var/research/smart-macro-vintages/manifest.json"),
     )
+    parser.add_argument("--global-panel-manifest", type=Path,
+                        help="Qualified timestamped global quotes/FX and valuation manifest")
     args = parser.parse_args()
-    capture(args.output, args.base_macro_manifest)
+    capture(args.output, args.base_macro_manifest, global_panel_manifest=args.global_panel_manifest)
 
 
 if __name__ == "__main__":

@@ -127,8 +127,9 @@ def solve_risk_budget(covariance, budgets):
 
 class SmartRegimePortfolio:
     def __init__(self, config_path=DEFAULT_SMART_CONFIG):
-        self.config=json.loads(Path(config_path).read_text())
-        self.configuration_sha256=hashlib.sha256(Path(config_path).read_bytes()).hexdigest()
+        from global_asset_registry import resolve_policy
+        self.config=resolve_policy(json.loads(Path(config_path).read_text()))
+        self.configuration_sha256=hashlib.sha256(json.dumps(self.config,sort_keys=True).encode()).hexdigest()
         c=self.config
         if c.get('schema_version')!=1 or c.get('mode')!='RESEARCH_ONLY' or c.get('production_activation') is not False:
             raise AllocationError('Smart strategy must remain research-only')

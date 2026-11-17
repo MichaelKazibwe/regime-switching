@@ -16,7 +16,7 @@ from productreport import private_write
 from strategy_dashboard_server import read_payload
 from strategy_report import load_training_report
 from strategy_training_data import usable_session
-from strategy_integrity import canonical, validate_scenario, verify_seal
+from strategy_integrity import canonical, validate_scenario, verify_seal, fingerprint
 from macro_allocation_lab import prepare_lab
 
 
@@ -148,6 +148,8 @@ def audit(bundle, dashboard):
         "scenarios": scenarios,
         "predictive_gate": report["classifier"]["latest_gate"],
         "latest_macro_available": report["latest_macro_available"],
+        "observation_protocol": fingerprint({"sources": report["source_hashes"],
+                                               "universe": report["core_universe"]}),
         "informational_macro_status": (
             payload["context"]["plans"][payload["plans"][0]["id"]]
             .get("latest_macro", {}).get("status", "UNAVAILABLE")
@@ -203,7 +205,8 @@ def observe(evidence, root, *, now=None):
         atomic_json(path, record, exclusive=True)
         read_observation(path, now)
     rows = [read_observation(p, now) for p in sorted(root.glob("????-??-??.json"))]
-    sessions = {r["evidence"]["market_session"] for r in rows}
+    sessions = {r["evidence"]["market_session"] for r in rows
+                if r["evidence"].get("observation_protocol") == evidence.get("observation_protocol")}
     return {
         "observed_sessions": len(sessions),
         "required_sessions": 20,

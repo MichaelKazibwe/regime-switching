@@ -355,7 +355,7 @@ def recalculate(
         else 0.0
         if shares is not None
         else None
-        for s in [*DIVERSIFIED_ASSETS, "DBMF", "ALLW", "USD_CASH"]
+        for s in [*__import__("investmentcatalog").catalogue(), "USD_CASH"]
     }
     result = {
         "status": "SHADOW_SCENARIO_CANDIDATE",

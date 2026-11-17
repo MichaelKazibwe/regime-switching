@@ -188,3 +188,27 @@ def test_watchdog_rejects_missing_receipt_and_failed_latest_job(tmp_path):
     assert health(tmp_path, now)["status"] == "HEALTHY_SHADOW_JOB"
     job.write_text(json.dumps({"status": "FAILED", "market_session": "2026-10-30"}))
     assert health(tmp_path, now)["status"] == "ALERT_REQUIRED"
+
+
+def test_observation_window_restarts_for_changed_source_universe_protocol(tmp_path):
+    old = {**evidence(), "observation_protocol": "old-contract"}
+    observe(old, tmp_path, now=datetime(2026, 10, 30, 22, tzinfo=timezone.utc))
+    original = (tmp_path / "2026-10-30.json").read_bytes()
+    new = {**evidence("2026-11-02", sha="c" * 64), "observation_protocol": "global-contract"}
+    result = observe(new, tmp_path, now=datetime(2026, 11, 2, 22, tzinfo=timezone.utc))
+    assert result["observed_sessions"] == 1
+    assert not result["observation_window_complete"]
+    assert len(list(tmp_path.glob("????-??-??.json"))) == 2
+    assert (tmp_path / "2026-10-30.json").read_bytes() == original
+
+
+def test_explicit_observation_stream_preserves_original_receipts(tmp_path):
+    from forward_cohort import observations
+    from strategy_receipts import atomic_json
+    assert observations(tmp_path) == tmp_path / 'observations'
+    atomic_json(tmp_path / 'active-cohort.json', dict(observation_directory='observations-global-v2'))
+    assert observations(tmp_path) == tmp_path / 'observations-global-v2'
+    for value in ['../observations', '/observations', 'other']:
+        atomic_json(tmp_path / 'active-cohort.json', dict(observation_directory=value))
+        with pytest.raises(ValueError):
+            observations(tmp_path)

@@ -1082,32 +1082,17 @@ class FullSystemRegression:
             # PRODUCTION ASSET UNIVERSE
             # ==========================================================
 
-            asset_order = [
-                "SPY",
-                "QQQ",
-                "IWM",
-                "VEA",
-                "VWO",
-                "TLT",
-                "IEF",
-                "SHY",
-                "LQD",
-                "HYG",
-                "GLD",
-                "SLV",
-                "DBC",
-                "VNQ",
-            ]
+            asset_order = list(__import__("assetuniverse").PRODUCTION_ASSETS)
 
             asset_count = len(
                 asset_order
             )
 
-            if asset_count != 14:
+            if not asset_count or len(set(asset_order)) != asset_count:
 
                 raise AssertionError(
                     "Production asset universe must "
-                    f"contain 14 assets. Got {asset_count}."
+                    f"contain unique registered assets. Got {asset_count}."
                 )
 
             print(
@@ -4004,22 +3989,7 @@ class FullSystemRegression:
         # SYNTHETIC PRICE DATA
         # ==========================================================
 
-        asset_order = [
-            "SPY",
-            "QQQ",
-            "IWM",
-            "VEA",
-            "VWO",
-            "TLT",
-            "IEF",
-            "SHY",
-            "LQD",
-            "HYG",
-            "GLD",
-            "SLV",
-            "DBC",
-            "VNQ",
-        ]
+        asset_order = list(__import__("assetuniverse").PRODUCTION_ASSETS)
 
         prices = build_phase11_price_data(
             asset_order,

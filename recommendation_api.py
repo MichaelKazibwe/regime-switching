@@ -249,9 +249,7 @@ def main():
         annual_fund_expenses=json.loads(args.fund_expenses.read_text())
         if args.fund_expenses
         else None,
-        fx_to_base=pd.read_csv(args.fx_to_base, index_col=0, parse_dates=True).iloc[
-            :, 0
-        ]
+        fx_to_base=__import__("productallocation").read_fx_csv(args.fx_to_base)
         if args.fx_to_base
         else None,
     )

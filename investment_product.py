@@ -131,7 +131,7 @@ def main():
         )
         return
     private_write(
-        args.output / "catalogue-28.json", json.dumps(catalogue_payload(), indent=2)
+        args.output / "instrument-catalogue.json", json.dumps(catalogue_payload(), indent=2)
     )
     if args.demo:
         if args.mandate or args.prices or args.cash_rate or args.as_of:
@@ -238,7 +238,7 @@ def main():
             json.dumps(
                 {
                     "mode": "HISTORICAL_ILLUSTRATIONS_NOT_CLIENT_RECOMMENDATIONS",
-                    "catalogue_count": 28,
+                    "catalogue_count": len(catalogue_payload()),
                     "reports": manifest,
                     "prices_sha256": hashlib.sha256(
                         prices.to_csv().encode()
@@ -315,7 +315,7 @@ def _plan(args, parser, mandate, prices, key, state_path):
             ),
         )
     fx = (
-        pd.read_csv(args.fx_to_base, index_col=0, parse_dates=True).iloc[:, 0]
+        __import__("productallocation").read_fx_csv(args.fx_to_base)
         if args.fx_to_base
         else None
     )

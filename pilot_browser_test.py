@@ -1,6 +1,7 @@
 """Real-browser frontend acceptance for disposable local QA accounts only."""
 
 import argparse
+import csv
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import json
@@ -79,26 +80,99 @@ def run(origin, output, *, browsers=("chromium", "firefox", "webkit")):
             context = browser.new_context(viewport=dict(width=1440, height=1000), accept_downloads=True,
                                           reduced_motion="reduce")
             page = context.new_page()
+            if os.environ.get("PILOT_REQUIRE_DAILY") == "1":
+                page.clock.install()
             errors = []
+            benchmark_requests = []
             page.on("pageerror", lambda error: errors.append(str(error)))
+            page.on("request", lambda request: benchmark_requests.append(request.url) if request.url.endswith('/api/benchmark') else None)
             page.set_default_timeout(30000)
             page.goto(origin + "/login")
             expect(page.get_by_role("heading", name="Sign in", exact=True)).to_be_visible()
             page.get_by_label("Username", exact=True).fill("alice@example.test")
             page.get_by_label("Password", exact=True).fill("Synthetic-test-password-123!")
             page.get_by_role("button", name="Sign in", exact=True).click()
-            expect(page.locator('[data-view="growth"]')).to_be_visible(timeout=90000)
+            expect(page.locator('#section-jump')).to_be_visible(timeout=90000)
             expect(page.locator("#pilot-account")).to_contain_text("alice@example.test", timeout=90000)
+            if os.environ.get("PILOT_REQUIRE_DAILY") == "1":
+                page.locator('#section-jump').select_option('weekly')
+                def daily_status(route):
+                    route.fulfill(json=dict(version="synthetic-new-daily-run", market_session="2026-11-13", stale=False, error=None))
+                    page.unroute('**/api/dashboard-status', daily_status)
+                page.route('**/api/dashboard-status', daily_status)
+                with page.expect_navigation(wait_until='domcontentloaded'):
+                    page.clock.fast_forward(60000)
+                expect(page.locator('#pilot-account')).to_contain_text('alice@example.test', timeout=90000)
+                expect(page.locator('[data-panel="weekly"]')).to_be_visible()
             sections = page.locator("[data-view]").evaluate_all("nodes=>nodes.map(n=>n.dataset.view)")
             visited = []
+            navigation_ms = []
             for section in sections:
-                page.locator(f'[data-view="{section}"]').click()
+                started = time.perf_counter()
+                page.locator('#section-jump').select_option(section)
                 expect(page.locator(f'[data-panel="{section}"]')).to_be_visible()
+                navigation_ms.append(round((time.perf_counter() - started) * 1000, 2))
                 expect(page.locator("#page-title")).not_to_have_text("")
                 visited.append(section)
+            if os.environ.get("PILOT_REQUIRE_WEEKLY") == "1":
+                page.locator('#section-jump').select_option('weekly')
+                expect(page.locator('#weekly-status')).to_contain_text('Week closed')
+                weekly = page.request.get(origin + '/api/weekly').json()
+                for key in ('short', 'medium', 'long'):
+                    page.locator('#weekly-horizon').select_option(key)
+                    rows = weekly['candidates'][key]['allocations']
+                    expect(page.locator('#weekly-holdings tr')).to_have_count(len(rows))
+                    for index, row in enumerate(rows):
+                        cells = page.locator('#weekly-holdings tr').nth(index).locator('td')
+                        expect(cells.nth(0)).to_have_text(row['symbol'])
+                        expect(cells.nth(1)).to_have_text(f"{row['weight'] * 100:.2f}%")
+                    expect(page.locator('#weekly-projections tr')).to_have_count(4)
+                    median = weekly['candidates'][key]['projections']['52']['median_return']
+                    expect(page.locator('#weekly-projections tr').nth(2).locator('td').nth(2)).to_have_text(f'{median * 100:.2f}%')
+                page.locator('#weekly-capital').fill('200000')
+                expect(page.locator('#weekly-projections tr').nth(2).locator('td').nth(4)).to_have_text(f'${200000 * (1 + median):,.0f}')
+                with page.expect_download() as event:
+                    page.locator('#weekly-pdf').click()
+                event.value.save_as(root / f'{name}-weekly.pdf')
+                assert (root / f'{name}-weekly.pdf').read_bytes().startswith(b'%PDF-')
+                page.screenshot(path=str(root / f'{name}-weekly-desktop.png'), full_page=True)
+                page.set_viewport_size(dict(width=390, height=844))
+                assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
+                page.screenshot(path=str(root / f'{name}-weekly-mobile.png'), full_page=True)
+                page.set_viewport_size(dict(width=1440, height=1000))
+            page.locator('#section-jump').select_option('benchmark')
+            if os.environ.get("PILOT_REQUIRE_MACRO_MONITOR") == "1":
+                page.locator('#section-jump').select_option('macro')
+                expect(page.locator('#macro-monitor-status')).to_contain_text('Market session', timeout=90000)
+                monitor = page.request.get(origin + '/api/macro-monitor').json()
+                assert monitor['execution_enabled'] is False
+                for quarter in monitor['quarters']:
+                    page.locator('#macro-monitor-quarter').select_option(quarter['quarter'])
+                    rows = [r for r in monitor['rows'] if r['quarter'] == quarter['quarter']]
+                    expect(page.locator('#macro-monitor-daily tr')).to_have_count(len(rows))
+                    expect(page.locator('#macro-monitor-daily tr').first.locator('td').first).to_have_text(rows[-1]['date'])
+                    actual = page.locator('#macro-monitor-quarterly tr').filter(has=page.get_by_role('button', name=quarter['quarter'], exact=True))
+                    mean = quarter['daily_context_means']['CPIAUCSL']
+                    expect(actual.locator('td').nth(5)).to_have_text(f'{mean:.2f}' if mean is not None else 'Unavailable')
+                    daily_cpi = rows[-1]['series']['CPIAUCSL']['value']
+                    expect(page.locator('#macro-monitor-daily tr').first.locator('td').nth(3)).to_contain_text(f'{daily_cpi:.2f}' if daily_cpi is not None else 'Unavailable')
+                page.locator('#macro-monitor-quarter').select_option(monitor['quarters'][0]['quarter'])
+                assert not page.locator('.macro-monitor-archive').evaluate('node=>node.open')
+                with page.expect_download() as event:
+                    page.locator('#macro-monitor-csv').click()
+                event.value.save_as(root / f'{name}-daily-macro.csv')
+                with (root / f'{name}-daily-macro.csv').open() as stream:
+                    exported = list(csv.reader(stream))
+                assert len(exported) - 1 == monitor['quarters'][0]['observed_sessions']
+                page.screenshot(path=str(root / f'{name}-macro-desktop.png'), full_page=True)
+                page.set_viewport_size(dict(width=390, height=844))
+                assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
+                page.screenshot(path=str(root / f'{name}-macro-mobile.png'), full_page=True)
+                page.set_viewport_size(dict(width=1440, height=1000))
+                page.locator('#section-jump').select_option('benchmark')
             expect(page.locator("#benchmark-note")).to_contain_text("Research reference", timeout=90000)
             expect(page.locator("#portfolio-identity")).to_contain_text("Cycle-diversified")
-            expect(page.locator("#benchmark-weights tr")).to_have_count(28)
+            expect(page.locator("#benchmark-weights tr")).to_have_count(len(page.request.get(origin + "/api/benchmark").json()["latest"]["weights"]) + 1)
             for option in page.locator("#benchmark-scenario option").evaluate_all("nodes=>nodes.map(n=>n.value)"):
                 page.locator("#benchmark-scenario").select_option(option)
                 expect(page.locator("#benchmark-scenario-note")).to_contain_text("Conditional one-year")
@@ -108,14 +182,60 @@ def run(origin, output, *, browsers=("chromium", "firefox", "webkit")):
             download.save_as(root / f"{name}-benchmark.json")
             report = json.loads((root / f"{name}-benchmark.json").read_text())
             assert report["execution_enabled"] is False
+            assert page.locator('[data-hub]').count() == 5
+            assert len(sections) == 11
+            fixed_allocation = page.locator('#benchmark-weights tr').evaluate_all(
+                "rows=>rows.map(r=>[...r.cells].slice(0,3).map(c=>c.textContent))")
+            medians = set()
+            for scenario_name, scenario in report['scenarios'].items():
+                page.locator('#benchmark-scenario').select_option(scenario_name)
+                for metric, key in [('median', 'median_return'), ('downside', 'p05_return'),
+                                    ('upside', 'p95_return'), ('drawdown', 'p95_drawdown'),
+                                    ('loss', 'probability_loss_10pct')]:
+                    expected = page.evaluate("v=>new Intl.NumberFormat(undefined,{style:'percent',maximumFractionDigits:1}).format(v)", scenario[key])
+                    expect(page.locator(f'#benchmark-metrics [data-metric="{metric}"] strong')).to_have_text(expected)
+                medians.add(page.locator('#benchmark-metrics [data-metric="median"] strong').inner_text())
+            assert len(medians) > 1
+            assert fixed_allocation == page.locator('#benchmark-weights tr').evaluate_all(
+                "rows=>rows.map(r=>[...r.cells].slice(0,3).map(c=>c.textContent))")
+            page.locator('#benchmark-capital').fill('200000')
+            last_scenario = list(report['scenarios'].values())[-1]
+            expected = page.evaluate("v=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(v)", 200000 * (1 + last_scenario['median_return']))
+            expect(page.locator('#benchmark-metrics [data-metric="ending"] strong')).to_have_text(expected)
+            page.locator('#benchmark-compare').select_option(next(iter(report['scenarios'])))
+            expect(page.locator('#benchmark-comparison')).to_contain_text('percentage points')
+            page.locator('#benchmark-mode-return').click()
+            expect(page.locator('#benchmark-mode-return')).to_have_attribute('aria-pressed', 'true')
+            page.locator('#benchmark-chart').focus()
+            page.keyboard.press('ArrowRight')
+            expect(page.locator('#benchmark-crosshair')).to_contain_text('Month')
+            with page.expect_download() as comparison_download:
+                page.locator('#benchmark-comparison-download').click()
+            comparison_path = root / f'{name}-comparison.csv'
+            comparison_download.value.save_as(comparison_path)
+            with comparison_path.open() as stream:
+                comparison_rows = list(csv.DictReader(stream))
+            assert len(comparison_rows) == 2
+            assert float(comparison_rows[0]['Median return']) == last_scenario['median_return']
+            assert float(comparison_rows[0]['Illustration USD']) == 200000
+            page.locator('.brand').click()
+            expect(page.locator('[data-panel="overview"]')).to_be_visible()
+            page.locator('#workspace-search').click()
+            page.locator('#workspace-search-input').fill('risk')
+            page.locator('.command-result').first.click()
+            expect(page.locator('[data-panel="risk"]')).to_be_visible()
+            for merged in ['observations', 'assumptions']:
+                page.locator(f'[data-merged="{merged}"] > summary').click()
+                expect(page.locator(f'[data-merged="{merged}"]')).to_have_attribute('open', '')
+            page.locator('#section-jump').select_option('benchmark')
             page.screenshot(path=str(root / f"{name}-benchmark-desktop.png"), full_page=True)
-            page.locator('[data-view="portfolio"]').click()
+            page.locator('#section-jump').select_option('portfolio')
             page.locator("#asset-search").fill("SPY")
             expect(page.locator("#asset-rows")).to_contain_text("SPY")
             page.locator("#asset-search").fill("NO-SUCH-ASSET")
             expect(page.locator("#asset-rows")).to_contain_text("No instruments match")
             page.locator("#asset-search").fill("")
-            page.locator('[data-view="overview"]').click()
+            page.locator('#section-jump').select_option('overview')
             median_before = page.locator("#median-value").inner_text()
             page.locator("#capital").fill("250000")
             page.locator("#capital").dispatch_event("change")
@@ -144,6 +264,8 @@ def run(origin, output, *, browsers=("chromium", "firefox", "webkit")):
             page.locator("#section-jump").select_option("benchmark")
             expect(page.locator('[data-panel="benchmark"]')).to_be_visible()
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 2")
+            assert page.locator('#benchmark-chart').bounding_box()['height'] >= 240
+            assert page.locator('.market-tile strong').evaluate_all('nodes=>nodes.every(n=>n.scrollWidth<=n.clientWidth+1)')
             page.screenshot(path=str(root / f"{name}-benchmark-mobile.png"), full_page=True)
             page.locator("#section-jump").select_option("macro")
             expect(page.locator("#lab-strategy")).to_be_visible()
@@ -167,9 +289,14 @@ def run(origin, output, *, browsers=("chromium", "firefox", "webkit")):
             page.locator("#pilot-logout").click()
             expect(page).to_have_url(origin + "/login")
             assert not errors, errors
+            assert len(benchmark_requests) == (3 if os.environ.get("PILOT_REQUIRE_DAILY") == "1" else 2)
             evidence[name] = dict(sections=visited, viewport_desktop=[1440, 1000], viewport_mobile=[390, 844],
                                   benchmark_scenarios=len(report["scenarios"]), page_errors=errors,
                                   logout_revoked=True, viewer_controls_disabled=True,
+                                  scenario_metric_cases=len(report['scenarios']),
+                                  grouped_navigation=True, command_search=True,
+                                  fixed_reference_preserved=True, illustration_scaling=True,
+                                  tester_navigation_ms=navigation_ms, benchmark_fetches=len(benchmark_requests),
                                   benchmark_download_sha256=file_hash(root / f"{name}-benchmark.json"))
             atomic_json(root / f"{name}-acceptance.json", dict(status="PASSED_ENGINE_ACCEPTANCE", **evidence[name]))
             context.close()

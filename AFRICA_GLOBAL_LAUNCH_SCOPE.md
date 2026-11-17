@@ -1,5 +1,7 @@
 # Africa-based global managed-account platform
 
+> **Universe policy update (2026-11-17):** Current portfolios and strategies resolve a configurable global instrument registry, with no fixed ETF-count limit. Numeric universe counts below describe this document's historical implementation or experiment. See [the current global-universe policy](GLOBAL_ASSET_UNIVERSE.md).
+
 Decision research: 1 November 2026. **Planning recommendation, not an incorporation, tax ruling, licence, brokerage approval or permission to trade.**
 
 ## Recommended base and broker

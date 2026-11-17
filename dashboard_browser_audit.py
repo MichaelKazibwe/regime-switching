@@ -39,7 +39,7 @@ def audit(origin, output):
             payload = page.request.get(origin + "/api/dashboard").json()
             count, downloads = 0, 0
             for i, plan in enumerate(payload["plans"]):
-                page.locator('[data-view="portfolio"]').click()
+                page.locator('#section-jump').select_option('portfolio')
                 page.locator("#profile").select_option(str(i))
                 page.locator("#core-only").uncheck()
                 page.locator("#capital").fill("250000")
@@ -67,7 +67,7 @@ def audit(origin, output):
                     else:
                         assert path.read_bytes().startswith(b"%PDF-")
                     downloads += 1
-            page.locator('[data-view="engines"]').click()
+            page.locator('#section-jump').select_option('engines')
             for row in payload["return_engines"]["assessment"]["strategies"]:
                 page.locator("#engine-selector").select_option(row["name"])
                 a = row["candidate"]
@@ -76,7 +76,7 @@ def audit(origin, output):
                     percentage(weight, a["cash"] if symbol == "USD_CASH" else a["weights"].get(symbol, 0), digits=1)
                     percentage(risk, 0 if symbol == "USD_CASH" else a["risk_shares"].get(symbol), digits=1)
                     count += 2
-            page.locator('[data-view="dynamic"]').click()
+            page.locator('#section-jump').select_option('dynamic')
             for tr in page.locator("#dynamic-weights tr").all():
                 symbol, _, weight, risk = tr.locator("td").all_inner_texts()
                 a = payload["dynamic_portfolio"]["snapshot"]
@@ -89,7 +89,7 @@ def audit(origin, output):
             event.value.save_as(path)
             assert path.read_bytes().startswith(b"%PDF-")
             downloads += 1
-            page.locator('[data-view="macro"]').click()
+            page.locator('#section-jump').select_option('macro')
             for strategy in payload["allocation_lab"]["results"]:
                 page.locator("#lab-strategy").select_option(strategy)
                 with page.expect_download() as event:

@@ -144,7 +144,7 @@ def test_future_market_prices_do_not_change_prior_states_and_ipos_are_not_filled
     import pandas_market_calendars as mcal
     dates=mcal.get_calendar('NYSE').schedule('2007-08-01','2009-01-01').index
     rng=np.random.default_rng(443)
-    prices=pd.DataFrame(100*np.exp(np.cumsum(rng.normal(.0001,.007,(len(dates),26)),axis=0)),index=dates,columns=DIVERSIFIED_ASSETS)
+    prices=pd.DataFrame(100*np.exp(np.cumsum(rng.normal(.0001,.007,(len(dates),len(DIVERSIFIED_ASSETS))),axis=0)),index=dates,columns=DIVERSIFIED_ASSETS)
     prices.loc[dates[:280],'IGOV']=np.nan
     path=macro_archive(tmp_path)
     _,first,_=prepare_states(prices,PointInTimeMacro(path),SmartRegimePortfolio())

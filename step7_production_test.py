@@ -84,22 +84,7 @@ from productioncomposition import ProductionComposition
 # 7.1 PRODUCTION ASSET UNIVERSE
 # ======================================================================
 
-PRODUCTION_ASSETS = [
-    "SPY",
-    "QQQ",
-    "IWM",
-    "VEA",
-    "VWO",
-    "TLT",
-    "IEF",
-    "SHY",
-    "LQD",
-    "HYG",
-    "GLD",
-    "SLV",
-    "DBC",
-    "VNQ",
-]
+from assetuniverse import PRODUCTION_ASSETS
 
 OBSERVATIONS = 300
 
@@ -171,7 +156,7 @@ assert engine.black_litterman is not None
 
 
 # ======================================================================
-# 7.4 VERIFY CANONICAL 14-ASSET UNIVERSE
+# 7.4 VERIFY REGISTRY-QUALIFIED UNIVERSE
 # ======================================================================
 
 print()
@@ -181,11 +166,11 @@ print(PRODUCTION_ASSETS)
 
 assert len(
     PRODUCTION_ASSETS
-) == 14
+) > 0
 
 assert len(
     set(PRODUCTION_ASSETS)
-) == 14
+) == len(PRODUCTION_ASSETS)
 
 
 # ======================================================================

@@ -21,6 +21,7 @@ from strategy_training_data import usable_session
 
 ROOT = Path(__file__).resolve().parent
 SOURCES = ("daily_alpha_training.py", "performance_forecast_calendar.py", "performance_forecasts.py",
+           "global_asset_registry.py", "research/global_asset_registry.json",
            "live_strategy_training.py", "forecast_calibration.py", "fourregimestrategies.py",
            "research/four_macro_strategies.json")
 

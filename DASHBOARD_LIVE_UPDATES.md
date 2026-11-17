@@ -1,5 +1,7 @@
 # Dashboard data and automatic refresh — 5 November 2026
 
+> **Universe policy update (2026-11-17):** Current portfolios and strategies resolve a configurable global instrument registry, with no fixed ETF-count limit. Numeric universe counts below describe this document's historical implementation or experiment. See [the current global-universe policy](GLOBAL_ASSET_UNIVERSE.md).
+
 The authenticated viewer runs on loopback port 8770. Its private launch URL is in `var/dashboard-service/manual.log`; do not share that token. Static HTML exports do not have authenticated live functionality.
 
 | Sections | Data and refresh |

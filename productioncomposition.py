@@ -16,7 +16,7 @@ Design principles
 3. Mandatory dependencies fail fast.
 4. Constructor incompatibilities are explicit.
 5. Composite components must be fully configured.
-6. The canonical 14-asset production universe is mandatory.
+6. The registry-qualified production universe is mandatory.
 7. Health checks must pass before the engine is released.
 8. Live trading remains disabled in Phase IV-B.1.
 
@@ -959,7 +959,7 @@ class ProductionComposition:
         )
 
         # --------------------------------------------------------------
-        # 13.2 CANONICAL 14-ASSET UNIVERSE
+        # 13.2 REGISTRY-QUALIFIED UNIVERSE
         # --------------------------------------------------------------
 
         asset_universe = (
@@ -1161,7 +1161,7 @@ class ProductionComposition:
             raise ProductionCompositionError(
                 (
                     "Production engine asset universe does "
-                    "not match the canonical 14-asset universe."
+                    "not match the registry-qualified universe."
                 )
             )
 
@@ -1562,7 +1562,7 @@ def test_production_composition_metadata() -> None:
 
     assert (
         metadata["production_asset_count"]
-        == 14
+        == len(PRODUCTION_ASSETS)
     )
 
     assert (
@@ -1576,7 +1576,7 @@ def test_production_composition_metadata() -> None:
 def test_production_composition_asset_universe() -> None:
     """
     Verify that ProductionComposition consumes the canonical
-    14-asset production AssetUniverse.
+    registry-qualified production AssetUniverse.
     """
 
     composition = (
@@ -1603,12 +1603,12 @@ def test_production_composition_asset_universe() -> None:
 
     assert (
         universe.size
-        == 14
+        == len(PRODUCTION_ASSETS)
     )
 
     assert (
         universe.PRODUCTION_ASSET_COUNT
-        == 14
+        == len(PRODUCTION_ASSETS)
     )
 
     assert (
@@ -1633,7 +1633,7 @@ def test_production_composition_asset_universe() -> None:
                 universe.tickers
             )
         )
-        == 14
+        == len(PRODUCTION_ASSETS)
     )
 
     assert universe.health_check()
@@ -1713,7 +1713,7 @@ def test_covariance_ensemble_composition() -> None:
 def test_production_composition_engine_uses_14_assets() -> None:
     """
     Verify that the final PortfolioDecisionEngine receives the
-    canonical 14-asset production universe.
+    registry-qualified production universe.
     """
 
     composition = (
@@ -1747,7 +1747,7 @@ def test_production_composition_engine_uses_14_assets() -> None:
 
     assert (
         universe.size
-        == 14
+        == len(PRODUCTION_ASSETS)
     )
 
     assert (
@@ -1763,7 +1763,7 @@ def test_production_composition_engine_uses_14_assets() -> None:
         len(
             universe.tickers
         )
-        == 14
+        == len(PRODUCTION_ASSETS)
     )
 
 
@@ -1801,7 +1801,7 @@ def test_production_composition_health() -> None:
         result[
             "production_asset_count"
         ]
-        == 14
+        == len(PRODUCTION_ASSETS)
     )
 
     assert (

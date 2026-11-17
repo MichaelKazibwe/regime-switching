@@ -1,5 +1,7 @@
 # Dashboard interaction and visual review — 2 November 2026
 
+> **Universe policy update (2026-11-17):** Current portfolios and strategies resolve a configurable global instrument registry, with no fixed ETF-count limit. Numeric universe counts below describe this document's historical implementation or experiment. See [the current global-universe policy](GLOBAL_ASSET_UNIVERSE.md).
+
 Updated the existing local investor workspace, preserving the financial payload, allocation contracts, saved client plans and PDF report bytes. Original HTML aliases and manifest were archived in `var/dashboard-review-20261102/original` before the presentation update. The current HTML was regenerated with its CSP script hash and artifact seal; no historical observation ledger was rewritten or approved.
 
 ## Changes

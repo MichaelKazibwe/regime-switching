@@ -1,5 +1,7 @@
 """Locked daily shadow refresh into an isolated candidate workspace."""
 
+from forward_cohort import observations as cohort_observations
+
 import argparse
 from datetime import datetime, timezone
 import fcntl
@@ -18,7 +20,7 @@ from observation_process import run_bounded
 from forward_cohort import database as cohort_database
 
 
-def run(root, *, refresh=False):
+def run(root, *, refresh=False, prepared_dashboard=None):
     root = Path(root).resolve()
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     with (root / "job.lock").open("a") as lock:
@@ -29,7 +31,7 @@ def run(root, *, refresh=False):
             raise RuntimeError("A validation job is already active") from None
         if refresh:
             session = str(usable_session(datetime.now(timezone.utc)).date())
-            receipt = root / "observations" / (session + ".json")
+            receipt = cohort_observations(root) / (session + ".json")
             if receipt.exists():
                 read_observation(receipt)
                 from strategy_healthcheck import health
@@ -58,7 +60,7 @@ def run(root, *, refresh=False):
         try:
             resume = None
             # latest-job was replaced above; inspect the prior immutable failure records.
-            if refresh:
+            if refresh and prepared_dashboard is None:
                 from observation_recovery import reusable_bundle
 
                 for old in sorted((root / "runs").iterdir(), reverse=True):
@@ -74,9 +76,21 @@ def run(root, *, refresh=False):
                     if resume:
                         status["reused_training_from"] = str(old)
                         break
+            if prepared_dashboard is not None:
+                if not refresh:
+                    raise ValueError("Prepared inputs require current-session validation")
+                from strategy_report import load_training_report
+                from strategy_integrity import strict_json
+                prepared_dashboard = Path(prepared_dashboard).resolve()
+                resume = strict_json(prepared_dashboard / "latest-strategy-run.json")
+                prepared_report = load_training_report(resume["training_report"])
+                if not prepared_report["current_numerical_source_match"] or prepared_report["market_session"] != session:
+                    raise ValueError("Prepared inputs require fresh source-matched training")
+                status["prepared_dashboard"] = str(prepared_dashboard)
             if refresh:
                 candidate = job / "dashboard"
                 template = (
+                    prepared_dashboard if prepared_dashboard is not None else
                     Path(status["reused_training_from"]) / "dashboard"
                     if resume
                     else Path("var/investor-dashboard")
@@ -144,7 +158,7 @@ def run(root, *, refresh=False):
                 root / "prospective-summary.json", summary(cohort_database(root))
             )
             status["stage"] = "OBSERVATION_RECEIPT"
-            observation = observe(evidence, root / "observations")
+            observation = observe(evidence, cohort_observations(root))
             private_write(
                 root / "observation-status.json", json.dumps(observation, indent=2)
             )

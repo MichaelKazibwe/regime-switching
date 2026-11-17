@@ -7,7 +7,7 @@
 Production integration boundary for the institutional portfolio stack.
 Phase IV-B.2 proves that the production dependency graph assembled by
 ProductionComposition can execute an end-to-end portfolio decision.
-The production portfolio is based on the canonical 14-asset universe
+The production portfolio is based on the registry-qualified universe
 defined by AssetUniverse.production().
 Design principles
 -----------------
@@ -20,7 +20,7 @@ Design principles
 7. No optimization logic is duplicated here.
 8. No trading or broker execution occurs in this phase.
 9. Test doubles are not permitted at the production boundary.
-10. Production inputs must align to the canonical 14 assets.
+10. Production inputs must align to the registry-qualified assets.
 11. Historical macro series and scalar macro observations are supported.
 12. Failures remain explicit and auditable.
 """
@@ -117,7 +117,7 @@ class ProductionIntegration:
                 |
                 v
         PortfolioDecision
-    The canonical production universe contains exactly 14 assets.
+    The canonical production universe contains the registered qualified assets.
     """
     # ------------------------------------------------------------------
     # 4.1 API METADATA
@@ -212,7 +212,7 @@ class ProductionIntegration:
     ) -> None:
         """
         Validate that the supplied AssetUniverse is the canonical
-        14-asset production universe.
+        registry-qualified production universe.
         """
         if universe is None:
             raise ProductionIntegrationError(
@@ -257,7 +257,7 @@ class ProductionIntegration:
             raise ProductionIntegrationError(
                 (
                     "Production asset universe does not match "
-                    "the canonical 14-asset universe. "
+                    "the registry-qualified universe. "
                     f"Missing: {missing}; "
                     f"Unexpected: {unexpected}."
                 )
@@ -514,7 +514,7 @@ class ProductionIntegration:
             raise ProductionIntegrationError(
                 (
                     "Portfolio must contain exactly the "
-                    "canonical 14 production assets. "
+                    "registry-qualified assets. "
                     f"Missing: {missing}; "
                     f"Unexpected: {unexpected}."
                 )
@@ -590,7 +590,7 @@ class ProductionIntegration:
         Validate production return/price history.
         The production decision engine may receive either return history
         or price history, but the input must contain exactly the
-        canonical 14 assets.
+        registry-qualified assets.
         """
         if returns is None:
             raise ProductionIntegrationError(
@@ -639,7 +639,7 @@ class ProductionIntegration:
             raise ProductionIntegrationError(
                 (
                     "Production return history does not match "
-                    "the canonical 14-asset universe. "
+                    "the registry-qualified universe. "
                     f"Missing: {missing}; "
                     f"Unexpected: {unexpected}."
                 )
@@ -694,7 +694,7 @@ class ProductionIntegration:
             missing = sorted(expected - set(columns))
             unexpected = sorted(set(columns) - expected)
             raise ProductionIntegrationError(
-                "Price history must match the canonical 14-asset universe. "
+                "Price history must match the registry-qualified universe. "
                 f"Missing: {missing}; Unexpected: {unexpected}."
             )
         if getattr(prices, "empty", False):
@@ -1001,7 +1001,7 @@ class ProductionIntegration:
                 raise ProductionIntegrationError(
                     (
                         "Approved decision does not contain "
-                        "the canonical 14 production assets. "
+                        "the registry-qualified assets. "
                         f"Missing: {missing}; "
                         f"Unexpected: {unexpected}."
                     )
@@ -1015,7 +1015,7 @@ class ProductionIntegration:
                 raise ProductionIntegrationError(
                     (
                         "Approved decision weights do not "
-                        "cover the canonical 14 production assets."
+                        "cover the registry-qualified assets."
                     )
                 )
             weight_total = sum(
@@ -1452,7 +1452,7 @@ def test_production_integration_metadata() -> None:
     )
     assert (
         metadata["production_asset_count"]
-        == 14
+        == len(PRODUCTION_ASSETS)
     )
     assert (
         metadata["production_assets"]
@@ -1489,7 +1489,7 @@ def test_production_integration_health() -> None:
     )
     assert (
         result["production_asset_count"]
-        == 14
+        == len(PRODUCTION_ASSETS)
     )
     assert (
         result["production_assets"]
@@ -1522,12 +1522,12 @@ def test_production_integration_summary() -> None:
     )
     assert (
         summary["production_asset_count"]
-        == 14
+        == len(PRODUCTION_ASSETS)
     )
 
 def test_production_integration_portfolio_validation() -> None:
     """
-    Verify the canonical 14-asset portfolio contract.
+    Verify the registry-qualified portfolio contract.
     """
     weight = (
         1.0
@@ -1674,7 +1674,7 @@ def test_production_integration_universe_validation() -> None:
     )
     assert (
         universe.size
-        == 14
+        == len(PRODUCTION_ASSETS)
     )
 
 # ======================================================================

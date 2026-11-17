@@ -113,6 +113,7 @@ def extended_prices(capture_path, extension_root):
         if Path(name).name != name or p.is_symlink() or file_hash(p) != digest:
             raise ValueError("Market capture integrity failure")
     prices = pd.read_csv(root / "prices.csv", index_col=0, parse_dates=True)
+    prices.attrs["base_currency"] = m.get("base_currency", "USD")
     extension_root = Path(extension_root)
     em = json.loads((extension_root / "capture.json").read_text())
     p = extension_root / "XLV-adjusted.csv"

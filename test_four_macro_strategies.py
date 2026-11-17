@@ -222,7 +222,7 @@ def test_extreme_equity_trend_is_projected_to_feasible_asset_risk_budgets():
         "probabilities": probs,
         "macro_forecast": {"as_of": s["signal"]["as_of"], "used": [1.0, 0.0, 0.0, 0.0]},
     }
-    trends = {symbol: float(symbol in {"SPY", "VEA", "VWO"}) for symbol in h}
+    trends = {symbol: float(symbol in p.config["sleeves"]["equities"]) for symbol in h}
     a = strategy_proposal(
         p,
         h,

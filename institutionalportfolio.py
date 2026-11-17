@@ -210,7 +210,8 @@ def coverage_report(realized, forecast_sigma):
 
 class InstitutionalPortfolio:
     def __init__(self, plan_path=DEFAULT_PLAN):
-        self.config = json.loads(Path(plan_path).read_text())
+        from global_asset_registry import resolve_policy
+        self.config = resolve_policy(json.loads(Path(plan_path).read_text()))
         c = self.config
         if (
             c.get("mode") != "RESEARCH_ONLY"

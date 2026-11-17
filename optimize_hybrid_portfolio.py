@@ -183,7 +183,7 @@ def main():
         for cost in (.0015,.003):
             frame,decisions=hybrid_simulation(development,states,policy,schedule,cost_rate=cost,cash_proxy=carry)
             models={'Chronologically selected hybrid':frame}
-            for name in ('14 production allocator*','26 diversified allocator*','SPY buy and hold'):
+            for name in ('Qualified paper allocator*','Global registry allocator*','SPY buy and hold'):
                 models[name]=simulate(all_returns,targets[name],cost_rate=cost,cash_returns=cash_returns)
             for name,full in models.items():
                 evaluated=rebased(full.loc[evaluation_start:])

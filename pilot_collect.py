@@ -1,5 +1,7 @@
 """Preserve imported sealed sessions; resume normal collection on new sessions."""
 
+from forward_cohort import observations as cohort_observations
+
 from datetime import datetime, timezone
 from pathlib import Path
 import json
@@ -22,7 +24,7 @@ def collect(root=Path.cwd(), *, now=None):
         core = imported["cohorts"].get("strategy-operations-integrated-v1")
         if core and core["session"] == expected:
             operations = root / "var/strategy-operations-integrated-v1"
-            if not (operations / "observations" / (expected + ".json")).is_file():
+            if not (cohort_observations(operations) / (expected + ".json")).is_file():
                 path = database(operations)
                 events = read_events(path)
                 if (not events or events[-1][0]["session"] != expected

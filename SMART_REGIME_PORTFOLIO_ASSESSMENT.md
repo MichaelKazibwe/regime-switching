@@ -1,5 +1,7 @@
 # Macro-aware portfolio construction and cycle tests
 
+> **Universe policy update (2026-11-17):** Current portfolios and strategies resolve a configurable global instrument registry, with no fixed ETF-count limit. Numeric universe counts below describe this document's historical implementation or experiment. See [the current global-universe policy](GLOBAL_ASSET_UNIVERSE.md).
+
 **Later V4 refinement:** [INSTITUTIONAL_PORTFOLIO_REFINEMENT.md](INSTITUTIONAL_PORTFOLIO_REFINEMENT.md) adds an All Weather-inspired core, invested Treasury reserve, risk forecast feedback and actual ALLW overlap. V4 lowers full-history volatility but reduces CAGR and worsens maximum drawdown relative to V3. It remains a separate, unaccepted research challenger; the V3 results below are preserved.
 
 **Decision: retain this as a research candidate; do not promote it as the project optimum.** The new engine is implemented and tested, including actual macro vintages and explicit asset risk budgets. Its measured drawdowns are lower than the older long-history baseline, but returns and conditional loss estimates do not establish the requested improvement on all objectives. Production configuration remains unchanged.

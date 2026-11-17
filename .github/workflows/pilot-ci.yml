@@ -24,9 +24,13 @@ jobs:
         run: python -m pytest -q --junitxml=var/ci/pilot-regression.xml
       - name: Source and frontend lint
         run: |
-          python -m ruff check pilot_*.py cycle_benchmark.py performance_*.py execute_performance_improvements.py run_performance_improvements.py test_pilot.py test_cycle_benchmark.py test_performance_improvements.py
+          python -m ruff check global_asset_registry.py global_market_panel.py test_global_asset_registry.py test_global_market_panel.py pilot_*.py cycle_benchmark.py performance_*.py execute_performance_improvements.py run_performance_improvements.py test_pilot.py test_cycle_benchmark.py test_performance_improvements.py
           node --check pilot/login.js
           node --check pilot/benchmark.js
+          node --check pilot/workspace.js
+          node --check pilot/weekly.js
+          node --check pilot/macro-monitor.js
+          node --check dashboard/investor.js
       - name: Stage source only; no private market or account data
         run: python pilot_release.py --source-only --destination var/pilot-context
       - name: Build candidate image

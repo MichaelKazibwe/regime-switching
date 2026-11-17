@@ -142,6 +142,47 @@ def sign_in(request, name="alice@example.test"):
     return cookie, json.loads(body)["csrf"]
 
 
+def test_weekly_routes_require_login_and_verified_artifacts(service, monkeypatch, tmp_path):
+    _, request = service
+    monkeypatch.setenv("PILOT_WEEKLY_ROOT", str(tmp_path / "weekly"))
+    for path in ("/api/weekly", "/api/weekly/pdf"):
+        assert request(path)[0] == 401
+    cookie, _ = sign_in(request, "viewer@example.test")
+    assert request("/api/weekly", cookie=cookie)[0] == 503
+    root = tmp_path / "weekly"
+    root.mkdir()
+    (root / "latest.json").write_text('{"research_id":"../escape"}')
+    assert request("/api/weekly/pdf", cookie=cookie)[0] == 503
+
+
+def test_daily_status_retains_failed_update_then_reports_new_version(service, monkeypatch):
+    import pilot_daily
+    pilot, request = service
+    pilot.daily_root = "synthetic"
+    cookie, _ = sign_in(request)
+    def fail(*_):
+        raise ValueError("Invalid new snapshot")
+    monkeypatch.setattr(pilot_daily, "refresh", fail)
+    status, _, body = request("/api/dashboard-status", cookie=cookie)
+    assert status == 200
+    assert json.loads(body)["version"] == "test-version"
+    assert json.loads(body)["error"]
+    def update(app, *_):
+        app.payload["training"]["run_id"] = "next-daily-version"
+        app.refresh_error = None
+        return "revision"
+    monkeypatch.setattr(pilot_daily, "refresh", update)
+    pilot.daily_checked = 0
+    assert json.loads(request("/api/dashboard-status", cookie=cookie)[2])["version"] == "next-daily-version"
+
+
+def test_macro_monitor_requires_auth_and_source_bound_inputs(service):
+    _, request = service
+    assert request("/api/macro-monitor")[0] == 401
+    cookie, _ = sign_in(request, "viewer@example.test")
+    assert request("/api/macro-monitor", cookie=cookie)[0] == 503
+
+
 def test_http_origin_cookie_csrf_and_logout(service):
     _, request = service
     assert request("/api/dashboard")[0] == 401

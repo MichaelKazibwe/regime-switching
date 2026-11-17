@@ -1,16 +1,16 @@
 # ======================================================================
-# STEP 8 — 14-ASSET HISTORICAL DATA + PRODUCTION DECISION INTEGRATION
+# STEP 8 — REGISTRY-QUALIFIED HISTORICAL DATA + PRODUCTION DECISION INTEGRATION
 # ======================================================================
 
 """
 Step 8 validates the production portfolio engine against real
 historical market and macroeconomic data using the complete
-14-asset production universe.
+registry-qualified production universe.
 
 Pipeline
 --------
 1. Download historical prices from Yahoo Finance.
-2. Validate the complete 14-asset price matrix.
+2. Validate the complete registry-qualified price matrix.
 3. Calculate historical returns.
 4. Download macroeconomic data from FRED.
 5. Calculate inflation from monthly CPI data.
@@ -19,7 +19,7 @@ Pipeline
 8. Construct a historical macro-regime series.
 9. Build the current macro state.
 10. Generate expected returns from historical prices.
-11. Build the 14-asset production portfolio.
+11. Build the registry-qualified production portfolio.
 12. Send the aligned production inputs into PortfolioDecisionEngine.
 13. Validate the complete production decision.
 14. Validate production engine health.
@@ -50,28 +50,13 @@ from productioncomposition import ProductionComposition
 # SECTION 2 — PRODUCTION CONFIGURATION
 # ======================================================================
 
-TICKERS = [
-    "SPY",
-    "QQQ",
-    "IWM",
-    "VEA",
-    "VWO",
-    "TLT",
-    "IEF",
-    "SHY",
-    "LQD",
-    "HYG",
-    "GLD",
-    "SLV",
-    "DBC",
-    "VNQ",
-]
+TICKERS = list(__import__("assetuniverse").PRODUCTION_ASSETS)
 
 HISTORY_PERIOD = "15y"
 
 MIN_OBSERVATIONS = 252
 
-EXPECTED_ASSET_COUNT = 14
+EXPECTED_ASSET_COUNT = len(__import__("assetuniverse").PRODUCTION_ASSETS)
 
 REGIME_LOOKBACK = 252
 
@@ -110,7 +95,7 @@ def fail(message: str) -> None:
 # ======================================================================
 
 def validate_production_universe() -> None:
-    """Validate the configured 14-asset production universe."""
+    """Validate the configured registry-qualified production universe."""
 
     if len(TICKERS) != EXPECTED_ASSET_COUNT:
         fail(
@@ -1085,11 +1070,11 @@ def build_expected_returns(
 
 
 # ======================================================================
-# SECTION 11 — BUILD 14-ASSET INPUT PORTFOLIO
+# SECTION 11 — BUILD REGISTRY-QUALIFIED INPUT PORTFOLIO
 # ======================================================================
 
 def build_portfolio() -> dict[str, dict[str, float]]:
-    """Build the equal-weight 14-asset production input portfolio."""
+    """Build the equal-weight registry-qualified production input portfolio."""
 
     weight = 1.0 / len(TICKERS)
 
@@ -1226,7 +1211,7 @@ def align_production_history(
         aligned_returns.columns
     ) != TICKERS:
         fail(
-            "Aligned returns do not use the exact 14-asset "
+            "Aligned returns do not use the exact registry-qualified "
             "production ordering."
         )
 
@@ -1335,10 +1320,10 @@ def run_production_decision(
     expected_returns: dict[str, float],
     portfolio: dict[str, dict[str, float]],
 ):
-    """Run and validate the complete 14-asset production decision."""
+    """Run and validate the complete registry-qualified production decision."""
 
     banner(
-        "5. END-TO-END 14-ASSET PRODUCTION PORTFOLIO DECISION"
+        "5. END-TO-END REGISTRY-QUALIFIED PRODUCTION PORTFOLIO DECISION"
     )
 
     composition = ProductionComposition()
@@ -1404,7 +1389,7 @@ def run_production_decision(
 
     if len(TICKERS) != EXPECTED_ASSET_COUNT:
         fail(
-            "Step 8 is not operating on the complete 14-asset "
+            "Step 8 is not operating on the complete registry-qualified "
             "production universe."
         )
 
@@ -1413,7 +1398,7 @@ def run_production_decision(
     ) != TICKERS:
         fail(
             "Production return history does not match the "
-            "14-asset universe."
+            "registry-qualified universe."
         )
 
     if set(
@@ -1421,7 +1406,7 @@ def run_production_decision(
     ) != set(TICKERS):
         fail(
             "Expected-return assets do not match the "
-            "14-asset universe."
+            "registry-qualified universe."
         )
 
     if set(
@@ -1429,7 +1414,7 @@ def run_production_decision(
     ) != set(TICKERS):
         fail(
             "Portfolio assets do not match the "
-            "14-asset universe."
+            "registry-qualified universe."
         )
 
     # --------------------------------------------------------------
@@ -1438,7 +1423,7 @@ def run_production_decision(
 
     print()
     print(
-        "RUNNING 14-ASSET PRODUCTION DECISION..."
+        "RUNNING REGISTRY-QUALIFIED PRODUCTION DECISION..."
     )
 
     try:
@@ -1601,7 +1586,7 @@ def run_production_decision(
     if decision_tickers != TICKERS:
         fail(
             "Decision ticker ordering does not match the "
-            "14-asset production universe.\n"
+            "registry-qualified production universe.\n"
             f"Expected: {TICKERS}\n"
             f"Received: {decision_tickers}"
         )
@@ -1963,7 +1948,7 @@ def run_production_decision(
     print()
     print("=" * 80)
     print(
-        "STEP 8 PASSED — 14-ASSET HISTORICAL DATA "
+        "STEP 8 PASSED — REGISTRY-QUALIFIED HISTORICAL DATA "
         "PRODUCTION INTEGRATION SUCCESSFUL"
     )
     print("=" * 80)
@@ -1979,7 +1964,7 @@ def main() -> None:
     """Execute the complete Step 8 integration test."""
 
     banner(
-        "STEP 8 — 14-ASSET HISTORICAL DATA PRODUCTION TEST"
+        "STEP 8 — REGISTRY-QUALIFIED HISTORICAL DATA PRODUCTION TEST"
     )
 
     print()

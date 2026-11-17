@@ -131,6 +131,8 @@ def snapshot(source_root, destination, pointer, benchmark=None):
                 capture="market/capture.json", training_report="training/training-report.json"))
     if benchmark:
         private_copy(benchmark, destination / "benchmark.json")
+    from dashboard_runtime import runtime
+    atomic_json(destination / "monitoring-runtime.json", runtime(source_root / "var"))
     files = {str(p.relative_to(destination)): file_hash(p) for p in destination.rglob("*") if p.is_file()}
     manifest = dict(schema_version=1, market_session=report["market_session"],
                     source_bundle_sha256=file_hash(published["bundle"]), files=files,
@@ -203,7 +205,7 @@ def stage(root, destination, *, allow_dirty=False, pointer=None, benchmark=None,
     paths = runtime_sources(root, entries=("pilot_server", "pilot_admin", "pilot_release", "pilot_verify", "pilot_preflight",
                     "local_observation_scheduler", "pilot_collect", "observation_watchdog", "investment_product",
                     "recommendation_api", "managed_api", "cycle_benchmark", "execute_performance_improvements",
-                    "shadow_bundle_backup", "integrated_strategy_comparison", "strategy_monthly_report"))
+                    "shadow_bundle_backup", "integrated_strategy_comparison", "strategy_monthly_report", "weekly_portfolios"))
     paths |= set(report.get("source_hashes", {})) | set(seal.get("source_hashes", {}))
     paths |= {str(x.relative_to(root)) for folder in ["dashboard", "pilot", "research"]
               for x in (root / folder).glob("*") if x.is_file() and x.suffix in {".json", ".html", ".css", ".js"}}

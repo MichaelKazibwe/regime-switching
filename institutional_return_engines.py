@@ -11,6 +11,7 @@ import pandas as pd
 from scipy.optimize import minimize
 from institutionalportfolio import calibrated_covariance
 from investmentcatalog import catalogue
+from global_asset_registry import expand_anchor
 
 VERSION = "INSTITUTIONAL_RETURN_ENGINES_V1"
 NAMES = (
@@ -78,7 +79,7 @@ ANCHORS = {
 }
 ANCHORS["tail_aware_ensemble"] = {
     s: 0.8 * sum(a.get(s, 0) for a in ANCHORS.values()) / 3
-    for s in set().union(*ANCHORS.values())
+    for s in sorted(set().union(*ANCHORS.values()))
 }
 ANCHORS["tail_aware_ensemble"]["DBMF"] = (
     ANCHORS["tail_aware_ensemble"].get("DBMF", 0) + 0.10
@@ -114,6 +115,7 @@ PROTOCOL = {
     "missing_macro": "Explicit market-only degraded candidate. No invented macro value; legacy strict policy unchanged.",
 }
 CATALOGUE = catalogue()
+ANCHORS = {name: expand_anchor(anchor) for name, anchor in ANCHORS.items()}
 GROUPS = {s: i.bucket for s, i in CATALOGUE.items()}
 
 
@@ -141,6 +143,7 @@ def context(prices, end, features, *, decision_time=None):
         for s in history
         if s != "ALLW"
         and s in GROUPS
+        and CATALOGUE[s].research_enabled
         and np.isfinite(history[s]).all()
         and (history[s] > -1).all()
         and history[s].std() > 1e-10

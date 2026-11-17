@@ -1,4 +1,6 @@
-"""Economic roles for the core and extended ETF menu; not allocation advice."""
+"""Economic roles for registered instruments; not allocation advice."""
+
+from global_asset_registry import load_registry
 
 ASSET_ROLES = {
     "SPY": "Broad US equity growth and corporate earnings exposure.",
@@ -31,3 +33,9 @@ ASSET_ROLES = {
     "ALLW": "Composite benchmark only; never allocated as a strategy component.",
     "USD_CASH": "Uninvested USD liquidity; this simulation assumes zero cash yield.",
 }
+
+for _symbol, _item in load_registry().instruments.items():
+    ASSET_ROLES.setdefault(_symbol,
+        f"{_item.name}: {_item.asset_type} exposure in {_item.region}; "
+        f"listed in {_item.listing_currency} on {_item.venue}. "
+        "Allocation depends on verified history, currency, mandate and strategy constraints.")

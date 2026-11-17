@@ -34,7 +34,7 @@ def verify():
     session = status["market_session"]
     assert not status["stale"] and status["error"] is None
     assert data["latest_market"]["session"] == session
-    assert len(data["latest_market"]["instruments"]) == 28
+    assert set(data["core_symbols"]) <= set(data["latest_market"]["instruments"])
     assert data["growth_resilience"]["end"] == session
     assert data["return_engines"]["assessment"]["market_session"] == session
     assert data["dynamic_portfolio"]["snapshot"]["decision_session"] == session

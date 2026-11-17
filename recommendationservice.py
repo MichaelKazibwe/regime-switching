@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 import numpy as np
 
 from clientmandate import aware_time
-from productallocation import PlanningCosts, allocate_plan, estimate_inputs
+from productallocation import PlanningCosts, allocate_plan, estimate_inputs, fx_source_hash
 from productrelease import readiness, release_manifest
 from productsimulation import simulate_plans
 from recommendationrisk import RecommendationRiskState
@@ -42,24 +42,18 @@ def recommend(
             raise ValueError(
                 "Use explicit historical preview for a non-current decision clock"
             )
-        from tradingcalendar import TradingCalendar
-
-        latest = TradingCalendar().latest_completed_session(now)
-        if prices.index[-1].date() != latest.tz_convert("America/New_York").date():
+        from global_asset_registry import common_sessions
+        from datetime import timedelta
+        latest = common_sessions(list(prices), (now - timedelta(days=31)).date(), now.date(), completed_at=now)[-1]
+        if prices.index[-1].date() != latest.date():
             raise ValueError(
                 "Current recommendations require the latest completed market session"
             )
-        import pandas_market_calendars as mcal
-
         recent = prices.index[-1261:]
-        expected = (
-            mcal.get_calendar("NYSE")
-            .schedule(recent[0].date(), recent[-1].date())
-            .index
-        )
+        expected = common_sessions(list(prices), recent[0].date(), recent[-1].date(), completed_at=now)
         if list(recent) != list(expected):
             raise ValueError(
-                "Complete NYSE sessions required for the US-listed product menu"
+                "Complete common exchange sessions required for the selected global instruments"
             )
     state = (
         RecommendationRiskState()
@@ -185,9 +179,7 @@ def recommend(
                 "release_id": manifest["release_id"],
                 "prices_sha256": hashlib.sha256(prices.to_csv().encode()).hexdigest(),
                 "cash_rate": asdict(cash_rate),
-                "fx_sha256": hashlib.sha256(fx_to_base.to_csv().encode()).hexdigest()
-                if fx_to_base is not None
-                else None,
+                "fx_sha256": fx_source_hash(fx_to_base),
                 "current_weights": current.tolist() if current is not None else None,
                 "costs": asdict(costs),
                 "sale_tax_rates": np.asarray(sell_tax_rates).tolist()
@@ -208,6 +200,7 @@ def recommend(
     return {
         "schema_version": 1,
         "kind": "NON_EXECUTABLE_PORTFOLIO_RECOMMENDATION",
+        "universe_contract": __import__("global_asset_registry").load_registry().payload(),
         "recommendation_id": fingerprint,
         "service_mode": manifest["service_mode"],
         "as_of": now.isoformat(),
@@ -225,7 +218,7 @@ def recommend(
         "limitations": [
             "No forecast or stop guarantees minimal loss or the requested return.",
             "Planning priors, square-root-impact coefficients and stress scenarios require independent validation.",
-            "28 US-listed instruments do not establish global legal access or suitable currency exposure.",
+            "Registry inclusion does not establish instrument access, data qualification or suitable currency exposure.",
             "No broker, custody, order submission, tax advice or legal approval is provided by this service.",
         ],
     }

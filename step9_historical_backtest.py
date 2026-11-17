@@ -1,6 +1,6 @@
 """
 ======================================================================
-STEP 9 — 14-ASSET HISTORICAL WALK-FORWARD REGIME-SWITCHING BACKTEST
+STEP 9 — REGISTRY-QUALIFIED HISTORICAL WALK-FORWARD REGIME-SWITCHING BACKTEST
 ======================================================================
 
 Purpose
@@ -28,7 +28,7 @@ VNQ
 
 Design
 ------
-1. Load real historical prices for all 14 production assets.
+1. Load real historical prices for all registered paper-qualified assets.
 2. Calculate historical returns.
 3. Load real FRED macroeconomic data.
 4. Align macro observations to the market calendar.
@@ -44,7 +44,7 @@ Design
 9. Apply transaction costs to turnover.
 10. Compare against:
        - SPY
-       - 14-asset equal-weight portfolio
+       - registry-qualified equal-weight portfolio
 11. Produce portfolio and regime-level statistics.
 12. Validate deterministic execution.
 13. Validate that no future observations enter any decision.
@@ -96,22 +96,7 @@ from productioncomposition import (
 # SECTION 2 — PRODUCTION CONFIGURATION
 # ======================================================================
 
-TICKERS = [
-    "SPY",
-    "QQQ",
-    "IWM",
-    "VEA",
-    "VWO",
-    "TLT",
-    "IEF",
-    "SHY",
-    "LQD",
-    "HYG",
-    "GLD",
-    "SLV",
-    "DBC",
-    "VNQ",
-]
+TICKERS = list(__import__("assetuniverse").PRODUCTION_ASSETS)
 
 BENCHMARK = "SPY"
 
@@ -127,7 +112,7 @@ TRADING_DAYS = 252
 
 TOLERANCE = 1e-8
 
-EXPECTED_ASSET_COUNT = 14
+EXPECTED_ASSET_COUNT = len(__import__("assetuniverse").PRODUCTION_ASSETS)
 
 
 # ======================================================================
@@ -210,7 +195,7 @@ def fail(
 def validate_universe() -> None:
     """
     Validate that Step 9 is operating on the complete production
-    14-asset universe.
+    registry-qualified universe.
     """
 
     if len(TICKERS) != EXPECTED_ASSET_COUNT:
@@ -248,7 +233,7 @@ def validate_universe() -> None:
 
         fail(
             "Step 9 production universe does not match "
-            "the required 14-asset architecture."
+            "the required registry-qualified architecture."
         )
 
     if BENCHMARK not in TICKERS:
@@ -286,7 +271,7 @@ def load_market_data() -> tuple[
     """
 
     banner(
-        "1. LOADING 14-ASSET HISTORICAL MARKET DATA"
+        "1. LOADING REGISTRY-QUALIFIED HISTORICAL MARKET DATA"
     )
 
     loader = MarketDataLoader(
@@ -463,7 +448,7 @@ def load_market_data() -> tuple[
 
         fail(
             "Historical price columns do not match "
-            "the 14-asset universe."
+            "the registry-qualified universe."
         )
 
     if list(
@@ -472,7 +457,7 @@ def load_market_data() -> tuple[
 
         fail(
             "Historical return columns do not match "
-            "the 14-asset universe."
+            "the registry-qualified universe."
         )
 
     print()
@@ -1233,7 +1218,7 @@ def build_point_in_time_expected_returns(
             fail(
                 "Expected-return forecast dimension "
                 f"{len(array)} does not match "
-                f"14-asset universe."
+                f"registry-qualified universe."
             )
 
         result = {
@@ -1597,7 +1582,7 @@ def run_backtest(
     """
 
     banner(
-        "4. RUNNING 14-ASSET WALK-FORWARD BACKTEST"
+        "4. RUNNING REGISTRY-QUALIFIED WALK-FORWARD BACKTEST"
     )
 
     # --------------------------------------------------------------
@@ -1677,7 +1662,7 @@ def run_backtest(
 
         fail(
             "Backtest price universe does not match "
-            "the 14 production assets."
+            "the registered paper-qualified assets."
         )
 
     if list(
@@ -1686,7 +1671,7 @@ def run_backtest(
 
         fail(
             "Backtest return universe does not match "
-            "the 14 production assets."
+            "the registered paper-qualified assets."
         )
 
     print()
@@ -2229,7 +2214,7 @@ def run_backtest(
         )
 
         # ----------------------------------------------------------
-        # 14-ASSET EQUAL-WEIGHT BENCHMARK
+        # REGISTRY-QUALIFIED EQUAL-WEIGHT BENCHMARK
         # ----------------------------------------------------------
 
         equal_weight_period_returns = (
@@ -2629,7 +2614,7 @@ def print_report(
     )
 
     print_performance_block(
-        "14-ASSET PRODUCTION STRATEGY",
+        "REGISTRY-QUALIFIED PRODUCTION STRATEGY",
         results[
             "strategy"
         ],
@@ -2643,7 +2628,7 @@ def print_report(
     )
 
     print_performance_block(
-        "14-ASSET EQUAL-WEIGHT BENCHMARK",
+        "REGISTRY-QUALIFIED EQUAL-WEIGHT BENCHMARK",
         results[
             "equal_weight_14"
         ],
@@ -2699,7 +2684,7 @@ def print_report(
     )
 
     print(
-        f"14-asset equal weight: "
+        f"registry-qualified equal weight: "
         f"{equal_cumulative:.8f}"
     )
 
@@ -2714,7 +2699,7 @@ def print_report(
 
     print()
     print(
-        "STRATEGY - 14-ASSET EQUAL WEIGHT:"
+        "STRATEGY - REGISTRY-QUALIFIED EQUAL WEIGHT:"
     )
 
     print(
@@ -3139,7 +3124,7 @@ def validate_backtest(
 
             fail(
                 "Active position count exceeds "
-                "14-asset universe."
+                "registry-qualified universe."
             )
 
         if not np.isfinite(
@@ -3151,7 +3136,7 @@ def validate_backtest(
             )
 
     # --------------------------------------------------------------
-    # Verify all 14 assets are represented in every decision.
+    # Verify all registered paper-qualified assets are represented in every decision.
     #
     # A weight may be zero, but the asset must exist in the decision
     # vector.
@@ -3165,7 +3150,7 @@ def validate_backtest(
 
             fail(
                 "Decision weight vector does not contain "
-                "exactly the 14 production assets at "
+                "exactly the registered paper-qualified assets at "
                 f"{observation.date}."
             )
 
@@ -3175,7 +3160,7 @@ def validate_backtest(
 
             fail(
                 "Expected-return vector does not contain "
-                "exactly the 14 production assets at "
+                "exactly the registered paper-qualified assets at "
                 f"{observation.date}."
             )
 
@@ -3273,7 +3258,7 @@ def validate_backtest(
     )
 
     print(
-        "14-asset universe: PASS"
+        "registry-qualified universe: PASS"
     )
 
     print(
@@ -3289,7 +3274,7 @@ def validate_backtest(
     )
 
     print(
-        "14-asset decision vectors: PASS"
+        "registry-qualified decision vectors: PASS"
     )
 
     print(
@@ -3420,7 +3405,7 @@ def validate_deterministic_decisions(
 def main() -> None:
 
     banner(
-        "STEP 9 — 14-ASSET HISTORICAL WALK-FORWARD "
+        "STEP 9 — REGISTRY-QUALIFIED HISTORICAL WALK-FORWARD "
         "REGIME-SWITCHING BACKTEST"
     )
 
@@ -3535,7 +3520,7 @@ def main() -> None:
     print()
     print("=" * 80)
     print(
-        "STEP 9 PASSED — 14-ASSET HISTORICAL "
+        "STEP 9 PASSED — REGISTRY-QUALIFIED HISTORICAL "
         "WALK-FORWARD BACKTEST SUCCESSFUL"
     )
     print("=" * 80)

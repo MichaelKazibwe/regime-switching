@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 
 import numpy as np
 import pandas as pd
@@ -75,18 +76,55 @@ class PlanningCosts:
 
 
 def base_currency_prices(prices, currency, fx_to_base=None):
-    if currency == "USD":
-        if fx_to_base is not None:
-            raise ValueError("Do not apply an extra FX conversion to USD prices")
-        return prices.copy()
-    if (
-        not isinstance(fx_to_base, pd.Series)
-        or not fx_to_base.index.equals(prices.index)
-        or not np.isfinite(fx_to_base).all()
-        or (fx_to_base <= 0).any()
-    ):
-        raise ValueError("Aligned historical base-currency units per USD required")
-    return prices.mul(fx_to_base, axis=0)
+    cat = catalogue()
+    native = {cat[s].listing_currency for s in prices}
+    if isinstance(fx_to_base, pd.Series):
+        if native != {"USD"} or currency == "USD":
+            raise ValueError("A single FX series is only valid for USD listings converted to a foreign base")
+        rates = {"USD": fx_to_base}
+    elif fx_to_base is None:
+        rates = {}
+    elif isinstance(fx_to_base, dict):
+        rates = fx_to_base
+        if currency in rates:
+            raise ValueError("Do not apply an extra FX conversion to base-currency prices")
+    else:
+        raise ValueError("Aligned historical base-currency units per listing currency required")
+    if set(rates) != native - {currency}:
+        raise ValueError("Aligned base-currency FX series must match the required listing currencies exactly")
+    converted = prices.copy()
+    for symbol in prices:
+        item = cat[symbol]
+        converted[symbol] = prices[symbol] * item.price_multiplier
+        if item.listing_currency == currency:
+            continue
+        rate = rates.get(item.listing_currency)
+        if (not isinstance(rate, pd.Series) or not rate.index.equals(prices.index)
+                or not np.isfinite(rate).all() or (rate <= 0).any()):
+            raise ValueError(f"Aligned historical base-currency units per {item.listing_currency} required")
+        converted[symbol] *= rate
+    return converted
+
+
+def fx_source_hash(fx):
+    if fx is None:
+        return None
+    if isinstance(fx, pd.Series):
+        content = fx.to_csv()
+    elif isinstance(fx, dict):
+        content = pd.DataFrame({k: fx[k] for k in sorted(fx)}).to_csv()
+    else:
+        raise ValueError("FX must be an aligned series or currency mapping")
+    return hashlib.sha256(content.encode()).hexdigest()
+
+
+def read_fx_csv(path):
+    frame = pd.read_csv(path, index_col=0, parse_dates=True)
+    if all(isinstance(k, str) and len(k) == 3 and k.isalpha() and k.isupper() for k in frame):
+        return {k: frame[k] for k in frame}
+    if len(frame.columns) == 1:
+        return frame.iloc[:, 0]
+    raise ValueError("Multi-currency FX columns must use ISO currency codes")
 
 
 def estimate_inputs(prices, mandate, cash_rate, decision_time, fx_to_base=None):
@@ -119,8 +157,10 @@ def estimate_inputs(prices, mandate, cash_rate, decision_time, fx_to_base=None):
             excluded[s] = "COMPOSITE_BENCHMARK_NOT_A_COMPONENT"
         elif len(recent) < 253 or not np.isfinite(recent).all() or (recent <= 0).any():
             excluded[s] = "INSUFFICIENT_COMPLETE_ACTUAL_PRICES"
-        elif s == "DBMF" and not mandate.allow_alternatives:
+        elif cat[s].bucket == "alternative" and not mandate.allow_alternatives:
             excluded[s] = "ALTERNATIVES_NOT_PERMITTED"
+        elif cat[s].pricing_model not in {"adjusted_close", "total_return", "net_asset_value"}:
+            excluded[s] = "RETURN_ACCOUNTING_ADAPTER_NOT_QUALIFIED"
         else:
             eligible.append(s)
     if not eligible:
@@ -134,6 +174,8 @@ def estimate_inputs(prices, mandate, cash_rate, decision_time, fx_to_base=None):
     if not np.isfinite(values).all() or (values <= -1).any():
         raise ValueError("Invalid asset returns")
     recent_values = values[-252:]
+    from global_asset_registry import periods_per_year
+    annual_sessions = periods_per_year(eligible, prices.index[-1])
     scale = recent_values.std(axis=0, ddof=0)
     if (scale <= 1e-10).any():
         raise ValueError("Unestimable zero-variance instrument")
@@ -143,16 +185,17 @@ def estimate_inputs(prices, mandate, cash_rate, decision_time, fx_to_base=None):
         .covariance_
     )
     corr = shrink / np.sqrt(np.outer(np.diag(shrink), np.diag(shrink)))
-    covariance = corr * np.outer(scale, scale) * 252
-    observed = 252 * np.clip(
+    covariance = corr * np.outer(scale, scale) * annual_sessions
+    observed = annual_sessions * np.clip(
         values, np.quantile(values, 0.01, axis=0), np.quantile(values, 0.99, axis=0)
     ).mean(axis=0)
     prior = np.array([PRIORS[cat[s].bucket][0] for s in eligible])
     uncertainty = np.array([PRIORS[cat[s].bucket][1] for s in eligible])
     # No fitted macro alpha in the product default: prior research failed its baseline.
     mu = 0.90 * prior + 0.10 * observed
-    cash_daily = cash_rate.daily_rate(decision_time)
+    cash_daily = cash_rate.daily_rate(decision_time, annual_sessions)
     r["USD_CASH" if mandate.base_currency == "USD" else "BASE_CASH"] = cash_daily
+    r.attrs["periods_per_year"] = annual_sessions
     mu = np.r_[mu, cash_rate.annual_effective_net_rate]
     uncertainty = np.r_[uncertainty, 0.0]
     matrix = np.zeros((len(mu), len(mu)))
@@ -341,7 +384,8 @@ def allocate_plan(
     sales = turn + n
     size = sales + n
     objective = np.zeros(size)
-    objective[:n] = -(mu - 0.5 * uncertainty) * 21 / 252
+    periods = returns.attrs.get("periods_per_year", 252)
+    objective[:n] = -(mu - 0.5 * uncertainty) * max(1, round(periods / 12)) / periods
     objective[eta] = policy["risk_aversion"]
     objective[tail : tail + m] = policy["risk_aversion"] / (0.05 * m)
     objective[track : track + n] = 0.02

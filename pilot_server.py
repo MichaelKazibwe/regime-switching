@@ -39,12 +39,17 @@ def encode(data):
 def shell():
     script = (PILOT_ASSETS / "bootstrap.js").read_text() + "\n" + (ASSETS / "investor.js").read_text()
     script += ("\n" + (PILOT_ASSETS / "benchmark.js").read_text()
+               + "\n" + (PILOT_ASSETS / "weekly.js").read_text()
+               + "\n" + (PILOT_ASSETS / "macro-monitor.js").read_text()
+               + "\n" + (PILOT_ASSETS / "workspace.js").read_text()
                + "\n}catch(error){document.getElementById('source-description').textContent='Workspace unavailable. Please sign in again or contact the operator.';}})();")
     digest = base64.b64encode(hashlib.sha256(script.encode()).digest()).decode()
     html = (ASSETS / "investor.html").read_text()
-    html = html.replace('</nav>', '<button class="nav" data-view="benchmark">Cycle benchmark</button></nav>', 1)
+    html = html.replace('</nav>', '<button class="nav" data-view="benchmark">Cycle benchmark</button><button class="nav" data-view="weekly">Weekly portfolios</button></nav>', 1)
     html = html.replace('</aside>', '<div id="pilot-account" class="small"></div><button id="pilot-logout" class="button">Sign out</button></aside>', 1)
     html = html.replace('</main>', (PILOT_ASSETS / "benchmark.html").read_text() + '</main>', 1)
+    html = html.replace('</main>', (PILOT_ASSETS / "weekly.html").read_text() + '</main>', 1)
+    html = html.replace('</main>', (PILOT_ASSETS / "macro-monitor.html").read_text() + '</main>', 1)
     return (html.replace("default-src 'none';", "default-src 'none'; connect-src 'self';")
             .replace("__SCRIPT_HASH__", digest).replace("__STYLE__", (ASSETS / "investor.css").read_text()
                      + "\n" + (PILOT_ASSETS / "pilot.css").read_text())
@@ -78,6 +83,37 @@ class Pilot:
         self.rate_lock = threading.Lock()
         self.benchmark = Path(benchmark) if benchmark else None
         self.trusted_proxy = trusted_proxy
+        self.daily_root = os.environ.get("PILOT_DAILY_ROOT")
+        self.daily_revision = None
+        self.daily_checked = 0.
+        self.snapshot_root = None
+        self.macro_monitor_cache = None
+
+    def macro_monitor_payload(self):
+        key = (self.application.payload["training"]["run_id"], self.daily_revision)
+        if self.macro_monitor_cache is None or self.macro_monitor_cache[0] != key:
+            from macro_monitor import build
+            root = Path(self.daily_root) / self.daily_revision if self.daily_root and self.daily_revision else self.snapshot_root
+            if root is None:
+                raise ValueError("Portable daily macro evidence unavailable")
+            launch = strict_json(root / "launch.json")
+            self.macro_monitor_cache = (key, build(root / launch["capture"], root / launch["training_report"]))
+        return {**self.macro_monitor_cache[1], "stale": self.application.payload["training"]["market_session"] != str(usable_session(datetime.now(timezone.utc)).date()),
+                "update_error": self.application.refresh_error}
+
+    def refresh(self):
+        if not self.daily_root:
+            self.application.refresh()
+            return
+        now = time.monotonic()
+        if now - self.daily_checked < 60:
+            return
+        self.daily_checked = now
+        try:
+            from pilot_daily import refresh
+            self.daily_revision = refresh(self.application, self.daily_root, self.state, self.daily_revision)
+        except (OSError, ValueError, KeyError, TypeError):
+            self.application.refresh_error = "Daily update unavailable or invalid; retaining the last verified snapshot."
 
     def peer_identity(self, peer, forwarded):
         if self.trusted_proxy and forwarded:
@@ -118,9 +154,11 @@ class Pilot:
         return self.users[key][1]
 
     def benchmark_payload(self):
-        if self.benchmark is None or not self.benchmark.is_file():
+        root = Path(self.daily_root) / self.daily_revision if self.daily_root and self.daily_revision else self.snapshot_root
+        benchmark = root / "benchmark.json" if root and (root / "benchmark.json").is_file() else self.benchmark
+        if benchmark is None or not benchmark.is_file():
             return dict(status="UNAVAILABLE", reason="No source-bound cycle benchmark is installed")
-        result = strict_json(self.benchmark)
+        result = strict_json(benchmark)
         if (result.get("status") != "RESEARCH_BENCHMARK"
                 or result.get("execution_enabled") is not False
                 or result.get("promotion_enabled") is not False
@@ -271,12 +309,31 @@ def handler(pilot):
                     self.json(app.news.get())
                 elif self.path == "/api/observations":
                     from dashboard_runtime import runtime
-                    self.json(runtime())
+                    with app.lock:
+                        pilot.refresh()
+                        source = Path(pilot.daily_root) / pilot.daily_revision / "monitoring-runtime.json" if pilot.daily_root and pilot.daily_revision else None
+                        self.json(strict_json(source) if source and source.is_file() else runtime())
                 elif self.path == "/api/benchmark":
                     self.json(pilot.benchmark_payload())
+                elif self.path == "/api/macro-monitor":
+                    with app.lock:
+                        pilot.refresh()
+                        self.json(pilot.macro_monitor_payload())
+                elif self.path in {"/api/weekly", "/api/weekly/pdf"}:
+                    from weekly_portfolios import published, weekly_session
+                    root = Path(os.environ.get("PILOT_WEEKLY_ROOT", "var/weekly-portfolios/published"))
+                    if not (root / "latest.json").is_file():
+                        self.json(dict(status="UNAVAILABLE", reason="No verified weekly research is installed"), 503)
+                    else:
+                        root, weekly = published(root)
+                        weekly["stale"] = weekly["market_session"] != weekly_session(datetime.now(timezone.utc))
+                        if self.path.endswith("/pdf"):
+                            self.send((root / "dashboard-report.pdf").read_bytes(), kind="application/pdf")
+                        else:
+                            self.json(weekly)
                 elif self.path in {"/api/dashboard", "/api/dashboard-status", "/readyz"}:
                     with app.lock:
-                        app.refresh()
+                        pilot.refresh()
                         market_session = app.payload["training"]["market_session"]
                         stale = market_session != str(usable_session(datetime.now(timezone.utc)).date())
                         if self.path == "/api/dashboard":
@@ -345,7 +402,7 @@ def handler(pilot):
                     self.json({"error": "A calculation is active; retry shortly"}, 409)
                     return
                 try:
-                    app.refresh()
+                    pilot.refresh()
                     personal = pilot.user_application(session)
                     if self.path == "/api/reallocate":
                         self.json(personal.calculate(body))
@@ -396,6 +453,11 @@ def main():
         owner.close()
         raise ValueError("Another pilot process owns this state directory") from None
     logging.basicConfig(level=logging.INFO)
+    daily_root = os.environ.get("PILOT_DAILY_ROOT")
+    if daily_root and (Path(daily_root) / "latest.json").is_file():
+        from pilot_daily import revision_directory
+        _, directory = revision_directory(daily_root)
+        args.snapshot = directory / "launch.json"
     snapshot = strict_json(args.snapshot)
     from pilot_release import verify_snapshot, verify_context, materialize_snapshot
     document = None
@@ -413,6 +475,7 @@ def main():
                               args.state / "shared-saved-pdfs")
     pilot = Pilot(application, args.state, args.origin, insecure_local=args.insecure_local,
                   benchmark=args.benchmark, trusted_proxy=os.environ.get("PILOT_TRUSTED_PROXY"))
+    pilot.snapshot_root = args.snapshot.parent if (args.snapshot.parent / "snapshot-manifest.json").is_file() else None
     server = BoundedServer((args.bind, args.port), handler(pilot))
     def stop(*_):
         threading.Thread(target=server.shutdown, daemon=True).start()

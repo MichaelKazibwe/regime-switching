@@ -1,5 +1,7 @@
 """Fail-closed monitoring of v2 run-start, completion and linked observations."""
 
+from forward_cohort import observations as cohort_observations
+
 import argparse
 from datetime import datetime, timezone
 import json
@@ -38,7 +40,7 @@ def health(root, now=None):
             )
         elif job["status"] == "PASSED_SHADOW_ONLY":
             finished = datetime.fromisoformat(job["finished_at"])
-            receipt = read_observation(root / "observations" / (session + ".json"), now)
+            receipt = read_observation(cohort_observations(root) / (session + ".json"), now)
             evidence = receipt["evidence"]
             job_path = Path(job["job"]).resolve()
             if job_path.parent != (root / "runs").resolve():

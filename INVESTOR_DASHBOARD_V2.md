@@ -1,5 +1,7 @@
 # Investor dashboard V2: allocation, macro outlook and risk
 
+> **Universe policy update (2026-11-17):** Current portfolios and strategies resolve a configurable global instrument registry, with no fixed ETF-count limit. Numeric universe counts below describe this document's historical implementation or experiment. See [the current global-universe policy](GLOBAL_ASSET_UNIVERSE.md).
+
 Implemented at the owner's request after the V1 design freeze. This is a new reviewable interface, not a public investment-release approval. V1 source hashes are retained separately.
 
 ## What changed

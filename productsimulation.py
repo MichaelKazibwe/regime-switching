@@ -15,6 +15,10 @@ def simulate_plans(
     initial_costs=None,
 ):
     values = returns.to_numpy(dtype=float)
+    periods = returns.attrs.get("periods_per_year", 252)
+    if type(periods) is not int or not 1 <= periods <= 366:
+        raise ValueError("Qualified annual valuation-session count required")
+    rebalance = max(1, round(periods / 12))
     mu = np.asarray(expected_annual, dtype=float)
     if (
         len(values) < 252
@@ -50,29 +54,29 @@ def simulate_plans(
     logs = np.log1p(values)
     centered = logs - logs.mean(axis=0)
     rng = np.random.default_rng(seed)
-    horizon = years * 252
+    horizon = years * periods
     curves = np.empty((len(targets), paths, horizon))
     for start in range(0, paths, 64):
         count = min(64, paths - start)
 
         def indices(length):
             starts = rng.integers(
-                0, len(values), size=(count, int(np.ceil(length / 21)))
+                0, len(values), size=(count, int(np.ceil(length / rebalance)))
             )
-            return ((starts[:, :, None] + np.arange(21)) % len(values)).reshape(
+            return ((starts[:, :, None] + np.arange(rebalance)) % len(values)).reshape(
                 count, -1
             )[:, :length]
 
         calibration = indices(len(values))
         exponential_moment = np.log(np.exp(centered).mean(axis=0))
         drift = (
-            np.log1p(mu) / 252
+            np.log1p(mu) / periods
             - exponential_moment
             + 0.5 * (logs[calibration].mean(axis=1) - logs.mean(axis=0))
         )
         sampled = centered[indices(horizon)] + drift[:, None, :]
         # Constant observed cash-rate assumption is explicit; it is not a yield forecast.
-        sampled[:, :, -1] = np.log1p(mu[-1]) / 252
+        sampled[:, :, -1] = np.log1p(mu[-1]) / periods
         growth = np.exp(sampled)
         for j, target in enumerate(targets):
             initial = (
@@ -87,7 +91,7 @@ def simulate_plans(
                 factor = dollars.sum(axis=1)
                 weights = dollars / factor[:, None]
                 nav *= factor
-                if (day + 1) % 21 == 0:
+                if (day + 1) % rebalance == 0:
                     fee = np.zeros(count)
                     for _ in range(20):
                         updated = cost_rate * np.abs(
@@ -126,7 +130,7 @@ def simulate_plans(
         "summary": summaries,
         "fan": fan,
         "assumptions": [
-            "21-session target rebalancing after old holdings earn the return; constant modeled trading costs.",
+            f"{rebalance}-valuation-session target rebalancing after old holdings earn the return; {periods} annual valuation sessions; constant modeled trading costs.",
             "No withdrawals, contributions, future tax-lot realization or future macro strategy reoptimization.",
             "Constant supplied net cash yield; asset growth priors are unvalidated planning assumptions.",
             "Annual asset-growth priors use an empirical exponential-moment adjustment when converted to daily log drift.",

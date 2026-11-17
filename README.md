@@ -4,8 +4,12 @@ Python portfolio research, chronological regime forecasting, risk controls, pape
 
 ## Start here
 
+- [Global migration verification](GLOBAL_UNIVERSE_MIGRATION_RESULTS.md)
+- [Open global asset universe](GLOBAL_ASSET_UNIVERSE.md) — current policy for every portfolio, benchmark and strategy; historical fixed-count descriptions are archived experiment context.
+
 - [Local VM dashboard and login setup](LOCAL_VM_PILOT.md)
 - [Dashboard accuracy audit](DASHBOARD_ACCURACY_AUDIT_20261115.md)
+- [Interactive terminal and navigation guide](DASHBOARD_TERMINAL_UPGRADE.md)
 - [Daily alpha research training](DAILY_ALPHA_TRAINING.md)
 - [Completed performance experiments](PERFORMANCE_IMPROVEMENTS_EXECUTION.md)
 - [Business-cycle benchmark](CYCLE_BENCHMARK_GUIDE.md)
@@ -33,3 +37,10 @@ Mac LaunchAgent files in `deploy/` are templates. The installers resolve current
 Keep `var/`, `output/`, local environment files, secrets, databases, captures, reports and model artifacts private and outside Git. Research reports describe the specific dated experiments they evaluated. The dashboard distinguishes archived illustrations, dated market closes, historical reference performance and simulated scenarios. Passing software tests does not establish predictive alpha or future returns.
 
 Historical phase documents and proof reports are project history; their older counts and deployment conclusions are not current release approvals. Current limits include Firefox QA failure, unresolved external security scan findings, SBOM generation and encrypted off-host recovery. See the deployment guides before exposing the service beyond this Mac.
+## Weekly portfolio research
+
+See [Weekly portfolio research](WEEKLY_PORTFOLIOS.md) for the automated weekly candidates, projections, reports and local pilot operations.
+
+See [Automatic daily dashboard updates](DAILY_DASHBOARD_REFRESH.md) for daily data publication and open-page refresh.
+
+See [Daily macro monitoring](MACRO_MONITORING.md) for daily observations, quarterly aggregates and missing-data interpretation in Macro outlook.

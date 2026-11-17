@@ -20,6 +20,7 @@ from compare_portfolio_models import rebalance_fee
 from strategy_report import load_training_report
 from strategy_integrity import strict_json, file_hash, fingerprint
 from strategy_receipts import atomic_json
+from global_asset_registry import load_registry
 
 BUDGETS = {
     "balanced": dict(equity=0.45, government=0.30, real_assets=0.15, credit=0.05, alternative=0.05),
@@ -33,7 +34,8 @@ REGIMES = ("disinflationary_growth", "inflationary_growth", "stagflation", "defl
 
 def allocate(history, budget, volatility):
     symbols = list(history)
-    stressed = history.loc[history.SPY <= history.SPY.quantile(0.2)].dropna()
+    market = history.SPY if "SPY" in history else history.mean(axis=1)
+    stressed = history.loc[market <= market.quantile(0.2)].dropna()
     cov, _ = calibrated_covariance(history.tail(252), stressed.tail(252), stress_weight=0.25)
     stress, _ = calibrated_covariance(history.tail(252), stressed.tail(252), stress_weight=0.50)
     raw = history.tail(252).cov().to_numpy() * 252
@@ -178,7 +180,8 @@ def run(bundle, output):
     report = load_training_report(b["training_report"])
     if not report["current_numerical_source_match"]:
         raise ValueError("Source-matched completed training required")
-    prices = extended_prices(b["capture"], b["benchmark_extension"]).drop(columns=["XLV", "ALLW"])
+    prices = extended_prices(b["capture"], b["benchmark_extension"])
+    prices = prices[[s for s in prices if s in CATALOGUE and CATALOGUE[s].research_enabled and not CATALOGUE[s].benchmark_only]]
     daily = prices.pct_change(fill_method=None)
     train_end, validation_end = len(prices) - 504, len(prices) - 252
     training = daily.iloc[train_end - 1260:train_end]
@@ -189,8 +192,10 @@ def run(bundle, output):
     sources = {p: file_hash(p) for p in ["cycle_benchmark.py", "institutionalportfolio.py",
                                        "institutional_return_engines.py", "portfolio_risk_envelope.py",
                                        "economic_design_assessment.py", "growth_resilience.py",
-                                       "fourregimestrategies.py", "performance_portfolios.py"]}
-    protocol = dict(objective="Validation CAGR - 0.5 annual variance + 0.5 max drawdown - daily ES95",
+                                       "fourregimestrategies.py", "performance_portfolios.py",
+                                       "global_asset_registry.py", "global_market_panel.py",
+                                       "research/global_asset_registry.json"]}
+    protocol = dict(universe_contract=load_registry().payload(), objective="Validation CAGR - 0.5 annual variance + 0.5 max drawdown - daily ES95",
                     budgets=BUDGETS, volatility_grid=[.06, .08, .10], drawdown_overlays=GUARDS,
                     guard_floor=.25, guard_reentry="Monthly only; prior-close drawdown",
                     capital_caps=CAPS, maximum_asset=.25, minimum_cash=.05,

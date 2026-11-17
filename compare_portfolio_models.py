@@ -178,7 +178,7 @@ def main():
     prices = pd.read_csv(args.prices,index_col=0,parse_dates=True)
     if (tuple(prices.columns) != DIVERSIFIED_ASSETS or not prices.index.is_monotonic_increasing
             or not prices.index.is_unique or not np.isfinite(prices.to_numpy()).all() or (prices<=0).any().any()):
-        raise ValueError("Complete, positive, ordered prices for the 26-ETF universe are required")
+        raise ValueError("Complete, positive, ordered prices for the declared registry universe are required")
     split = int(len(prices)*.8)
     development = prices.iloc[:split].copy()
     if len(development) < 505:
@@ -223,7 +223,7 @@ def main():
                                "SGOV carry sensitivity uses ETF total returns, not actual broker cash interest.",
                                "Known covariance-shrinkage sensitivity is retained; no strategy tuning in this comparison."]}
     (args.output/'methodology.json').write_text(json.dumps(metadata,indent=2)+'\n')
-    lines = ["="*114,"14-ETF PRODUCTION ALLOCATOR vs 26-ETF DIVERSIFIED ALLOCATOR", "EXPLORATORY PRICE-SIGNAL COMPARISON — NOT A FULL PRODUCTION STRATEGY BACKTEST",'='*114,
+    lines = ["="*114,"QUALIFIED PAPER ALLOCATOR vs REGISTRY RESEARCH ALLOCATOR", "EXPLORATORY PRICE-SIGNAL COMPARISON — NOT A FULL PRODUCTION STRATEGY BACKTEST",'='*114,
              f"Scored: {metadata['scored_start']} to {metadata['scored_end']} | {len(returns)} sessions | initial capital $1,000,000",
              f"Excluded from return scoring: {metadata['reserved_start']} to {metadata['reserved_end']} (final 20%)",
              "252-return warmup; rolling covariance <=756 returns; rebalance every 21 sessions; next-session-close fills.",

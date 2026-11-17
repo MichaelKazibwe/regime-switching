@@ -1,5 +1,7 @@
 # Deployment roadmap — accepted dashboard, continuous validation, controlled release
 
+> **Universe policy update (2026-11-17):** Current portfolios and strategies resolve a configurable global instrument registry, with no fixed ETF-count limit. Numeric universe counts below describe this document's historical implementation or experiment. See [the current global-universe policy](GLOBAL_ASSET_UNIVERSE.md).
+
 **Updated: 30 October 2026. This section is the current delivery plan.** Earlier paper-only plans below are historical implementation detail, not evidence of current public-release readiness. The first product is **recommendations, simulations and charts**, not client account management. The accepted investor dashboard is now frozen. The 14-asset paper worker remains a separate qualification path.
 
 **Current position:** 1,245 local tests pass; Ruff passes. No host exists yet; no background research timer has been enabled; no public recommendation release is qualified. Saved investor examples use 29 October 2025 prices. Do not call those examples live or claim the research strategies are already active behind them.

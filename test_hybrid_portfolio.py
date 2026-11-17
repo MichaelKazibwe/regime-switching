@@ -14,7 +14,7 @@ def inputs():
     policy=HybridPortfolioPolicy()
     w14=dict.fromkeys(PRODUCTION_ASSETS,1/len(PRODUCTION_ASSETS))
     w26=dict.fromkeys(DIVERSIFIED_ASSETS,1/len(DIVERSIFIED_ASSETS))
-    cov=pd.DataFrame(np.eye(26)*.04,index=DIVERSIFIED_ASSETS,columns=DIVERSIFIED_ASSETS)
+    cov=pd.DataFrame(np.eye(len(DIVERSIFIED_ASSETS))*.04,index=DIVERSIFIED_ASSETS,columns=DIVERSIFIED_ASSETS)
     times={'decision_time':'2025-01-15T21:00:00Z','sources_available_at':'2025-01-02T21:00:00Z',
            'covariance_as_of':'2025-01-15T21:00:00Z'}
     return policy,w14,w26,cov,times
@@ -40,7 +40,7 @@ def test_rejected_parent_uses_diversified_source_without_a_budget_bypass():
     policy,_,w26,cov,times=inputs()
     result=policy.allocate(None,w26,cov,parameter_grid(policy)[-1],uptrend=True,stress=False,**times)
     assert result['parent14_fraction']==0
-    assert np.allclose(result['weights']/result['weights'].sum(),np.full(26,1/26))
+    assert np.allclose(result['weights']/result['weights'].sum(),np.full(len(DIVERSIFIED_ASSETS),1/len(DIVERSIFIED_ASSETS)))
 
 
 def test_unknown_assets_future_information_and_stale_sources_fail_closed():
@@ -57,9 +57,9 @@ def test_unknown_assets_future_information_and_stale_sources_fail_closed():
 
 def test_correlation_shrinkage_preserves_treasury_bill_variance_scale():
     rng=np.random.default_rng(45)
-    scales=np.linspace(.006,.018,26)
+    scales=np.linspace(.006,.018,len(DIVERSIFIED_ASSETS))
     scales[list(DIVERSIFIED_ASSETS).index('SGOV')]=.00015
-    returns=pd.DataFrame(rng.normal(size=(300,26))*scales,columns=DIVERSIFIED_ASSETS)
+    returns=pd.DataFrame(rng.normal(size=(300,len(DIVERSIFIED_ASSETS)))*scales,columns=DIVERSIFIED_ASSETS)
     cov=scale_preserving_covariance(returns)
     empirical=returns.var(ddof=0)*252
     assert np.allclose(np.diag(cov),empirical.to_numpy(),rtol=1e-12)

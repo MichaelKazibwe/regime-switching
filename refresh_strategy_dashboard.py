@@ -49,6 +49,11 @@ def integrate(
     # Existing client plan payloads are preserved byte-for-byte at the data level.
     original = json.dumps(payload["plans"], sort_keys=True)
     retire_extensions(payload)
+    from investmentcatalog import catalogue_payload
+    from global_asset_registry import load_registry
+    payload["catalogue"] = catalogue_payload()
+    payload["core_symbols"] = list(load_registry().symbols())
+    payload["universe_contract"] = load_registry().payload()
     if latest_macro_features:
         rows = json.loads(Path(latest_macro_features).read_text())
         if not isinstance(rows, list) or any(

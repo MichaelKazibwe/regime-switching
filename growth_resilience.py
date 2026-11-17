@@ -9,6 +9,7 @@ import json
 import numpy as np
 import pandas as pd
 from strategy_integrity import file_hash
+from global_asset_registry import expand_anchor, load_registry
 from compare_portfolio_models import rebalance_fee
 
 WEIGHTS = dict(
@@ -119,6 +120,13 @@ ROLES = {
         "Liquidity; zero unverified net interest assumed",
     ),
 }
+
+
+LEGACY_REFERENCE_WEIGHTS = WEIGHTS.copy()
+WEIGHTS = expand_anchor(WEIGHTS)
+for _symbol, _instrument in load_registry().instruments.items():
+    ROLES.setdefault(_symbol, (_instrument.name, _instrument.region,
+        "Registered exposure; allocation remains subject to the declared class budget and data eligibility."))
 
 
 def backtest(returns, weights, cost=0.0015):
@@ -319,11 +327,11 @@ def build_benchmark(capture, extension_root):
         ),
         limitations=[
             "Weights designed, not optimized to this sample. Retrospective universe selection; no prospective performance claim.",
-            "Common observed ETF history only. Young funds prevent a 50-year actual ETF test. No synthetic pre-inception prices.",
+            "Common observed instrument history only. Shorter histories limit the available backtest. No synthetic pre-inception prices.",
             "Modeled 15 bps on actual risky-asset dollars traded (self-financing); monthly 21-session close rebalancing. No verified brokerage, taxes, spreads or cash yield.",
             "All Weather-style proxy is a transparent illustrative mix, not Bridgewater fund performance.",
             "Geography describes fund mandates, not verified country look-through. Japan overlaps VEA; themes overlap broad equity. USD listings carry foreign currency risk.",
-            "XLV is a benchmark-specific healthcare extension; existing 28-instrument research catalog is preserved.",
+            "Constituents resolve from the versioned global registry; historical references retain their original universe.",
             "Diversification can fail during simultaneous equity and bond shocks. Drawdowns and losses remain possible.",
         ],
     )

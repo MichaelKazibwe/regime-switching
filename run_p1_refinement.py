@@ -68,7 +68,7 @@ def run(bundle, output):
         validation_sessions=252,
         test_sessions=252,
         cost_rates=[0.0, 0.0015, 0.003],
-        universe="26 core ETFs plus DBMF; ALLW comparison only; no pre-inception filling",
+        universe="Registry-resolved research instruments; benchmark-only products excluded from components; no pre-inception filling",
         promotion_enabled=False,
         execution_enabled=False,
         limitation="Design follows previously inspected history; chronological retrospective evidence, not untouched or prospective validation.",

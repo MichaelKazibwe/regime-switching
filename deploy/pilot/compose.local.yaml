@@ -14,6 +14,8 @@ services:
     cpus: 2
     environment:
       PILOT_PUBLIC_ORIGIN: http://127.0.0.1:8782
+      PILOT_WEEKLY_ROOT: /app/weekly-research/published
+      PILOT_DAILY_ROOT: /app/daily-research
     healthcheck:
       test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8782/healthz', timeout=4).read()"]
       interval: 30s
@@ -25,6 +27,8 @@ services:
     volumes:
       - inputs:/app/var:ro
       - state:/app/var/pilot:rw
+      - weekly:/app/weekly-research:ro
+      - daily:/app/daily-research:ro
     tmpfs:
       - /tmp:size=256m,mode=1777
 volumes:
@@ -33,4 +37,10 @@ volumes:
     external: true
   state:
     name: regime-pilot-local-state
+    external: true
+  weekly:
+    name: regime-pilot-local-weekly
+    external: true
+  daily:
+    name: regime-pilot-local-daily
     external: true

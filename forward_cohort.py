@@ -17,3 +17,15 @@ def database(operations):
             or record.get("promotion_enabled") is not False):
         raise ValueError("Invalid forward cohort selection")
     return root / name
+
+
+def observations(operations):
+    """Select an explicit immutable receipt stream alongside a migrated cohort."""
+    root = Path(operations)
+    pointer = root / "active-cohort.json"
+    if not pointer.is_file():
+        return root / "observations"
+    name = strict_json(pointer).get("observation_directory", "observations")
+    if not isinstance(name, str) or Path(name).name != name or not name.startswith("observations"):
+        raise ValueError("Invalid observation stream selection")
+    return root / name

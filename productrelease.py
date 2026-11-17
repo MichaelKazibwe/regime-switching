@@ -21,6 +21,9 @@ PRODUCT_CHECKS = (
     "owner_signoff",
 )
 PRODUCT_SOURCES = (
+    "global_asset_registry.py",
+    "global_market_panel.py",
+    "research/global_asset_registry.json",
     "assetuniverse.py",
     "investmentcatalog.py",
     "clientmandate.py",

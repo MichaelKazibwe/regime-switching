@@ -18,6 +18,11 @@ from strategy_receipts import atomic_json
 
 def run(snapshot, state, *, local_preview=False):
     snapshot, state = Path(snapshot).resolve(), Path(state).resolve()
+    daily = os.environ.get("PILOT_DAILY_ROOT")
+    if daily and (Path(daily) / "latest.json").is_file():
+        from pilot_daily import revision_directory
+        _, directory = revision_directory(daily)
+        snapshot = directory / "launch.json"
     source = verify_context(Path.cwd())
     inputs = verify_snapshot(snapshot.parent)
     launch = strict_json(snapshot)

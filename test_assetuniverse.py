@@ -63,7 +63,7 @@ def test_diversified_research_universe_has_complete_metadata_and_preserves_produ
     from core_constants import DEFAULT_ASSETS, DIVERSIFIED_RESEARCH_ASSETS
 
     expanded = AssetUniverse.diversified()
-    assert expanded.size == DIVERSIFIED_ASSET_COUNT == 26
+    assert expanded.size == DIVERSIFIED_ASSET_COUNT == len(__import__("global_asset_registry").research_symbols())
     assert DIVERSIFIED_ASSETS[:len(PRODUCTION_ASSETS)] == tuple(PRODUCTION_ASSETS)
     assert expanded.health_check()
     assert DEFAULT_ASSETS == PRODUCTION_ASSETS

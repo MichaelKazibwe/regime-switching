@@ -1,5 +1,7 @@
 # Regime-adaptive hybrid portfolio
 
+> **Universe policy update (2026-11-17):** Current portfolios and strategies resolve a configurable global instrument registry, with no fixed ETF-count limit. Numeric universe counts below describe this document's historical implementation or experiment. See [the current global-universe policy](GLOBAL_ASSET_UNIVERSE.md).
+
 **Status: implemented research candidate, not activated in the paper worker.** The hybrid combines the 14-ETF production allocator and 26-ETF diversified research allocator. It seeks the highest net training return subject to a drawdown objective, rather than claiming a universally optimal portfolio.
 
 ## Result on common dates

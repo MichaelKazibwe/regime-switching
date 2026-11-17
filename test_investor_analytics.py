@@ -138,7 +138,7 @@ def test_research_allocation_is_separate_and_reconciled(tmp_path):
     r = result()
     before = deepcopy(r)
     c = build_context([r], research_allocation_path=p)
-    assert len(c["core_symbols"]) == 26
+    assert len(c["core_symbols"]) == len(__import__("assetuniverse").DIVERSIFIED_ASSETS)
     assert c["research_allocation"]["weights"]["SPY"] == 0.9
     assert r == before
     p.write_text(
@@ -163,18 +163,18 @@ def test_pdf_generation_contains_private_local_artifact_without_mutating_plan(tm
     assert r == before
 
 
-def test_rendered_dashboard_has_26_core_symbols_and_macroeconomic_sections(tmp_path):
+def test_rendered_dashboard_has_registry_symbols_and_macroeconomic_sections(tmp_path):
     from investor_dashboard import render_dashboard
     from test_investor_dashboard import saved_plan, payload
 
     path = tmp_path / "index.html"
     render_dashboard([saved_plan()], path, context={"plans": {}})
     html = path.read_text()
-    assert len(payload(path)["core_symbols"]) == 26
+    assert len(payload(path)["core_symbols"]) == len(__import__("assetuniverse").DIVERSIFIED_ASSETS)
     assert all(
         text in html
         for text in [
-            "26-ETF allocation map",
+            "Research-universe allocation map",
             "Macroeconomic dashboard",
             "Four-quarter indicator outlook",
             "Performance and macro sensitivity",

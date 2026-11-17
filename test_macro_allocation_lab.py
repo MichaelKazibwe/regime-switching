@@ -64,7 +64,7 @@ def test_recalculation_reconciles_capital_risk_and_preserves_policy(lab, name):
     assert max(r["weights"].values()) <= 0.250001
     assert max(v for v in r["risk_contributions"].values() if v is not None) <= 0.250001
     assert r["risk_budget_error"] <= 1e-6 and not r["execution_enabled"]
-    assert set(ASSET_ROLES) == set(DIVERSIFIED_ASSETS) | {"DBMF", "ALLW", "USD_CASH"}
+    assert set(ASSET_ROLES) == set(__import__("global_asset_registry").load_registry().instruments) | {"USD_CASH"}
     assert lab["policy"].config == config
     assert r["simulation"]["paths"] == 100
     assert (

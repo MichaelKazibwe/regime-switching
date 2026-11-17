@@ -21,7 +21,9 @@ def read_capture(path):
         if Path(name).name != name or p.is_symlink() or file_hash(p) != digest:
             raise ValueError("Capture lineage/hash mismatch")
     prices = pd.read_csv(path.parent / "prices.csv", index_col=0, parse_dates=True)
-    return doc, validate_prices(prices, pd.Timestamp(doc["price_session"]))
+    contract = doc.get("universe_contract")
+    symbols = [i["symbol"] for i in contract["instruments"] if i["research_enabled"]] if contract else list(prices)
+    return doc, validate_prices(prices, pd.Timestamp(doc["price_session"]), required_symbols=symbols)
 
 
 def review(current, previous=None, secondary=None):

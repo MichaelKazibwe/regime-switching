@@ -2,7 +2,8 @@
 
 from dataclasses import asdict, dataclass
 
-from assetuniverse import DIVERSIFIED_ASSETS, PRODUCTION_ASSETS
+from assetuniverse import PRODUCTION_ASSETS
+from global_asset_registry import load_registry
 
 
 @dataclass(frozen=True)
@@ -15,6 +16,15 @@ class ProductInstrument:
     verified_domicile: str | None = None
     # No jurisdiction is automatically declared suitable or legally approved.
     approved_jurisdictions: tuple[str, ...] = ()
+    asset_type: str = "etf"
+    venue: str = "XNYS"
+    calendar: str = "NYSE"
+    region: str = "unknown"
+    quote_unit: str = "USD"
+    price_multiplier: float = 1.0
+    pricing_model: str = "adjusted_close"
+    research_enabled: bool = True
+    name: str = ""
 
     @property
     def legacy_paper_eligible(self):
@@ -22,44 +32,13 @@ class ProductInstrument:
 
 
 def catalogue():
-    groups = {
-        "equity": (
-            "SPY",
-            "VEA",
-            "VWO",
-            "QQQ",
-            "IWM",
-            "EWJ",
-            "XLF",
-            "XLP",
-            "XLE",
-            "XLU",
-            "XLI",
-            "KIE",
-            "ITB",
-            "XLY",
-            "VNQ",
-        ),
-        "government": ("TLT", "IEF", "SHY", "IGOV", "TIP", "SGOV"),
-        "credit": ("LQD", "HYG"),
-        "real_assets": ("GLD", "SLV", "DBC"),
-        "alternative": ("DBMF",),
-        "composite": ("ALLW",),
-    }
-    instruments = {
-        s: ProductInstrument(
-            s,
-            bucket,
-            satellite=bucket == "equity" and s not in {"SPY", "VEA", "VWO"},
-            benchmark_only=s == "ALLW",
-        )
-        for bucket, names in groups.items()
-        for s in names
-    }
-    expected = set(DIVERSIFIED_ASSETS) | {"DBMF", "ALLW"}
-    if set(instruments) != expected or len(instruments) != 28:
-        raise ValueError("Product catalogue must account for all 28 instruments")
-    return instruments
+    registry = load_registry()
+    return {s: ProductInstrument(symbol=s, bucket=i.bucket, satellite=i.satellite,
+                benchmark_only=i.benchmark_only, listing_currency=i.listing_currency,
+                asset_type=i.asset_type, venue=i.venue, calendar=i.calendar, region=i.region,
+                quote_unit=i.quote_unit, price_multiplier=i.price_multiplier,
+                pricing_model=i.pricing_model, research_enabled=i.research_enabled, name=i.name)
+            for s in registry.symbols("product") for i in [registry.instruments[s]]}
 
 
 def catalogue_payload():

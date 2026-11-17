@@ -1,5 +1,7 @@
 > Current policy update, 31 October 2026: fixed return targets and the 5% account drawdown constraint are superseded. See [Growth & Resilience](GROWTH_RESILIENCE_BENCHMARK.md). Earlier results below retain their historical assumptions.
 
+> **Universe policy update (2026-11-17):** Current portfolios and strategies resolve a configurable global instrument registry, with no fixed ETF-count limit. Numeric universe counts below describe this document's historical implementation or experiment. See [the current global-universe policy](GLOBAL_ASSET_UNIVERSE.md).
+
 # Economic P0/P1 execution
 
 **31 October 2026, Europe/Warsaw.** Inputs are the verified market/vintage capture through 30 October 2026. This implements the five P0/P1 workstreams from `ECONOMIC_DESIGN_REASSESSMENT.md` as an isolated, executable shadow workflow. **Actual investor cash, costs, access and fund exposure gates remain blocked at the owner's explicit instruction: no verified files exist yet.** Nothing here is a public investment release or an approved replacement for the current portfolios.

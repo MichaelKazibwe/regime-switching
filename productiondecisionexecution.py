@@ -146,9 +146,9 @@ class ProductionDecisionExecution:
                 f"Unable to construct the canonical production universe: {exc}"
             ) from exc
         canonical = tuple(PRODUCTION_ASSETS)
-        if len(tickers) != 14 or len(set(tickers)) != 14:
+        if not tickers or len(tickers) != len(canonical) or len(set(tickers)) != len(canonical):
             raise ProductionDecisionExecutionError(
-                "Canonical production universe must contain 14 unique tickers."
+                "Paper universe must match the registered qualified unique tickers."
             )
         if set(tickers) != set(canonical):
             raise ProductionDecisionExecutionError(
@@ -202,7 +202,7 @@ class ProductionDecisionExecution:
     @classmethod
 
     def build_portfolio(cls) -> dict[str, float]:
-        """Build an equal-weight portfolio over the canonical 14 assets."""
+        """Build an equal-weight portfolio over the registry-qualified assets."""
         tickers = cls.production_tickers()
         weight = 1.0 / len(tickers)
         return {ticker: weight for ticker in tickers}
@@ -940,7 +940,7 @@ def test_production_decision_execution_data() -> None:
     assert "yield_spread" in macro_data
     returns = ProductionDecisionExecution.build_returns()
     prices = ProductionDecisionExecution.build_prices()
-    assert returns.shape == (300, 14)
+    assert returns.shape == (300, len(PRODUCTION_ASSETS))
     assert prices.shape == returns.shape
     assert tuple(returns.columns) == ProductionDecisionExecution.production_tickers()
     assert np.isfinite(returns.to_numpy()).all()

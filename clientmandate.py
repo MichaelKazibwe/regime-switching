@@ -111,7 +111,7 @@ class CashRate:
     source: str
     verified: bool = False
 
-    def daily_rate(self, decision_time):
+    def daily_rate(self, decision_time, periods_per_year=252):
         if not isinstance(self.verified, bool):
             raise ValueError("Cash source verification must be boolean")
         finite(self.annual_effective_net_rate, "cash rate", -0.20, 0.50)
@@ -123,4 +123,6 @@ class CashRate:
             aware_time(decision_time) - aware_time(self.as_of)
         ).total_seconds() > 7 * 86400:
             raise ValueError("Cash rate is stale")
-        return math.expm1(math.log1p(self.annual_effective_net_rate) / 252)
+        if type(periods_per_year) is not int or not 1 <= periods_per_year <= 366:
+            raise ValueError("Qualified annual valuation-session count required")
+        return math.expm1(math.log1p(self.annual_effective_net_rate) / periods_per_year)

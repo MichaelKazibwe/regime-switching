@@ -1,5 +1,7 @@
 # Portfolio risk contributions and capital weights
 
+> **Universe policy update (2026-11-17):** Current portfolios and strategies resolve a configurable global instrument registry, with no fixed ETF-count limit. Numeric universe counts below describe this document's historical implementation or experiment. See [the current global-universe policy](GLOBAL_ASSET_UNIVERSE.md).
+
 **Assessment:** the solver meets its configured group risk budgets, but the covariance model materially inflates SGOV variance relative to this historical sample. Resolve that estimator sensitivity before using the resulting weights for paper qualification. No allocation, signal or production configuration was changed by this analysis.
 
 Analysis of the **26-ETF research portfolio**, not actual account holdings. Saved adjusted prices end at **29 October 2026**; covariance uses **756** returns from **2023-10-25** through **2026-10-29**, annualized by 252. Four conditional regimes share one covariance snapshot. No current regime classification, expected return, drawdown forecast or return backtest is supplied.

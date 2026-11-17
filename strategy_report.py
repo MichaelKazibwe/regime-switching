@@ -8,7 +8,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from assetuniverse import DIVERSIFIED_ASSETS
 from fourregimestrategies import FourMacroStrategies
 from strategy_training_data import usable_session
 
@@ -54,8 +53,10 @@ def load_training_report(path):
         FourMacroStrategies().config["strategies"]
     ):
         raise ValueError("Exactly four known strategies required")
-    if list(report["core_universe"]) != list(DIVERSIFIED_ASSETS):
-        raise ValueError("Training universe mismatch")
+    symbols = report["core_universe"]
+    if (not symbols or len(symbols) != len(set(symbols))
+            or not set(symbols) <= set(__import__("global_asset_registry").load_registry().instruments)):
+        raise ValueError("Training requires an explicit registered universe")
     for row in [*report["strategies"], *report["benchmarks"]]:
         h = row["history"]
         if len(h) != report["evaluation"]["sessions"] or [p[0] for p in h] != sorted(
@@ -74,7 +75,7 @@ def load_training_report(path):
         candidate = row.get("candidate", {})
         weights = candidate.get("weights")
         if weights is not None and (
-            set(weights) != set(DIVERSIFIED_ASSETS)
+            set(weights) != set(symbols)
             or min([*weights.values(), candidate["cash"]]) < -1e-8
             or max(weights.values()) > 0.250001
             or not np.isclose(sum(weights.values()) + candidate["cash"], 1, atol=1e-6)

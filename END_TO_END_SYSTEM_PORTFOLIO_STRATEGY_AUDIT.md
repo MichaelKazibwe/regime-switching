@@ -1,5 +1,7 @@
 # End-to-end system, portfolio and strategy audit
 
+> **Universe policy update (2026-11-17):** Current portfolios and strategies resolve a configurable global instrument registry, with no fixed ETF-count limit. Numeric universe counts below describe this document's historical implementation or experiment. See [the current global-universe policy](GLOBAL_ASSET_UNIVERSE.md).
+
 **Audit date: 30 October 2026, Europe/Warsaw.** Scope: the current private recommendation/dashboard product, four-strategy training and simulation path, data provenance, report/notification integration, operational observation and deployment boundary. The separate paper execution stack was covered by the full regression suite and reviewed at its integration boundary; no broker orders, deployment, external messages, production input mutation or additional data download occurred. This is a local engineering and quantitative audit, not independent legal, penetration-test or investment certification.
 
 **Verdict: keep the system in private shadow evaluation. Public release and predictive-model promotion are not supported.** The normal calculation path works, but the audit reproduced acceptance defects and a current CPI calculation defect. Financial results do not demonstrate a profitable strategy or the requested return/loss objective.

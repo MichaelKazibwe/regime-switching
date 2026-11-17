@@ -44,7 +44,8 @@ def aware(value):
 
 class DiversifiedRegimePolicy:
     def __init__(self, config_path=DEFAULT_CONFIG, *, asset_catalog_path=DEFAULT_ASSET_CATALOG):
-        self.config = json.loads(Path(config_path).read_text())
+        from global_asset_registry import resolve_policy
+        self.config = resolve_policy(json.loads(Path(config_path).read_text()))
         self.universe_profile = self.config.get("universe_profile", "production")
         if self.universe_profile not in {"production", "diversified_research"}:
             raise AllocationError("Unknown universe profile")

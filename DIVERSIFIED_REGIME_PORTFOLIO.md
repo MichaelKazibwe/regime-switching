@@ -1,5 +1,7 @@
 # Diversified regime portfolio
 
+> **Universe policy update (2026-11-17):** Current portfolios and strategies resolve a configurable global instrument registry, with no fixed ETF-count limit. Numeric universe counts below describe this document's historical implementation or experiment. See [the current global-universe policy](GLOBAL_ASSET_UNIVERSE.md).
+
 Status: implemented research candidate; not activated in the paper worker. USD capital, long-only ETFs, no capital borrowing. The four economic regimes below are a separate research taxonomy from the production bull/neutral/crisis states.
 
 A combined return/drawdown research candidate now uses this allocator alongside the 14-ETF production allocator. Its daily risk controls, chronological parameter selection and common-date comparison are documented in [HYBRID_PORTFOLIO_MODEL.md](HYBRID_PORTFOLIO_MODEL.md). The hybrid is a separate research strategy requiring its own account risk-budget acceptance.

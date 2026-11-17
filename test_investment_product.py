@@ -48,7 +48,7 @@ def mandate(profile="balanced", **changes):
 
 def prices():
     dates = pd.bdate_range(end="2025-10-29", periods=600)
-    symbols = list(catalogue())
+    symbols = [s for s,i in catalogue().items() if i.listing_currency == "USD"]
     rng = np.random.default_rng(3105)
     common = rng.normal(0, 0.004, (len(dates), 1))
     values = rng.normal(0.0001, 0.003, (len(dates), len(symbols))) + common
@@ -66,8 +66,8 @@ def inputs(profile="balanced", **changes):
     return m, rate, r, mu, u, c, excluded
 
 
-def test_28_menu_is_separate_from_14_execution_universe():
-    assert len(catalogue()) == len(AssetUniverse.product_menu()) == 28
+def test_registered_menu_is_separate_from_qualified_execution_universe():
+    assert len(catalogue()) == len(AssetUniverse.product_menu()) == len(__import__("global_asset_registry").load_registry().symbols("product"))
     assert catalogue()["ALLW"].benchmark_only
     assert not catalogue()["DBMF"].legacy_paper_eligible
     assert set(AssetUniverse.production().tickers) == set(PRODUCTION_ASSETS)
@@ -308,7 +308,8 @@ def test_service_is_non_executable_audits_inputs_and_preserves_original_goal(tmp
     render_report(result, path)
     html = path.read_text()
     assert "OPERATOR_PREVIEW_ONLY" in html and "<canvas" in html and "sha256-" in html
-    assert "https://" not in html
+    # Source URLs in registry metadata are inert; executable remote resources remain forbidden.
+    assert 'src="https://' not in html and 'href="https://' not in html
     assert path.stat().st_mode & 0o777 == 0o600
     private_write(tmp_path / "result.json", json.dumps(result, allow_nan=False))
 

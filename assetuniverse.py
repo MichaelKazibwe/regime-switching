@@ -1,76 +1,18 @@
-"""
-======================================================================
-ASSET UNIVERSE
-======================================================================
+"""Registry-driven asset universes with separate research and execution eligibility.
 
-Institutional Asset Universe
-
-Maintains the canonical list of investable assets together with their
-metadata.
-
-ARCHITECTURAL PRINCIPLE
------------------------
-All portfolio construction, forecasting, optimization, risk modelling,
-scenario analysis and execution modules should consume AssetUniverse
-instead of maintaining independent ticker lists.
-
-UNIVERSE MODES
---------------
-1. AssetUniverse()
-
-   Generic empty universe.
-
-   This preserves the original generic AssetUniverse behaviour and
-   allows callers/tests to construct custom universes explicitly.
-
-2. AssetUniverse.production()
-
-   Canonical 14-asset production universe.
-
-   This is the authoritative production investment universe used by
-   the production portfolio decision pipeline.
-
-3. AssetUniverse.diversified()
-
-   Expanded research universe for the Bridgewater/Berkshire approach.
-   Its eligibility is for research; production authorization is separate.
-
-EXPANDED DIVERSIFIED ASSETS — 26 ETFs
------------------------------------
-    US and international equities: SPY, QQQ, IWM, VEA, VWO
-    US government bonds:           TLT, IEF, SHY
-    Corporate credit:              LQD, HYG
-    Metals and commodities:        GLD, SLV, DBC
-    Real estate:                   VNQ
-    Inflation-linked bonds:        TIP
-    International sovereign bonds: IGOV
-    Treasury bills:                SGOV
-    Financial services:            XLF
-    Consumer staples:              XLP
-    Energy producers:              XLE
-    Utilities:                     XLU
-    Industrials:                   XLI
-    Insurance:                     KIE
-    Home construction:             ITB
-    Japan equities:                EWJ
-    Consumer discretionary:        XLY
-
-DIVERSIFIED_ASSETS below is the explicit ordered research list.
-PRODUCTION_ASSETS is the existing 14-ETF paper execution profile.
-
-IMPORTANT
----------
-Production modules must obtain their production ticker universe from
-AssetUniverse.production() rather than maintaining their own ticker
-lists.
-
-======================================================================
+AssetUniverse() is an empty configurable universe. diversified() resolves the
+versioned global research registry; production() resolves only explicitly
+qualified paper instruments. Neither factory imposes an instrument count or
+ETF-only restriction. Legacy constant names remain compatibility APIs for the
+registry-resolved vectors; historical reports carry their own frozen vectors.
 """
 
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from typing import Any, Dict
+
+from global_asset_registry import load_registry
 
 
 # ======================================================================
@@ -108,297 +50,15 @@ class Asset:
 # ======================================================================
 
 
-# ----------------------------------------------------------------------
-# 2.1 EXPANDED DIVERSIFIED TICKERS — 26-ASSET RESEARCH PROFILE
-# ----------------------------------------------------------------------
-
-
-DIVERSIFIED_ASSETS = (
-    # US and international equities
-    "SPY",
-    "QQQ",
-    "IWM",
-    "VEA",
-    "VWO",
-    # US government bonds
-    "TLT",
-    "IEF",
-    "SHY",
-    # Corporate credit
-    "LQD",
-    "HYG",
-    # Metals and commodities
-    "GLD",
-    "SLV",
-    "DBC",
-    # Real estate
-    "VNQ",
-    # Inflation-linked bonds, international sovereigns and Treasury bills
-    "TIP",
-    "IGOV",
-    "SGOV",
-    # Business-sector and Japan exposure
-    "XLF",
-    "XLP",
-    "XLE",
-    "XLU",
-    "XLI",
-    "KIE",
-    "ITB",
-    "EWJ",
-    "XLY",
-)
-
+# Registry membership and metadata are authoritative; no fixed ticker array.
+_registry = load_registry()
+DIVERSIFIED_ASSETS = _registry.symbols("research")
 DIVERSIFIED_ASSET_COUNT = len(DIVERSIFIED_ASSETS)
-
-
-# ----------------------------------------------------------------------
-# 2.2 EXISTING PRODUCTION TICKERS — 14-ASSET PAPER EXECUTION PROFILE
-# ----------------------------------------------------------------------
-
-
-PRODUCTION_ASSETS = [
-    "SPY",
-    "QQQ",
-    "IWM",
-    "VEA",
-    "VWO",
-    "TLT",
-    "IEF",
-    "SHY",
-    "LQD",
-    "HYG",
-    "GLD",
-    "SLV",
-    "DBC",
-    "VNQ",
-]
-
-
-PRODUCTION_ASSET_TUPLE = tuple(
-    PRODUCTION_ASSETS
-)
-
-
-PRODUCTION_ASSET_COUNT = len(
-    PRODUCTION_ASSETS
-)
-
-
-# ----------------------------------------------------------------------
-# 2.3 PRODUCTION ASSET DEFINITIONS
-# ----------------------------------------------------------------------
-
-
-PRODUCTION_ASSET_DEFINITIONS = (
-    {
-        "ticker": "SPY",
-        "name": "SPDR S&P 500 ETF",
-        "asset_class": "Equity",
-        "sector": "US Large Cap",
-        "country": "USA",
-        "currency": "USD",
-        "benchmark": "S&P 500",
-        "active": True,
-    },
-    {
-        "ticker": "QQQ",
-        "name": "Invesco QQQ",
-        "asset_class": "Equity",
-        "sector": "US Technology / Growth",
-        "country": "USA",
-        "currency": "USD",
-        "benchmark": "NASDAQ-100",
-        "active": True,
-    },
-    {
-        "ticker": "IWM",
-        "name": "iShares Russell 2000 ETF",
-        "asset_class": "Equity",
-        "sector": "US Small Cap",
-        "country": "USA",
-        "currency": "USD",
-        "benchmark": "Russell 2000",
-        "active": True,
-    },
-    {
-        "ticker": "VEA",
-        "name": "Vanguard FTSE Developed Markets ETF",
-        "asset_class": "Equity",
-        "sector": "Developed International",
-        "country": "International",
-        "currency": "USD",
-        "benchmark": "FTSE Developed All Cap ex US",
-        "active": True,
-    },
-    {
-        "ticker": "VWO",
-        "name": "Vanguard FTSE Emerging Markets ETF",
-        "asset_class": "Equity",
-        "sector": "Emerging Markets",
-        "country": "Emerging Markets",
-        "currency": "USD",
-        "benchmark": (
-            "FTSE Emerging Markets All Cap "
-            "China A Inclusion"
-        ),
-        "active": True,
-    },
-    {
-        "ticker": "TLT",
-        "name": "iShares 20+ Year Treasury Bond ETF",
-        "asset_class": "Bond",
-        "sector": "Long Duration Government",
-        "country": "USA",
-        "currency": "USD",
-        "benchmark": "ICE US Treasury 20+ Year",
-        "active": True,
-    },
-    {
-        "ticker": "IEF",
-        "name": "iShares 7-10 Year Treasury Bond ETF",
-        "asset_class": "Bond",
-        "sector": "Intermediate Government",
-        "country": "USA",
-        "currency": "USD",
-        "benchmark": "ICE US Treasury 7-10 Year",
-        "active": True,
-    },
-    {
-        "ticker": "SHY",
-        "name": "iShares 1-3 Year Treasury Bond ETF",
-        "asset_class": "Bond",
-        "sector": "Short Duration Government",
-        "country": "USA",
-        "currency": "USD",
-        "benchmark": "ICE US Treasury 1-3 Year",
-        "active": True,
-    },
-    {
-        "ticker": "LQD",
-        "name": (
-            "iShares iBoxx Investment Grade "
-            "Corporate Bond ETF"
-        ),
-        "asset_class": "Bond",
-        "sector": "Investment Grade Corporate",
-        "country": "USA",
-        "currency": "USD",
-        "benchmark": (
-            "Markit iBoxx USD Liquid "
-            "Investment Grade"
-        ),
-        "active": True,
-    },
-    {
-        "ticker": "HYG",
-        "name": (
-            "iShares iBoxx High Yield "
-            "Corporate Bond ETF"
-        ),
-        "asset_class": "Bond",
-        "sector": "High Yield Corporate",
-        "country": "USA",
-        "currency": "USD",
-        "benchmark": (
-            "Markit iBoxx USD Liquid High Yield"
-        ),
-        "active": True,
-    },
-    {
-        "ticker": "GLD",
-        "name": "SPDR Gold Shares",
-        "asset_class": "Commodity",
-        "sector": "Precious Metals",
-        "country": "USA",
-        "currency": "USD",
-        "benchmark": "Gold",
-        "active": True,
-    },
-    {
-        "ticker": "SLV",
-        "name": "iShares Silver Trust",
-        "asset_class": "Commodity",
-        "sector": "Precious Metals",
-        "country": "USA",
-        "currency": "USD",
-        "benchmark": "Silver",
-        "active": True,
-    },
-    {
-        "ticker": "DBC",
-        "name": (
-            "Invesco DB Commodity Index "
-            "Tracking Fund"
-        ),
-        "asset_class": "Commodity",
-        "sector": "Broad Commodities",
-        "country": "USA",
-        "currency": "USD",
-        "benchmark": (
-            "DBIQ Optimum Yield Diversified "
-            "Commodity Index"
-        ),
-        "active": True,
-    },
-    {
-        "ticker": "VNQ",
-        "name": "Vanguard Real Estate ETF",
-        "asset_class": "REIT",
-        "sector": "Real Estate",
-        "country": "USA",
-        "currency": "USD",
-        "benchmark": (
-            "MSCI US Investable Market "
-            "Real Estate 25/50"
-        ),
-        "active": True,
-    },
-)
-
-
-# Research extensions preserve the production order as a prefix. They are
-# ordinary unlevered ETF instruments; USD listing does not remove FX risk.
-DIVERSIFIED_EXTENSION_DEFINITIONS = (
-    {"ticker":"TIP", "name":"iShares TIPS Bond ETF", "asset_class":"Bond",
-     "sector":"Inflation Linked Government", "country":"USA", "currency":"USD",
-     "benchmark":"ICE US Treasury Inflation Linked Bond Index", "active":True},
-    {"ticker":"IGOV", "name":"iShares International Treasury Bond ETF", "asset_class":"Bond",
-     "sector":"International Government", "country":"International", "currency":"USD",
-     "benchmark":"FTSE World Government Bond Index - Developed Markets Capped Select Index", "active":True},
-    {"ticker":"SGOV", "name":"iShares 0-3 Month Treasury Bond ETF", "asset_class":"Bond",
-     "sector":"Treasury Bills", "country":"USA", "currency":"USD",
-     "benchmark":"ICE 0-3 Month US Treasury Securities Index", "active":True},
-    {"ticker":"XLF", "name":"Financial Select Sector SPDR ETF", "asset_class":"Equity",
-     "sector":"Financial Services", "country":"USA", "currency":"USD",
-     "benchmark":"Financial Select Sector Index", "active":True},
-    {"ticker":"XLP", "name":"Consumer Staples Select Sector SPDR ETF", "asset_class":"Equity",
-     "sector":"Consumer Staples", "country":"USA", "currency":"USD",
-     "benchmark":"Consumer Staples Select Sector Index", "active":True},
-    {"ticker":"XLE", "name":"Energy Select Sector SPDR ETF", "asset_class":"Equity",
-     "sector":"Energy Producers", "country":"USA", "currency":"USD",
-     "benchmark":"Energy Select Sector Index", "active":True},
-    {"ticker":"XLU", "name":"Utilities Select Sector SPDR ETF", "asset_class":"Equity",
-     "sector":"Utilities", "country":"USA", "currency":"USD",
-     "benchmark":"Utilities Select Sector Index", "active":True},
-    {"ticker":"XLI", "name":"Industrial Select Sector SPDR ETF", "asset_class":"Equity",
-     "sector":"Industrials", "country":"USA", "currency":"USD",
-     "benchmark":"Industrial Select Sector Index", "active":True},
-    {"ticker":"KIE", "name":"SPDR S&P Insurance ETF", "asset_class":"Equity",
-     "sector":"Insurance", "country":"USA", "currency":"USD",
-     "benchmark":"S&P Insurance Select Industry Index", "active":True},
-    {"ticker":"ITB", "name":"iShares US Home Construction ETF", "asset_class":"Equity",
-     "sector":"Home Construction", "country":"USA", "currency":"USD",
-     "benchmark":"Dow Jones US Select Home Construction Index", "active":True},
-    {"ticker":"EWJ", "name":"iShares MSCI Japan ETF", "asset_class":"Equity",
-     "sector":"Japan Broad Equity", "country":"Japan", "currency":"USD",
-     "benchmark":"MSCI Japan Index", "active":True},
-    {"ticker":"XLY", "name":"Consumer Discretionary Select Sector SPDR ETF", "asset_class":"Equity",
-     "sector":"Consumer Discretionary", "country":"USA", "currency":"USD",
-     "benchmark":"Consumer Discretionary Select Sector Index", "active":True},
-)
-
-DIVERSIFIED_ASSET_DEFINITIONS = PRODUCTION_ASSET_DEFINITIONS + DIVERSIFIED_EXTENSION_DEFINITIONS
+DIVERSIFIED_ASSET_DEFINITIONS = tuple(_registry.instruments[s].asset_definition() for s in DIVERSIFIED_ASSETS)
+PRODUCTION_ASSETS = list(_registry.symbols("paper"))
+PRODUCTION_ASSET_TUPLE = tuple(PRODUCTION_ASSETS)
+PRODUCTION_ASSET_COUNT = len(PRODUCTION_ASSETS)
+PRODUCTION_ASSET_DEFINITIONS = tuple(_registry.instruments[s].asset_definition() for s in PRODUCTION_ASSETS)
 
 if (len(set(DIVERSIFIED_ASSETS)) != DIVERSIFIED_ASSET_COUNT
         or tuple(item["ticker"] for item in DIVERSIFIED_ASSET_DEFINITIONS) != DIVERSIFIED_ASSETS):
@@ -419,12 +79,12 @@ def _validate_production_definitions() -> None:
     universe cannot silently enter the dependency graph.
     """
 
-    if len(PRODUCTION_ASSETS) != 14:
+    if len(PRODUCTION_ASSETS) != PRODUCTION_ASSET_COUNT or not PRODUCTION_ASSETS:
 
         raise RuntimeError(
             (
                 "Canonical production universe must contain exactly "
-                f"14 assets. Got {len(PRODUCTION_ASSETS)}."
+                f"the registered qualified assets. Got {len(PRODUCTION_ASSETS)}."
             )
         )
 
@@ -441,12 +101,12 @@ def _validate_production_definitions() -> None:
         for definition in PRODUCTION_ASSET_DEFINITIONS
     ]
 
-    if len(definition_tickers) != 14:
+    if len(definition_tickers) != PRODUCTION_ASSET_COUNT:
 
         raise RuntimeError(
             (
                 "Canonical production asset definitions must contain "
-                f"exactly 14 assets. Got {len(definition_tickers)}."
+                f"the registered {PRODUCTION_ASSET_COUNT} assets. Got {len(definition_tickers)}."
             )
         )
 
@@ -526,7 +186,7 @@ class AssetUniverse:
 
         AssetUniverse.production()
 
-    for the canonical 14-asset production universe.
+    for the canonical registry-qualified production universe.
     """
 
     API_VERSION = "1.0.0"
@@ -565,7 +225,7 @@ class AssetUniverse:
         cls,
     ) -> "AssetUniverse":
         """
-        Construct the canonical 14-asset production universe.
+        Construct the registry-qualified paper universe.
         """
 
         universe = cls()
@@ -588,15 +248,13 @@ class AssetUniverse:
         universe = cls()
         for definition in DIVERSIFIED_ASSET_DEFINITIONS:
             universe.add_asset(Asset(**definition))
-        if (universe.size != DIVERSIFIED_ASSET_COUNT
-                or DIVERSIFIED_ASSETS[:PRODUCTION_ASSET_COUNT] != PRODUCTION_ASSET_TUPLE
-                or not universe.health_check()):
+        if universe.size != DIVERSIFIED_ASSET_COUNT or not universe.health_check():
             raise RuntimeError("Expanded research universe failed validation")
         return universe
 
     @staticmethod
     def product_menu():
-        """28-instrument recommendation menu, separate from paper authorization.
+        """Open registered recommendation menu, separate from paper authorization.
 
         Includes DBMF and the benchmark-only ALLW. Jurisdiction access and
         public recommendation qualification are assessed by the product service.
@@ -866,7 +524,7 @@ class AssetUniverse:
     ) -> bool:
         """
         Return True when the universe exactly matches the canonical
-        14-asset production universe.
+        registry-qualified production universe.
         """
 
         if self.size != PRODUCTION_ASSET_COUNT:
@@ -1375,31 +1033,11 @@ def run_regression_tests() -> None:
 
     assert production.health_check()
 
-    assert production.size == 14
+    assert production.size == PRODUCTION_ASSET_COUNT
 
     assert (
         set(production.tickers)
         == set(PRODUCTION_ASSETS)
-    )
-
-    assert (
-        len(production.equities())
-        == 5
-    )
-
-    assert (
-        len(production.bonds())
-        == 5
-    )
-
-    assert (
-        len(production.commodities())
-        == 3
-    )
-
-    assert (
-        len(production.reits())
-        == 1
     )
 
     assert (
@@ -1416,7 +1054,7 @@ def run_regression_tests() -> None:
     )
 
     print(
-        "Production asset count: 14"
+        f"Production asset count: {PRODUCTION_ASSET_COUNT}"
     )
 
     print(

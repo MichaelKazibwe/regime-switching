@@ -1,5 +1,7 @@
 # MODULE REGISTRY — REGIME SWITCHING PORTFOLIO FRAMEWORK
 
+> **Universe policy update (2026-11-17):** Current portfolios and strategies resolve a configurable global instrument registry, with no fixed ETF-count limit. Numeric universe counts below describe this document's historical implementation or experiment. See [the current global-universe policy](GLOBAL_ASSET_UNIVERSE.md).
+
 > **15 November 2026 source cleanup:** Start with [README.md](README.md) and the current local-pilot guides. Superseded source copies and duplicate tests were removed from the source tree; recoverable local copies remain in ignored cleanup storage. Runtime data, trained artifacts and generated output are excluded from the commit. The historical phase counts below are preserved as history.
 
 > **1 November 2026 deployment checkpoint:** Live trading remains disabled. The current upgrade checklist is [LIVE_TRADING_UPGRADE_ROADMAP.md](LIVE_TRADING_UPGRADE_ROADMAP.md), covering 26 ordered engineering and qualification tasks. Historical LOCKED labels below certify their recorded phase only; they do not approve a broker connection, unattended host, client service or live orders. Read `var/release-acceptance/latest.json` for the latest source-bound audit result.
