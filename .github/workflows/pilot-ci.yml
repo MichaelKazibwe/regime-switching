@@ -87,7 +87,7 @@ jobs:
           mkdir -p security-reports
           if [ -f var/pilot-context/image/pilot-release.json ]; then cp var/pilot-context/image/pilot-release.json security-reports/pilot-release.json; fi
           if docker image inspect regime-pilot:${{ github.sha }} > /dev/null 2>&1; then docker image inspect regime-pilot:${{ github.sha }} --format '{{.Id}}' > security-reports/image-id.txt; fi
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         if: always()
         with:
           name: invited-pilot-${{ github.run_id }}
