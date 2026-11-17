@@ -343,9 +343,9 @@ frozendict==2.4.7 \
     --hash=sha256:fd7ba56cf6340c732ecb78787c4e9600c4bd01372af7313ded21037126d33ec6 \
     --hash=sha256:ffd1a9f9babec9119712e76a39397d8aa0d72ef8c4ccad917c6175d7e7f81b74 \
     --hash=sha256:fff8584e3bbdc5c1713cd016fbf4b88babfffd4e5e89b39020f2a208dd24c900
-idna==3.11 \
-    --hash=sha256:771a87f49d9defaf64091e6e6fe9c18d4833f140bd19464795bc32d966ca37ea \
-    --hash=sha256:795dafcc9c04ed0c1fb032c2aa73654d8e8c5023a7df64a53f39190ada629902
+idna==3.15 \
+    --hash=sha256:048adeaf8c2d788c40fee287673ccaa74c24ffd8dcf09ffa555a2fbb59f10ac8 \
+    --hash=sha256:ca962446ea538f7092a95e057da437618e886f4d349216d2b1e294abfdb65fdc
 joblib==1.5.3 \
     --hash=sha256:5fc3c5039fc5ca8c0276333a188bbd59d6b7ab37fe6632daa76bc7f9ec18e713 \
     --hash=sha256:8561a3269e6801106863fd0d6d84bb737be9e7631e33aaed3fb9ce5953688da3
@@ -590,9 +590,9 @@ pycparser==3.0 \
 pydantic==2.13.4 \
     --hash=sha256:45a282cde31d808236fd7ea9d919b128653c8b38b393d1c4ab335c62924d9aba \
     --hash=sha256:c40756b57adaa8b1efeeced5c196f3f3b7c435f90e84ea7f443901bec8099ef6
-pydantic-settings==2.14.1 \
-    --hash=sha256:6e3c7edfd8277687cdc598f56e5cff0e9bfff0910a3749deaa8d4401c3a2b9de \
-    --hash=sha256:e874d3bec7e787b0c9958277956ed9b4dd5de6a80e162188fdaff7c5e26fd5fa
+pydantic-settings==2.14.2 \
+    --hash=sha256:a20c97b37910b6550d5ea50fbcc2d4187defe58cd57070b73863d069419c9440 \
+    --hash=sha256:c19dd64b19097f1de80184f0cc7b0272a13ae6e170cbf240a3e27e381ed14a5f
 pydantic_core==2.46.4 \
     --hash=sha256:00c603d540afdd6b80eb39f078f33ebd46211f02f33e34a32d9f053bba711de0 \
     --hash=sha256:0186750b482eefa11d7f435892b09c5c606193ef3375bcf94aa00ae6bfb66262 \

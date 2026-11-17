@@ -290,7 +290,10 @@ def run(origin, output, *, browsers=("chromium", "firefox", "webkit")):
             expect(page.locator("#lab-strategy")).to_be_visible()
             for i in range(4):
                 page.locator(f"#lab-prob-{i}").fill("25")
-            expect(page.locator("#lab-preset")).to_have_value("custom", timeout=90000)
+            try:
+                expect(page.locator("#lab-preset")).to_have_value("custom", timeout=90000)
+            except AssertionError as error:
+                raise AssertionError(page.locator('#lab-status').inner_text()) from error
             with page.expect_download() as event:
                 with page.expect_response(lambda response: response.url.endswith('/api/scenario-pdf')) as pdf_response:
                     page.locator("#lab-pdf").click()
