@@ -1,6 +1,7 @@
 ARG PILOT_BASE_IMAGE
 FROM ${PILOT_BASE_IMAGE}
 USER root
+RUN apt-get update && apt-get install --no-install-recommends -y libatomic1 && rm -rf /var/lib/apt/lists/*
 COPY requirements-browser.hashed.lock /app/requirements-browser.hashed.lock
 RUN python -m pip install --no-cache-dir --no-deps --require-hashes -r /app/requirements-browser.hashed.lock
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright

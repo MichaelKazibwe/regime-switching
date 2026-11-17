@@ -169,6 +169,8 @@ def run(app_image, browser_image, fixture, output):
             except subprocess.CalledProcessError:
                 time.sleep(0.5)
         else:
+            logs = subprocess.run([docker, "logs", app], capture_output=True, text=True, timeout=15)
+            (output / "app-startup.log").write_text(logs.stdout + logs.stderr)
             raise RuntimeError("Isolated exact-image app failed to start")
         performance_script = r"""
 import json,time,urllib.request,http.cookiejar,concurrent.futures,math
