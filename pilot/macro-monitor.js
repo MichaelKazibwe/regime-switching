@@ -31,5 +31,4 @@ function renderSharedMacroAlpha(data){
  text('macro-alpha-outcomes',m?`${m.observed_forecasts} genuine issued forecasts · ${m.pending} pending · ${m.matured} scored · ${m.matured_unscorable||0} matured without valid outcome inputs. ${m.matured?'Outcome scores are in the exported evidence.':'Awaiting matured outcomes; no predictive alpha claim.'}`:'Prospective receipt unavailable; this snapshot does not count as an issued observation.');
  text('macro-alpha-training',`${f.prediction.training_examples} training examples · latest matured training label ${f.prediction.last_training_label_date||'unavailable'} · ${f.prediction.feature_names.join(', ')} · 25% model / 75% frequency shrinkage · protocol ${f.protocol_id.slice(0,12)}`);
 }
-async function refreshSharedMacroAlpha(){try{const response=await fetch('/api/macro-alpha',{signal:AbortSignal.timeout(30000)});if(!response.ok)throw Error();renderSharedMacroAlpha(await response.json());}catch(_){macroAlphaBanner.textContent='Macro alpha · verified monitor unavailable';}}
-refreshSharedMacroAlpha();setInterval(()=>{if(!document.hidden)refreshSharedMacroAlpha();},60000);
+renderSharedMacroAlpha(data.macro_alpha);
