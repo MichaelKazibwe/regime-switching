@@ -63,6 +63,7 @@ jobs:
       - name: Image vulnerability gate
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
+          version: v0.76.2
           scan-type: image
           image-ref: regime-pilot:${{ github.sha }}
           scanners: vuln
@@ -74,6 +75,7 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && inputs.generate_sbom == true
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
+          version: v0.76.2
           scan-type: image
           image-ref: regime-pilot:${{ github.sha }}
           format: cyclonedx
@@ -82,8 +84,9 @@ jobs:
       - name: Bind build evidence
         if: always()
         run: |
-          cp var/pilot-context/image/pilot-release.json security-reports/pilot-release.json
-          docker image inspect regime-pilot:${{ github.sha }} --format '{{.Id}}' > security-reports/image-id.txt
+          mkdir -p security-reports
+          if [ -f var/pilot-context/image/pilot-release.json ]; then cp var/pilot-context/image/pilot-release.json security-reports/pilot-release.json; fi
+          if docker image inspect regime-pilot:${{ github.sha }} > /dev/null 2>&1; then docker image inspect regime-pilot:${{ github.sha }} --format '{{.Id}}' > security-reports/image-id.txt; fi
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

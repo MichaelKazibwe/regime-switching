@@ -2,6 +2,11 @@ name: Managed paper candidate checks
 on:
   pull_request:
   workflow_dispatch:
+    inputs:
+      generate_sbom:
+        description: Explicitly authorize optional SBOM generation
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
@@ -23,13 +28,16 @@ jobs:
       - run: docker run --rm --read-only --tmpfs /tmp --cap-drop ALL --security-opt no-new-privileges managed-paper:candidate
       - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
+          version: v0.76.2
           image-ref: managed-paper:candidate
           format: sarif
           output: var/managed-ci/image-scan.sarif
           exit-code: '1'
           severity: CRITICAL,HIGH
       - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        if: github.event_name == 'workflow_dispatch' && inputs.generate_sbom == true
         with:
+          version: v0.76.2
           image-ref: managed-paper:candidate
           format: cyclonedx
           output: var/managed-ci/sbom.json

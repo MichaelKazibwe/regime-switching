@@ -6,18 +6,18 @@ No paid server, domain, data subscription or storage account was created. Remote
 
 ## Engineering and research evidence
 
-- Full backend suite: **1,503 passed** (`var/project-review/pytest-final-pipeline.xml`).
+- Full backend suite: **1,504 passed** (`var/project-review/pytest-clean-final-all.xml`).
 - Standalone complete regression: **1,108/1,108 checks passed** (`var/project-review/final-regression-end-to-end.log`); canonical harness: **26/26** (`canonical-regression.log`). The historical reference monolith `rewrite.py` remains inventoried/compiled, outside the active import/runtime contract; optional plotting/web/database packages were not installed just to import historical code.
 - Legacy historical-data integration and walk-forward backtest passed with network access to their existing free sources. Those runs do not qualify revised macro data as historical-vintage investment evidence.
-- Chromium and WebKit passed all 11 views, desktop/mobile, roles, research review, daily refresh, macro monitoring, benchmark scenario metrics, amount scaling and PDF/CSV/JSON exports against the exact app image and genuine captured inputs (`var/project-review/final-review-browser/acceptance.json`). Synthetic sealed-fixture acceptance also passed separately. An earlier export download timed out; its diagnostic rerun and subsequent genuine-data runs passed. This is retained as a transient observation, not erased.
-- Four local readers, 20 requests: **p95 1.734 seconds**, no errors, maximum response **2,212,800 bytes**. Budgets: p95 under 10 seconds and response under 8 MiB. This excludes WAN and simultaneous optimization/export load.
+- Chromium and WebKit passed all 11 views, desktop/mobile, roles, research review, daily refresh, macro monitoring, benchmark scenario metrics, amount scaling and PDF/CSV/JSON exports against the exact app image and genuine captured inputs (`var/project-review/clean-ci-browser/acceptance.json`). Synthetic sealed-fixture acceptance also passed separately. An earlier export download timed out; its diagnostic rerun and subsequent genuine-data runs passed. This is retained as a transient observation, not erased.
+- Four local readers, 20 requests: **p95 1.325 seconds**, no errors, maximum response **2,212,800 bytes**. Budgets: p95 under 10 seconds and response under 8 MiB. This excludes WAN and simultaneous optimization/export load.
 - Synthetic optimizer capacity: 100 assets **0.085 seconds**; 500 assets **9.011 seconds**, allocation constraints passed. Not financial-performance evidence or a broad scalability certification.
 - Two targeted mutation faults were killed: future FX sessions and silently missing reference holdings (`var/project-review/mutations-final/receipt.json`). This is not a whole-project mutation score.
 - Selected critical-contract coverage was approximately **79%** over five named modules. Coverage is scoped and does not imply exhaustive correctness.
 - Genuine model training and three-policy portfolio research were rerun through **2026-11-16**. All 11 declared macro masks failed the comparison screen. The uncertainty-shrink alternative reduced retrospective drawdowns and returns; it was not automatically adopted.
 - A fresh isolated Linux container, with network disabled and no production volumes, completed imported-session collection, bootstrap, benchmark and daily/weekly publication. The pipeline correctly reported **WAITING** for the alpha trainer's new validated host session; it did not manufacture observations or training status. Receipt: `var/project-review/linux-pipeline-issued-evidence/receipt.json`.
 - Encrypted archive: **131,194,931 bytes**. Authenticated decrypt/restore and isolated Linux validation passed; one invited account's metadata was preserved and sessions were revoked only in the restored copy. Host publication writers were not globally stopped, so full cross-component quiescence is not certified. **No off-host upload/download has occurred.**
-- Exact final candidate image: `sha256:ddc61861b855e986251a41c49dc9ad8bba5127a7aa703e67fa1a85b91f22ff88`; source release `9325e99f6e7a3aba4fd13fc9d669f5e50f628246c34693a6b3d86fb233e43586`, qualification **CANDIDATE**. The fixable zlib finding was removed. The exact-image scan retains **47 HIGH findings, 11 distinct CVEs, none with a listed fix**, so its public security gate remains BLOCKED. No waivers or SBOM were generated.
+- Exact final candidate image: `sha256:67899da3f4203454dd9eb3b0f861ed2c27fe52933fefa95f0d0853ea6a5c61dd`; source release `44428bb15c4d96fa0be4c940b4ce3875c574e9f78f5b78e1ca3ea22c301156b5`, qualification **CANDIDATE**. The fixable zlib finding was removed. The exact-image scan retains **47 HIGH findings, 11 distinct CVEs, none with a listed fix**, so its public security gate remains BLOCKED. No waivers or SBOM were generated.
 
 ## Disposition of every review item
 
@@ -60,7 +60,7 @@ No paid server, domain, data subscription or storage account was created. Remote
 
 ## Installed local pilot
 
-The exact candidate image above is installed on the existing local Linux VM at `http://127.0.0.1:8782/`. All **10** runtime checks and all **four** required feature checks passed. The original account is preserved, old input trees are retained, and both scheduled publishers succeeded against the installed image. Final image deployment receipt: `var/project-review/final-image-rollout/deployment.json`; preflight: `final-image-rollout/preflight.json`. The data/cohort migration receipt is retained in `local-rollout-2/deployment.json`. No public access or execution authority was enabled.
+The exact candidate image above is installed on the existing local Linux VM at `http://127.0.0.1:8782/`. All **10** runtime checks and all **four** required feature checks passed. The original account is preserved, old input trees are retained, and both scheduled publishers succeeded against the installed image. Final image deployment receipt: `var/project-review/clean-ci-image-rollout/deployment.json`; preflight: `clean-ci-image-rollout/preflight.json`. The data/cohort migration receipt is retained in `local-rollout-2/deployment.json`. No public access or execution authority was enabled.
 
 ## Free remaining operator steps
 
@@ -71,3 +71,9 @@ The exact candidate image above is installed on the existing local Linux VM at `
 5. Continue real future-session and horizon monitoring. Failed research gates remain failed until qualifying evidence changes them.
 
 All 32 findings are accounted for. The local engineering execution and institutional/public qualification are deliberately separate statuses; unachieved external or future-observation criteria above remain open.
+
+## Hosted-CI follow-up
+
+The first GitHub run exposed clean-checkout issues masked by the original Mac's ignored runtime files. They were corrected and verified in an isolated checkout: the historical three-year policy is now a byte-identical versioned research JSON, and two wrapper tests construct their own synthetic dashboard template. The paper image now includes its admitted backup module and global registry JSON; the recommendation Dockerfile copies every declared resource, including `.dockerignore` and research JSON. Both actual images pass manifest/import checks; recommendation synthetic plan/viewer/replay smoke passes. The clean paper execution proof matrix passes **54/54**.
+
+All scanner actions pin Trivy **0.76.2**; source scanning retains JSON evidence at the original HIGH/CRITICAL threshold. The current source secret/configuration scan reports **zero HIGH/CRITICAL findings**. The older scanner had returned failure with only LOW informational missing-healthcheck notes for batch images. No false health checks, security waivers or disabled vulnerability gates were added. SBOM is explicitly opt-in across pilot, paper, managed-paper and recommendation workflows. Hosted workflow outcomes remain separate from these local clean-checkout results.

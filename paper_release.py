@@ -19,6 +19,7 @@ ENTRIES = (
     "monthlyreport", "monthlydelivery",
 )
 RESOURCES = (
+    "research/global_asset_registry.json",
     "Dockerfile", "compose.paper.yaml", ".dockerignore", ".env.paper.example",
     "OPERATIONAL_RUNBOOK.md", "PAPER_DEPLOYMENT_GUIDE.md", "STRATEGY_ACCEPTANCE.md",
     "deploy/systemd/README.md", "deploy/systemd/paper-worker.service",

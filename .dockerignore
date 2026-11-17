@@ -35,6 +35,7 @@ pre_rewrite_backup_*/
 *.backup
 *.bak_*
 !shadow_bundle_backup.py
+!paper_backup.py
 test_*.py
 *_test.py
 !pilot_browser_test.py

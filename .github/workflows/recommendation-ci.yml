@@ -5,6 +5,11 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      generate_sbom:
+        description: Explicitly authorize optional SBOM generation
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -43,6 +48,7 @@ jobs:
       - name: Scan recommendation image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
+          version: v0.76.2
           scan-type: image
           image-ref: regime-recommendations:${{ github.sha }}
           scanners: vuln
@@ -51,8 +57,10 @@ jobs:
           exit-code: '1'
           severity: CRITICAL,HIGH
       - name: Generate image SBOM
+        if: github.event_name == 'workflow_dispatch' && inputs.generate_sbom == true
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
         with:
+          version: v0.76.2
           scan-type: image
           image-ref: regime-recommendations:${{ github.sha }}
           scanners: vuln
@@ -62,6 +70,7 @@ jobs:
       - name: Retain image and source identity
         if: always()
         run: |
+          mkdir -p security-reports
           cp var/recommendation-context/release-manifest.json security-reports/release-manifest.json
           docker image inspect regime-recommendations:${{ github.sha }} --format '{{.Id}}' > security-reports/image-digest.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

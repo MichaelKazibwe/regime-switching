@@ -26,7 +26,8 @@ from optimize_smart_portfolio import regime_report
 from refine_institutional_portfolio import prepare
 from stress_test_models import monte_carlo
 
-PLAN = Path("var/policy-history/20261031T013230141697Z/research/three_year_goal_plan.json")
+# Versioned historical policy, independent of one operator's ignored var tree.
+PLAN = Path(__file__).resolve().parent / "research/three_year_goal_plan_frozen_20261031.json"
 OUT = Path("var/research/three-year-goal-v5")
 
 

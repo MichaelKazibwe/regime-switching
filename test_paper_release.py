@@ -1,11 +1,34 @@
 import json
 from pathlib import Path
 import subprocess
+import os
+import sys
 
 import pytest
 
 import paper_release
 from lock_paper_dependencies import hash_lock
+
+
+def test_real_staged_paper_context_imports_without_repository_data(tmp_path):
+    root = Path(__file__).resolve().parent
+    target = tmp_path / "paper"
+    document = paper_release.stage(root, target, allow_dirty=True)
+    assert "research/global_asset_registry.json" in document["files"]
+    subprocess.run(
+        [
+            sys.executable,
+            "-B",
+            "-c",
+            "import paper_service,paper_admin,paper_backup,paper_qualification,paper_dashboard_server,monthlyreport,monthlydelivery",
+        ],
+        cwd=target,
+        env={**os.environ, "PYTHONPATH": str(target)},
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
 
 
 @pytest.fixture
@@ -22,8 +45,21 @@ def source(tmp_path, monkeypatch):
     monkeypatch.setattr(paper_release, "RESOURCES", ())
     subprocess.run(["git", "init", str(root)], check=True, capture_output=True)
     subprocess.run(["git", "add", "."], cwd=root, check=True, capture_output=True)
-    subprocess.run(["git", "-c", "user.name=Release Test", "-c", "user.email=test@example.invalid",
-                    "commit", "-m", "Fixture"], cwd=root, check=True, capture_output=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.name=Release Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "-m",
+            "Fixture",
+        ],
+        cwd=root,
+        check=True,
+        capture_output=True,
+    )
     return root
 
 
@@ -49,8 +85,12 @@ def test_dirty_candidate_cannot_masquerade_as_clean_release(source, tmp_path):
         paper_release.verify(tmp_path / "candidate", forged)
     from paper_qualification import assess
 
-    assessment = assess(tmp_path / "candidate", tmp_path / "evidence",
-                        tmp_path / "reports", tmp_path / "missing.sqlite3")
+    assessment = assess(
+        tmp_path / "candidate",
+        tmp_path / "evidence",
+        tmp_path / "reports",
+        tmp_path / "missing.sqlite3",
+    )
     assert assessment["checks"]["clean_release"] == "BLOCKED"
     assert assessment["paper_operations"] == "BLOCKED"
 
@@ -77,8 +117,11 @@ def test_hashed_locks_match_exact_pins_and_require_all_hashes():
     for name in ("paper", "dev"):
         plain = (root / f"requirements-{name}.lock").read_text()
         hashed = (root / f"requirements-{name}.hashed.lock").read_text()
-        expected = {line.strip() for line in plain.splitlines()
-                    if line.strip() and not line.startswith(("#", "-r"))}
+        expected = {
+            line.strip()
+            for line in plain.splitlines()
+            if line.strip() and not line.startswith(("#", "-r"))
+        }
         actual = set()
         for line in hashed.replace("\\\n", " ").splitlines():
             if not line or line.startswith(("#", "-r")):
@@ -86,9 +129,15 @@ def test_hashed_locks_match_exact_pins_and_require_all_hashes():
             tokens = line.split()
             actual.add(tokens[0])
             assert len(tokens) > 1
-            assert all(token.startswith("--hash=sha256:") and len(token) == 78 for token in tokens[1:])
+            assert all(
+                token.startswith("--hash=sha256:") and len(token) == 78
+                for token in tokens[1:]
+            )
         assert actual == expected
-    assert "-r requirements-paper.hashed.lock" in (root / "requirements-dev.hashed.lock").read_text()
+    assert (
+        "-r requirements-paper.hashed.lock"
+        in (root / "requirements-dev.hashed.lock").read_text()
+    )
 
 
 def test_lock_generation_fails_closed_on_yanked_or_invalid_metadata(tmp_path):

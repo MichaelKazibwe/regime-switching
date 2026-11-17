@@ -7,6 +7,11 @@ on:
   schedule:
     - cron: "23 8 * * 1"
   workflow_dispatch:
+    inputs:
+      generate_sbom:
+        description: Explicitly authorize optional SBOM generation
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -83,11 +88,12 @@ jobs:
       - name: Scan source and deployment configuration
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          version: v0.76.2
           scan-type: fs
           scan-ref: .
           scanners: secret,misconfig
-          format: sarif
-          output: security-reports/source-scan.sarif
+          format: json
+          output: security-reports/source-scan.json
           exit-code: "1"
           severity: CRITICAL,HIGH
 
@@ -124,6 +130,7 @@ jobs:
       - name: Scan paper image vulnerabilities
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          version: v0.76.2
           scan-type: image
           image-ref: regime-switching-paper:${{ github.sha }}
           scanners: vuln
@@ -133,8 +140,10 @@ jobs:
           severity: CRITICAL,HIGH
 
       - name: Generate image SBOM
+        if: github.event_name == 'workflow_dispatch' && inputs.generate_sbom == true
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
+          version: v0.76.2
           scan-type: image
           image-ref: regime-switching-paper:${{ github.sha }}
           scanners: vuln

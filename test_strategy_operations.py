@@ -6,6 +6,15 @@ import pytest
 from strategy_operations import observe
 
 
+@pytest.fixture
+def isolated_dashboard_template(tmp_path, monkeypatch):
+    template = tmp_path / "var/investor-dashboard"
+    template.mkdir(parents=True)
+    (template / "investor-dashboard.html").write_text("Synthetic wrapper-test template")
+    monkeypatch.chdir(tmp_path)
+    return template
+
+
 def test_forward_cohort_selection_preserves_legacy_and_rejects_paths(tmp_path):
     from forward_cohort import database
     from strategy_receipts import atomic_json
@@ -13,8 +22,11 @@ def test_forward_cohort_selection_preserves_legacy_and_rejects_paths(tmp_path):
     legacy = tmp_path / "prospective.sqlite3"
     legacy.write_bytes(b"preserve historical evidence")
     assert database(tmp_path) == legacy
-    record = dict(database="prospective-quarantine-v2.sqlite3",
-                  execution_enabled=False, promotion_enabled=False)
+    record = dict(
+        database="prospective-quarantine-v2.sqlite3",
+        execution_enabled=False,
+        promotion_enabled=False,
+    )
     atomic_json(tmp_path / "active-cohort.json", record)
     assert database(tmp_path) == tmp_path / record["database"]
     assert legacy.read_bytes() == b"preserve historical evidence"
@@ -31,12 +43,20 @@ def test_missing_macro_requires_exact_cash_quarantine():
     report = dict(
         latest_macro_available=False,
         classifier=dict(latest_forecast=dict(input_valid=False, enabled=False)),
-        strategies=[dict(candidate=dict(status="DATA_QUARANTINE_CASH_ONLY",
-                                       cash=1.0, weights={"SPY": 0.0}))],
+        strategies=[
+            dict(
+                candidate=dict(
+                    status="DATA_QUARANTINE_CASH_ONLY", cash=1.0, weights={"SPY": 0.0}
+                )
+            )
+        ],
     )
     assert macro_availability_handled(report, [{"macro_valid": False}])
-    for field, value in [("cash", 0.9), ("weights", {"SPY": 0.1}),
-                         ("status", "ALLOCATED")]:
+    for field, value in [
+        ("cash", 0.9),
+        ("weights", {"SPY": 0.1}),
+        ("status", "ALLOCATED"),
+    ]:
         bad = deepcopy(report)
         bad["strategies"][0]["candidate"][field] = value
         assert not macro_availability_handled(bad, [{"macro_valid": False}])
@@ -49,14 +69,18 @@ def test_missing_overlay_omits_only_unavailable_quarter_scenarios():
 
     macro = {"status": "UNAVAILABLE"}
     results = {str(i): {"latest_model": {}} for i in range(4)}
-    payload = dict(plans=[{"id": "saved"}],
-                   context={"plans": {"saved": {"latest_macro": macro}}},
-                   allocation_lab={"results": results})
+    payload = dict(
+        plans=[{"id": "saved"}],
+        context={"plans": {"saved": {"latest_macro": macro}}},
+        allocation_lab={"results": results},
+    )
     assert scenario_modes_valid(payload)
     results["0"]["Q1"] = {}
     assert not scenario_modes_valid(payload)
-    macro.update(status="LATEST_AVAILABLE_FRED_CONTEXT",
-                 quarterly=[{"quarter": f"Q{i}"} for i in range(1, 5)])
+    macro.update(
+        status="LATEST_AVAILABLE_FRED_CONTEXT",
+        quarterly=[{"quarter": f"Q{i}"} for i in range(1, 5)],
+    )
     assert not scenario_modes_valid(payload)
     for rows in results.values():
         rows.update({f"Q{i}": {} for i in range(1, 5)})
@@ -101,7 +125,9 @@ def test_observation_rejects_backfill_failure_and_rewrite(tmp_path):
     )
 
 
-def test_daily_wrapper_records_success_and_failure(tmp_path, monkeypatch):
+def test_daily_wrapper_records_success_and_failure(
+    tmp_path, monkeypatch, isolated_dashboard_template
+):
     import scheduled_strategy_validation as jobs
 
     import prospective_strategy_ledger
@@ -127,7 +153,9 @@ def test_daily_wrapper_records_success_and_failure(tmp_path, monkeypatch):
     assert (root / "job.lock").stat().st_mode & 0o777 == 0o600
 
 
-def test_refresh_passes_repository_cwd_to_bounded_worker(tmp_path, monkeypatch):
+def test_refresh_passes_repository_cwd_to_bounded_worker(
+    tmp_path, monkeypatch, isolated_dashboard_template
+):
     import scheduled_strategy_validation as jobs
     from pathlib import Path
 
@@ -194,7 +222,10 @@ def test_observation_window_restarts_for_changed_source_universe_protocol(tmp_pa
     old = {**evidence(), "observation_protocol": "old-contract"}
     observe(old, tmp_path, now=datetime(2026, 10, 30, 22, tzinfo=timezone.utc))
     original = (tmp_path / "2026-10-30.json").read_bytes()
-    new = {**evidence("2026-11-02", sha="c" * 64), "observation_protocol": "global-contract"}
+    new = {
+        **evidence("2026-11-02", sha="c" * 64),
+        "observation_protocol": "global-contract",
+    }
     result = observe(new, tmp_path, now=datetime(2026, 11, 2, 22, tzinfo=timezone.utc))
     assert result["observed_sessions"] == 1
     assert not result["observation_window_complete"]
@@ -205,10 +236,14 @@ def test_observation_window_restarts_for_changed_source_universe_protocol(tmp_pa
 def test_explicit_observation_stream_preserves_original_receipts(tmp_path):
     from forward_cohort import observations
     from strategy_receipts import atomic_json
-    assert observations(tmp_path) == tmp_path / 'observations'
-    atomic_json(tmp_path / 'active-cohort.json', dict(observation_directory='observations-global-v2'))
-    assert observations(tmp_path) == tmp_path / 'observations-global-v2'
-    for value in ['../observations', '/observations', 'other']:
-        atomic_json(tmp_path / 'active-cohort.json', dict(observation_directory=value))
+
+    assert observations(tmp_path) == tmp_path / "observations"
+    atomic_json(
+        tmp_path / "active-cohort.json",
+        dict(observation_directory="observations-global-v2"),
+    )
+    assert observations(tmp_path) == tmp_path / "observations-global-v2"
+    for value in ["../observations", "/observations", "other"]:
+        atomic_json(tmp_path / "active-cohort.json", dict(observation_directory=value))
         with pytest.raises(ValueError):
             observations(tmp_path)
