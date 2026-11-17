@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "expected_root_python_files": 411,
+  "expected_root_python_files": 413,
   "additional_research_and_pilot_modules": [
     "assess_return_engine_robustness.py",
     "assetroles.py",
@@ -172,7 +172,9 @@
     "verify_live_dashboard.py",
     "weekly_portfolio_report.py",
     "weekly_portfolios.py",
-    "writer_fencing.py"
+    "writer_fencing.py",
+    "macro_alpha.py",
+    "test_macro_alpha.py"
   ],
   "additional_test_modules": [
     "test_compare_portfolio_models.py",

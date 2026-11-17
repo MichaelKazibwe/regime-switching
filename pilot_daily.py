@@ -125,6 +125,11 @@ def tick(root=Path("var/pilot-daily"), now=None, publish_vm=False):
                           retained_session=pointer["market_session"])
             atomic_json(root / "heartbeat.json", result)
             return result
+        from macro_alpha import build as macro_build, record as macro_record
+        bundle = strict_json(pointer['bundle'])
+        alpha = macro_build(bundle['capture'], bundle['training_report'])
+        macro_record(alpha, strict_json(Path(bundle['training_report']).parent / 'features.json'),
+                     'var/macro-alpha', now=now)
         benchmark_pointer = Path("var/cycle-benchmark/latest.json")
         benchmark = None
         if benchmark_pointer.is_file():
@@ -136,7 +141,9 @@ def tick(root=Path("var/pilot-daily"), now=None, publish_vm=False):
             if any(file_hash(p) != h for p, h in evidence["source_hashes"].items()):
                 raise ValueError("Cycle benchmark sources are stale")
         key = fingerprint(dict(document=pointer["document_sha256"], bundle=pointer["bundle_sha256"],
-                               benchmark=file_hash(benchmark) if benchmark else None))
+                               benchmark=file_hash(benchmark) if benchmark else None,
+                               macro_alpha_source=file_hash("macro_alpha.py"),
+                               macro_alpha_forecast=alpha["forecast_id"]))
         directory = root / "snapshots" / key
         if not directory.exists():
             directory.parent.mkdir(parents=True, exist_ok=True)

@@ -26,7 +26,7 @@ REGIONS = {"VEA": "Developed ex-US", "VWO": "Emerging markets", "EWJ": "Japan",
            "SLV": "Global real assets", "DBC": "Global real assets", "DBMF": "Global futures"}
 SOURCES = ("weekly_portfolios.py", "weekly_portfolio_report.py", "investmentcatalog.py",
            "global_asset_registry.py", "research/global_asset_registry.json",
-           "global_market_panel.py",
+           "global_market_panel.py", "macro_alpha.py", "macro_feature_contract.py", "macrovintage.py",
            "portfolio_contract.py", "global_market_calendar.py", "strategy_training_data.py")
 
 
@@ -233,7 +233,7 @@ def build(prices, session):
             "Universe survivorship, short history, parameter choices, currency exposure and overlapping holdings may bias results.",
             "Geographic labels describe registered exposure mandates or issuer locations, not verified country look-through. US listings do not imply US-only underlying holdings.",
             "Historical replay is causal but has no untouched policy-selection holdout; no demonstrated forecasting advantage.",
-            "Macro-regime probabilities are unavailable when upstream macro inputs fail validation; no macro alpha is assumed."])
+            "Full-input macro activation remains gated; the separate partial-input research monitor never overrides these allocations."])
 
 
 def verify(root):
@@ -309,6 +309,8 @@ def run(bundle, output, now=None):
         growth={k: dashboard["growth_resilience"][k] for k in ("name", "status", "weights", "metrics", "start", "end", "limitations")},
         dynamic_status=dashboard.get("dynamic_portfolio", {}).get("snapshot", {}).get("status", "UNAVAILABLE"),
         engine_status=dashboard.get("return_engines", {}).get("status", "UNAVAILABLE"))
+    from macro_alpha import build as macro_build
+    data['macro_alpha_monitor'] = macro_build(b['capture'], b['training_report'])
     data["input_evidence"] = dict(bundle_sha256=file_hash(bundle), capture_sha256=file_hash(b["capture"]),
                                   training_sha256=file_hash(b["training_report"]))
     data["research_id"] = fingerprint(data)

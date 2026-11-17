@@ -131,6 +131,12 @@ def snapshot(source_root, destination, pointer, benchmark=None):
                 capture="market/capture.json", training_report="training/training-report.json"))
     if benchmark:
         private_copy(benchmark, destination / "benchmark.json")
+    from macro_alpha import build as macro_build
+    alpha = macro_build(b['capture'], b['training_report'])
+    recorded = source_root / 'var/macro-alpha/latest.json'
+    monitored = strict_json(recorded) if recorded.is_file() else {}
+    atomic_json(destination / 'macro-alpha.json', dict(forecast=alpha,
+                monitoring=monitored.get('monitoring') if monitored.get('forecast', {}).get('forecast_id') == alpha['forecast_id'] else None))
     from dashboard_runtime import runtime
     atomic_json(destination / "monitoring-runtime.json", runtime(source_root / "var"))
     files = {str(p.relative_to(destination)): file_hash(p) for p in destination.rglob("*") if p.is_file()}

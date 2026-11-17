@@ -10,6 +10,7 @@ Python portfolio research, chronological regime forecasting, risk controls, pape
 - [Local VM dashboard and login setup](LOCAL_VM_PILOT.md)
 - [Dashboard accuracy audit](DASHBOARD_ACCURACY_AUDIT_20261115.md)
 - [Interactive terminal and navigation guide](DASHBOARD_TERMINAL_UPGRADE.md)
+- [Macro alpha testing monitor](MACRO_ALPHA_MONITORING.md)
 - [Daily alpha research training](DAILY_ALPHA_TRAINING.md)
 - [Completed performance experiments](PERFORMANCE_IMPROVEMENTS_EXECUTION.md)
 - [Business-cycle benchmark](CYCLE_BENCHMARK_GUIDE.md)

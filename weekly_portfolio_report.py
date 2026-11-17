@@ -104,6 +104,18 @@ def report_pdf(data, output):
         paragraph(f"Bound dashboard document SHA-256: {context['document_sha256']}")
     story.append(PageBreak())
     paragraph("Review and evidence", "Title")
+    alpha = data.get('macro_alpha_monitor')
+    if alpha:
+        paragraph("Shared macro alpha research monitor", "Heading2")
+        paragraph(f"Signal session {alpha['market_session']}; {alpha['status']}. Separate from weekly candidate weights. "
+                  "Experimental 63-session released-condition regime probabilities; no demonstrated forecasting advantage.")
+        table([["Regime", "Research probability", "Frequency baseline"]] + [
+            [name.replace('_', ' '), pct(alpha['prediction']['probabilities'][i]) if alpha['prediction']['probabilities'] else 'Unavailable',
+             pct(alpha['prediction']['baseline'][i])] for i,name in enumerate(alpha['regimes'])], [250,125,125])
+        paragraph('Included components: ' + ', '.join(alpha['prediction']['feature_names']))
+        for name,reason in alpha['missing_components'].items():
+            paragraph(f"Excluded {name}: {reason}")
+        paragraph('Research monitoring only. Portfolio alpha activation, risk controls and execution gates are unchanged.')
     paragraph("Before adopting a candidate, review holding period, liquidity needs, tax, product availability, "
               "currency exposure, overlapping underlying holdings, concentration and ability to bear loss. "
               "This report records research only; it does not record client approval.")

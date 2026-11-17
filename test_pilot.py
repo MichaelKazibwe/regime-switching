@@ -178,6 +178,7 @@ def test_daily_status_retains_failed_update_then_reports_new_version(service, mo
 
 def test_macro_monitor_requires_auth_and_source_bound_inputs(service):
     _, request = service
+    assert request("/api/macro-alpha")[0] == 401
     assert request("/api/macro-monitor")[0] == 401
     cookie, _ = sign_in(request, "viewer@example.test")
     assert request("/api/macro-monitor", cookie=cookie)[0] == 503

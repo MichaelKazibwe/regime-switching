@@ -104,6 +104,20 @@ def run(origin, output, *, browsers=("chromium", "firefox", "webkit")):
                     page.clock.fast_forward(60000)
                 expect(page.locator('#pilot-account')).to_contain_text('alice@example.test', timeout=90000)
                 expect(page.locator('[data-panel="weekly"]')).to_be_visible()
+            if os.environ.get('PILOT_REQUIRE_MACRO_ALPHA') == '1':
+                expect(page.locator('#macro-alpha-global')).to_contain_text('testing', timeout=30000)
+                alpha = page.request.get(origin + '/api/macro-alpha').json()
+                f = alpha['forecast']
+                assert f['monitoring_enabled'] and not f['portfolio_activation_enabled'] and not f['execution_enabled']
+                assert abs(sum(f['prediction']['probabilities']) - 1) < 1e-9
+                assert set(f['components']).isdisjoint(f['missing_components'])
+                for path in ['/api/dashboard', '/api/benchmark', '/api/observations', '/api/weekly']:
+                    assert page.request.get(origin + path).json()['macro_alpha']['forecast']['forecast_id'] == f['forecast_id']
+                page.locator('#macro-alpha-global').click()
+                expect(page.locator('#macro-alpha-panel')).to_be_visible()
+                expect(page.locator('#macro-alpha-probabilities tr')).to_have_count(4)
+                expect(page.locator('#macro-alpha-inputs tr')).to_have_count(4)
+                expect(page.locator('#macro-alpha-outcomes')).to_contain_text('pending')
             sections = page.locator("[data-view]").evaluate_all("nodes=>nodes.map(n=>n.dataset.view)")
             visited = []
             navigation_ms = []

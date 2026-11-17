@@ -22,3 +22,5 @@ body{background:#f4f6fb;color:var(--terminal-ink);font-size:14px;letter-spacing:
 [data-panel="macro"] .macro-monitor-scroll{max-height:540px;overflow:auto}[data-panel="macro"] #macro-monitor-daily td{min-width:105px;vertical-align:top}[data-panel="macro"] #macro-monitor-daily td:nth-child(9){min-width:220px}[data-panel="macro"] #macro-monitor-daily td:last-child{min-width:170px}#macro-monitor-daily,#macro-monitor-quarterly{font-variant-numeric:tabular-nums}#macro-monitor-daily td,#macro-monitor-quarterly td{overflow-wrap:normal;word-break:normal}#macro-monitor-quarterly td{white-space:nowrap}.macro-monitor-scroll table{min-width:1450px;table-layout:auto}.macro-monitor-scroll thead{position:sticky;top:0;z-index:1}#macro-monitor-cards .indicator-card p,#macro-monitor-id{overflow-wrap:anywhere}.macro-monitor-archive>summary{font-weight:650;padding:10px;cursor:pointer}.macro-monitor-archive>.panel{margin-top:18px}
 
 .macro-monitor-quarter-scroll table{min-width:1250px;table-layout:auto}
+
+.research-alpha-banner{display:block;max-width:100%;white-space:normal;text-align:left;margin:12px 0;line-height:1.5}

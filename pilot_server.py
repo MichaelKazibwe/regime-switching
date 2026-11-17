@@ -98,7 +98,7 @@ class Pilot:
                 raise ValueError("Portable daily macro evidence unavailable")
             launch = strict_json(root / "launch.json")
             self.macro_monitor_cache = (key, build(root / launch["capture"], root / launch["training_report"]))
-        return {**self.macro_monitor_cache[1], "stale": self.application.payload["training"]["market_session"] != str(usable_session(datetime.now(timezone.utc)).date()),
+        return {**self.macro_monitor_cache[1], "macro_alpha": self.macro_alpha_payload(), "stale": self.application.payload["training"]["market_session"] != str(usable_session(datetime.now(timezone.utc)).date()),
                 "update_error": self.application.refresh_error}
 
     def refresh(self):
@@ -152,6 +152,19 @@ class Pilot:
         while len(self.users) > 64:
             self.users.popitem(last=False)
         return self.users[key][1]
+
+    def macro_alpha_payload(self):
+        root = Path(self.daily_root) / self.daily_revision if self.daily_root and self.daily_revision else self.snapshot_root
+        if not root or not (root / 'macro-alpha.json').is_file():
+            return dict(status='UNAVAILABLE', monitoring_enabled=True, execution_enabled=False)
+        data = strict_json(root / 'macro-alpha.json')
+        forecast = data['forecast']
+        from strategy_integrity import fingerprint
+        if (fingerprint({k:v for k,v in forecast.items() if k != 'forecast_id'}) != forecast['forecast_id']
+                or any(file_hash(p) != h for p,h in forecast['source_hashes'].items())
+                or forecast['execution_enabled'] is not False or forecast['portfolio_activation_enabled'] is not False):
+            raise ValueError('Macro alpha evidence mismatch')
+        return {**data, 'stale': forecast['market_session'] != str(usable_session(datetime.now(timezone.utc)).date())}
 
     def benchmark_payload(self):
         root = Path(self.daily_root) / self.daily_revision if self.daily_root and self.daily_revision else self.snapshot_root
@@ -312,9 +325,13 @@ def handler(pilot):
                     with app.lock:
                         pilot.refresh()
                         source = Path(pilot.daily_root) / pilot.daily_revision / "monitoring-runtime.json" if pilot.daily_root and pilot.daily_revision else None
-                        self.json(strict_json(source) if source and source.is_file() else runtime())
+                        self.json({**(strict_json(source) if source and source.is_file() else runtime()), "macro_alpha": pilot.macro_alpha_payload()})
                 elif self.path == "/api/benchmark":
-                    self.json(pilot.benchmark_payload())
+                    self.json({**pilot.benchmark_payload(), "macro_alpha": pilot.macro_alpha_payload()})
+                elif self.path == "/api/macro-alpha":
+                    with app.lock:
+                        pilot.refresh()
+                        self.json(pilot.macro_alpha_payload())
                 elif self.path == "/api/macro-monitor":
                     with app.lock:
                         pilot.refresh()
@@ -330,14 +347,14 @@ def handler(pilot):
                         if self.path.endswith("/pdf"):
                             self.send((root / "dashboard-report.pdf").read_bytes(), kind="application/pdf")
                         else:
-                            self.json(weekly)
+                            self.json({**weekly, "macro_alpha": pilot.macro_alpha_payload()})
                 elif self.path in {"/api/dashboard", "/api/dashboard-status", "/readyz"}:
                     with app.lock:
                         pilot.refresh()
                         market_session = app.payload["training"]["market_session"]
                         stale = market_session != str(usable_session(datetime.now(timezone.utc)).date())
                         if self.path == "/api/dashboard":
-                            self.json(app.payload)
+                            self.json({**app.payload, "macro_alpha": pilot.macro_alpha_payload()})
                         else:
                             self.json(dict(version=app.payload["training"]["run_id"],
                                            market_session=market_session, stale=stale,

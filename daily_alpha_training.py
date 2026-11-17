@@ -20,7 +20,7 @@ from strategy_report import load_training_report
 from strategy_training_data import usable_session
 
 ROOT = Path(__file__).resolve().parent
-SOURCES = ("daily_alpha_training.py", "performance_forecast_calendar.py", "performance_forecasts.py",
+SOURCES = ("daily_alpha_training.py", "macro_alpha.py", "performance_forecast_calendar.py", "performance_forecasts.py",
            "global_asset_registry.py", "research/global_asset_registry.json",
            "live_strategy_training.py", "forecast_calibration.py", "fourregimestrategies.py",
            "research/four_macro_strategies.json")
@@ -70,6 +70,9 @@ def train(bundle, output):
     settings = strict_json("research/four_macro_strategies.json")["macro_forecast"]
     model = fit_latest(features, settings, evaluation["selected_on_validation"])
     atomic_json(output / "model.json", model, exclusive=True)
+    from macro_alpha import build as macro_build
+    macro_monitor = macro_build(b['capture'], b['training_report'])
+    atomic_json(output / 'macro-alpha.json', macro_monitor, exclusive=True)
     if any(file_hash(p) != h for p, h in sources.items()):
         raise ValueError("Training source changed during run")
     result = dict(status="COMPLETED_DAILY_RESEARCH_TRAINING", completed_at=datetime.now(timezone.utc).isoformat(),
@@ -77,6 +80,7 @@ def train(bundle, output):
                   features_sha256=file_hash(features_path), source_hashes=sources,
                   trained=model["trained"], training_examples=model["model_parameters"]["training_examples"],
                   current_forecast_status=model["current_forecast_status"],
+                  macro_alpha_monitoring_enabled=True, macro_alpha_status=macro_monitor['status'],
                   historical_screen_passed=evaluation["candidate_gate_passed"],
                   prospective_confirmation_required=True, promotion_enabled=False, execution_enabled=False,
                   artifacts={p.name: file_hash(p) for p in output.iterdir() if p.is_file()})
