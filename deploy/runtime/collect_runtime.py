@@ -77,7 +77,7 @@ def collect(root=Path('/runtime'), local=Path('/usr/local')):
         name = package.split(':', 1)[0]
         copyright_file = Path('/usr/share/doc')/name/'copyright'
         if copyright_file.is_file():
-            target = root/'usr/share/doc'/name/'copyright'
+            target = root/'usr/local/share/regime/licenses'/name/'copyright'
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(copyright_file, target)
     print(json.dumps(dict(packages=sorted(packages), libraries=sorted(map(str, copied)))))
