@@ -13,6 +13,21 @@ def dependencies(text):
     return {Path(word) for line in text.splitlines() for word in line.strip().split() if word.startswith('/')}
 
 
+def copy_native(source, root):
+    """Preserve loader execution permission and merged-/usr SONAME aliases."""
+    target = root/str(source.resolve()).lstrip('/')
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, target)
+    relative = str(source).lstrip('/')
+    if str(source).startswith('/lib/'):
+        relative = 'usr/' + relative
+    alias = root/relative
+    alias.parent.mkdir(parents=True, exist_ok=True)
+    if alias != target:
+        shutil.copy2(source, alias)
+    return target
+
+
 def collect(root=Path('/runtime'), local=Path('/usr/local')):
     root.mkdir(exist_ok=False)
     for stem in EXCLUDED_EXTENSIONS:
@@ -33,16 +48,7 @@ def collect(root=Path('/runtime'), local=Path('/usr/local')):
         for source in dependencies(linked.stdout):
             if str(source).startswith('/usr/local/') or source in copied:
                 continue
-            target = root/str(source.resolve()).lstrip('/')
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(source, target)
-            relative = str(source).lstrip('/')
-            if str(source).startswith('/lib/'):
-                relative = 'usr/' + relative
-            alias = root/relative
-            alias.parent.mkdir(parents=True, exist_ok=True)
-            if alias != target:
-                shutil.copy2(source, alias)
+            copy_native(source, root)
             copied.add(source)
             result = subprocess.run(['dpkg-query', '-S', str(source.resolve())], text=True, capture_output=True, timeout=30)
             if result.returncode:
@@ -55,6 +61,12 @@ def collect(root=Path('/runtime'), local=Path('/usr/local')):
         path = root/'var/lib/dpkg/status.d'/package.replace(':', '_')
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(metadata)
+        name = package.split(':', 1)[0]
+        copyright_file = Path('/usr/share/doc')/name/'copyright'
+        if copyright_file.is_file():
+            target = root/'usr/share/doc'/name/'copyright'
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(copyright_file, target)
     print(json.dumps(dict(packages=sorted(packages), libraries=sorted(map(str, copied)))))
 
 
