@@ -1,8 +1,38 @@
-# Project review execution register — 17 November 2026
+# Project review execution register — updated 18 November 2026
 
 The 32-item source review is [PROJECT_REVIEW_20261117.md](PROJECT_REVIEW_20261117.md). All findings now have an implementation or an explicit evidence/scope disposition below. **This does not mean all original institutional/public-release acceptance criteria are closed.** The current authorized scope is a free, local, invitation-only research pilot. Execution and automatic promotion remain disabled.
 
 No paid server, domain, data subscription or storage account was created. Remote commercial access and externally qualified recovery are not represented as completed.
+
+
+## Current execution status — 18 November 2026
+
+This dated update supersedes the installed-image, security and operator-step status in the historical sections below. The free local invitation-only pilot remains at http://127.0.0.1:8782/; execution and automatic promotion remain disabled. Institutional/public release is not approved.
+
+- Installed image: `sha256:5d42a323ea425a77fb2805c59340b5c0dee810a0f72e0d5ec3d3fd489434cc4c`; source release `86a7c68ef2899a0bef9846bc4feb3d6d11ed36727d185e62a9b2f19d219f3340`. All 200 shipped source files match the reviewed main revision; later CI/documentation changes do not alter that runtime.
+- All 10 final local runtime checks and four feature-readiness checks pass. The complete daily/weekly/alpha/monitoring pipeline completed without waiting stages. Completed market session: November 17; weekly portfolio price cutoff: November 13, with daily macro context dated separately.
+- Full host backend regression: 1,511 passed, followed by passing targeted release, native-runtime and recovery regressions. Genuine-data Chromium/WebKit acceptance passes, covering desktop/mobile views, state-dependent calculations, roles, scenarios, PDF/downloads and refresh. Four-reader sampled API p95 was approximately 1.05 seconds; this is a local sampled workload, not a WAN/service-scale qualification.
+- The final exact-image scan passes the declared HIGH/CRITICAL threshold with zero findings at those severities, using the November 18 vulnerability database. Lower-severity findings remain tracked. No findings were waived, no threshold was lowered, and no SBOM was requested/generated. The runtime uses digest-pinned distroless Debian 13 and verified SQLite 3.54.1; release identities bind the native security inputs.
+- Hosted checks pass on `a87e8dcd957bf27a5b16b9bbb255826a7474ca1e`: [pilot](https://github.com/MichaelKazibwe/regime-switching/actions/runs/44340419567), [paper](https://github.com/MichaelKazibwe/regime-switching/actions/runs/44340419433), [managed paper](https://github.com/MichaelKazibwe/regime-switching/actions/runs/44340419287), [recommendations](https://github.com/MichaelKazibwe/regime-switching/actions/runs/44340419240). These replace earlier failed-run status below.
+- Coordinated recovery acquires all 10 registered host writer locks, stops application writers for export and restarts the pilot in a finally block. The final archive includes four VM volumes, host monitoring/cohort streams, the matching image source context and the allowlisted operator restore code with locked dependencies. Local decryption, database integrity, archived-operator-source restoration and isolated exact-image Linux restoration pass. The final encrypted archive was uploaded to Proton and downloaded with a matching SHA-256; its downloaded-copy exact-image Linux restore also passed. Account metadata and all three monitoring cohorts survived; copied sessions were revoked only in the isolated restored copy. Independent physical-device recovery remains untested.
+- VM build-disk exhaustion was resolved by removing unused build cache and identified disposable build remnants; deployed data volumes and rollback images were preserved. The browser runner then built and passed acceptance.
+
+### Remaining evidence and owner requirements
+
+All 32 review findings have a recorded implementation or evidence/scope disposition. The following acceptance criteria remain open; engineering checks cannot substitute for them:
+
+1. Owner must directly enroll Proton MFA and store recovery codes privately. Requiring a security-key PIN alone does not enroll a key or enable MFA. Browser policy requires owner entry and submission of new authentication credentials.
+2. Keep a separately protected recovery-key copy away from both this Mac and the cloud backup account. Complete a fresh-host/independent-physical-device disaster restore; same-Mac isolated Linux recovery is narrower evidence.
+3. Complete actual owner/independent source and client-data-access rights review. Free software and official macro data do not grant securities-data redistribution rights.
+4. Supply actual independent aligned total-return prices, corporate actions/currencies, historical membership/delistings and dated issuer look-through holdings for admitted assets. Macro authorities cannot qualify securities prices or fund holdings.
+5. Allow genuinely future observations and monthly/quarterly/annual outcomes to mature. The current small prospective sample does not establish alpha, optimal allocations or calibrated forecasts. Missing required macro observations remain unavailable rather than imputed.
+6. External identity, valid HTTPS, firewall and remote-host qualification apply before expanding beyond the authorized local pilot. No paid domain, VM or data subscription is required for the present local test.
+
+See [PILOT_GATE_REQUIREMENTS.md](PILOT_GATE_REQUIREMENTS.md) for concrete inputs and free operator procedures. Detailed local evidence lives under `var/project-review/`; it is not committed or published.
+
+## Historical execution receipts — November 17
+
+The sections below retain their original image, test and gate status as dated history; use the November 18 update above for current status.
 
 ## Engineering and research evidence
 
