@@ -1,6 +1,7 @@
 """Copy required native libraries with permissions and Debian scan metadata."""
 from pathlib import Path
 import json
+import os
 import shutil
 import subprocess
 
@@ -41,11 +42,23 @@ def collect(root=Path('/runtime'), local=Path('/usr/local')):
         if path.is_dir():
             shutil.rmtree(path)
     packages, copied = set(), set()
-    for path in [local/'bin/python3.12', *local.rglob('*.so'), *local.rglob('*.so.*')]:
+    native = [*local.rglob('*.so'), *local.rglob('*.so.*')]
+    # Wheel-internal libraries may resolve siblings via their loading parent.
+    # Give standalone ldd inspection those existing bundled directories too;
+    # this environment is never installed as the application's search path.
+    inspect_environment = dict(os.environ)
+    inspect_environment['LD_LIBRARY_PATH'] = os.pathsep.join([
+        str(local/'lib'), *sorted({str(path.parent) for path in native}),
+    ])
+    for path in [local/'bin/python3.12', *native]:
         if not path.is_file():
             continue
-        linked = subprocess.run(['ldd', str(path)], text=True, capture_output=True, timeout=30)
-        for source in dependencies(linked.stdout):
+        linked = subprocess.run(['ldd', str(path)], text=True, capture_output=True, timeout=30, env=inspect_environment)
+        try:
+            required = dependencies(linked.stdout)
+        except ValueError as error:
+            raise ValueError(str(path)+': '+str(error)) from error
+        for source in required:
             if str(source).startswith('/usr/local/') or source in copied:
                 continue
             copy_native(source, root)
