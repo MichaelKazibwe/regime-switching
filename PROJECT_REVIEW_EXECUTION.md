@@ -1,11 +1,31 @@
 # Project review execution register — updated 18 November 2026
 
+## Latest installed adaptive allocation release — 18 November 2026
+
+This update supersedes the installed-state entries below. Their image and recovery receipts remain dated historical evidence.
+
+The invitation-only local pilot at http://127.0.0.1:8782/#weekly now runs image `sha256:a867251d5f2e3de3209e13da4f1e777b7873519d231c9944c052631cda962a46`, source release `9deaacbc9fa99406e05a1ead77f41d7afd62c86145b621ffa182f63d7777260c`, from source commit `ecba72dbfdf5e18ca9c23a9ca9f36fd07ffb28a8`. All 200 shipped files match the tested source. The existing account, old input trees and rollback pointers were preserved.
+
+Weekly horizon candidates now fit uncertainty-shrunk current-market return/covariance inputs, allow variable holding counts and independently enforce a 35% maximum positive signed variance contribution. The new adaptive aggregate fits its horizon proportions plus additional cash from those market inputs. The daily dynamic strategy also fits its engine proportions; its revised prospective cohort is separate from the old design. See [the allocation method and safeguards](ADAPTIVE_PORTFOLIOS.md).
+
+- Final backend regression: **1,519 passed**. Chromium and WebKit acceptance passed on genuine data against the exact installed image, including all four weekly candidates, matching allocations/projections, comparison tables, refresh failure/recovery, roles, review controls and PDFs. The live Safari weekly page was separately observed after installation.
+- The completed market session is **November 18**; weekly decision prices correctly remain at the completed week of **November 13**. The complete collection, benchmark, daily alpha, daily publication and weekly publication pipeline completed with no waiting stages. All **10 runtime checks** and **four feature-readiness checks** pass.
+- Exact installed image security: **zero HIGH/CRITICAL findings** using the fresh November 18 database. Lower-severity findings remain separately tracked; no waivers or SBOM were introduced.
+- All hosted release-code workflows pass: [pilot](https://github.com/MichaelKazibwe/regime-switching/actions/runs/44405899664), [paper](https://github.com/MichaelKazibwe/regime-switching/actions/runs/44405899522), [managed paper](https://github.com/MichaelKazibwe/regime-switching/actions/runs/44405899575), [recommendations](https://github.com/MichaelKazibwe/regime-switching/actions/runs/44405900782).
+- Sampled local four-reader API load budget passes, p95 approximately **1.70 seconds**. This excludes WAN, sustained mixed optimizer/export load and broad scalability claims. Local browser acceptance reused a previously qualified toolchain after verifying identical dependency-lock hashes and copying the final sources/tests; the redundant download build was stopped. The canonical hosted build and browser checks also pass.
+- The updated **14-page PDF** includes the aggregate proportions, holdings, risk shares, stress results, projections and dated dashboard context. Recommendations remain subject to client research review; the optimizer does not establish future outperformance or loss limits.
+
+Detailed private evidence: `var/project-review/adaptive-allocations/`. The prior encrypted off-host recovery point remains a dated earlier release, not a new backup of this upgrade. Owner MFA, independent-device recovery, source/data-access rights, independent market evidence and sufficiently matured outcomes retain their separate requirements in [PILOT_GATE_REQUIREMENTS.md](PILOT_GATE_REQUIREMENTS.md). Trading, automatic promotion and production approval remain disabled.
+
+## Earlier review and release evidence
+
+
 The 32-item source review is [PROJECT_REVIEW_20261117.md](PROJECT_REVIEW_20261117.md). All findings now have an implementation or an explicit evidence/scope disposition below. **This does not mean all original institutional/public-release acceptance criteria are closed.** The current authorized scope is a free, local, invitation-only research pilot. Execution and automatic promotion remain disabled.
 
 No paid server, domain, data subscription or storage account was created. Remote commercial access and externally qualified recovery are not represented as completed.
 
 
-## Current execution status — 18 November 2026
+## Earlier execution status — 18 November 2026
 
 This dated update supersedes the installed-image, security and operator-step status in the historical sections below. The free local invitation-only pilot remains at http://127.0.0.1:8782/; execution and automatic promotion remain disabled. Institutional/public release is not approved.
 
