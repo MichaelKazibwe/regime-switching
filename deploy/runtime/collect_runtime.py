@@ -19,7 +19,7 @@ def copy_native(source, root):
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, target)
     relative = str(source).lstrip('/')
-    if str(source).startswith('/lib/'):
+    if source.parts[1] in {'lib', 'lib64', 'lib32'}:
         relative = 'usr/' + relative
     alias = root/relative
     alias.parent.mkdir(parents=True, exist_ok=True)
