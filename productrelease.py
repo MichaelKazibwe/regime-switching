@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 from clientmandate import aware_time
-from paper_release import safe_file, sha256
+from paper_release import safe_file, sha256, RUNTIME_RESOURCES
 
 
 PRODUCT_CHECKS = (
@@ -20,7 +20,7 @@ PRODUCT_CHECKS = (
     "operations_recovery",
     "owner_signoff",
 )
-PRODUCT_SOURCES = (
+PRODUCT_SOURCES = RUNTIME_RESOURCES + (
     "global_asset_registry.py",
     "global_market_panel.py",
     "research/global_asset_registry.json",
