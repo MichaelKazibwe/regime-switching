@@ -13,6 +13,7 @@ import time
 from forward_cohort import database, observations
 from pilot_recovery import backup, restore
 from pilot_release import verify_context
+from paper_release import runtime_sources, safe_file, RUNTIME_RESOURCES
 from pilot_snapshot_locks import quiesce, WRITER_LOCKS
 from research_publisher import docker_command
 from strategy_receipts import atomic_json
@@ -88,6 +89,19 @@ def snapshot(output, source_context, key, *, root=Path.cwd()):
                 paths[name.replace("-", "_")] = target
             shutil.copytree(source_context, components / "reviewed_source")
             paths["reviewed_source"] = components / "reviewed_source"
+            operator = components / "operator_source"
+            operator.mkdir(mode=0o700)
+            operator_files = runtime_sources(root, entries=("pilot_recovery", "pilot_snapshot")) | set(RUNTIME_RESOURCES) | {
+                "requirements-ops.hashed.lock", "requirements-paper.hashed.lock",
+                "deploy/pilot/local-vm.sh", "deploy/pilot/compose.local.yaml",
+                "compose.pilot.yaml", "deploy/pilot/Caddyfile", ".dockerignore",
+                "OFFICIAL_DATA_AND_BACKUP_PLAN.md", "PILOT_GATE_REQUIREMENTS.md",
+            }
+            for name in sorted(operator_files):
+                target = operator / name
+                target.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                shutil.copyfile(safe_file(root, name), target)
+            paths["operator_source"] = operator
             atomic_json(output / "quiescence.json", dict(status="REGISTERED_WRITERS_QUIESCED",
                 started_at=began, captured_at=datetime.now(timezone.utc).isoformat(),
                 lock_protocols=list(WRITER_LOCKS), lock_count=len(held), app_stopped=True,
