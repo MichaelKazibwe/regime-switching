@@ -3,7 +3,6 @@ ARG PYTHON_BASE_IMAGE=python:3.12-slim-trixie@sha256:5e2bdb1b0d542d5039cffb8181c
 FROM ${PILOT_BASE_IMAGE} AS application
 FROM ${PYTHON_BASE_IMAGE}
 COPY --from=application /usr/local/ /usr/local/
-COPY --from=application /app/ /app/
 ENV LD_LIBRARY_PATH=/usr/local/lib
 WORKDIR /app
 USER root
@@ -12,6 +11,7 @@ COPY requirements-browser.hashed.lock /app/requirements-browser.hashed.lock
 RUN python -m pip install --no-cache-dir --no-deps --require-hashes -r /app/requirements-browser.hashed.lock
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 RUN python -m playwright install --with-deps chromium webkit && chmod -R a+rX /ms-playwright
+COPY --from=application /app/ /app/
 COPY pilot_browser_test.py /app/pilot_browser_test.py
 USER 10001:10001
 ENTRYPOINT ["python", "pilot_browser_test.py"]
