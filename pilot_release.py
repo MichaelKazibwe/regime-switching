@@ -232,7 +232,8 @@ def stage(root, destination, *, allow_dirty=False, pointer=None, benchmark=None,
     paths |= set(report.get("source_hashes", {})) | set(seal.get("source_hashes", {}))
     paths |= {str(x.relative_to(root)) for folder in ["dashboard", "pilot", "research"]
               for x in (root / folder).glob("*") if x.is_file() and x.suffix in {".json", ".html", ".css", ".js"}}
-    paths |= {"requirements-paper.hashed.lock", "Dockerfile.pilot", ".dockerignore"}
+    from paper_release import RUNTIME_RESOURCES
+    paths |= {"requirements-paper.hashed.lock", "Dockerfile.pilot", ".dockerignore"} | set(RUNTIME_RESOURCES)
     image = destination / "image"
     image.mkdir(parents=True, mode=0o700)
     for name in sorted(paths):

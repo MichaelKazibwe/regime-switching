@@ -52,10 +52,10 @@ def run(app_image, browser_image, fixture, output):
                     [],
                 ),
                 "--entrypoint",
-                "sh",
+                "python",
                 app_image,
                 "-c",
-                "chown -R 10001:10001 /inputs /daily /weekly /qa",
+                "from pathlib import Path; import os; roots=[Path(p) for p in ['/inputs','/daily','/weekly','/qa']]; [os.chown(p,10001,10001,follow_symlinks=False) for root in roots for p in [root,*root.rglob('*')]]",
             ]
         )
         for local, volume in [

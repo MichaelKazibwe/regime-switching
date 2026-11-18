@@ -1,5 +1,11 @@
 ARG PILOT_BASE_IMAGE
-FROM ${PILOT_BASE_IMAGE}
+ARG PYTHON_BASE_IMAGE=python:3.12-slim-trixie@sha256:5e2bdb1b0d542d5039cffb8181c65930093949194a65c365dfb1b0fe13a4fa5b
+FROM ${PILOT_BASE_IMAGE} AS application
+FROM ${PYTHON_BASE_IMAGE}
+COPY --from=application /usr/local/ /usr/local/
+COPY --from=application /app/ /app/
+ENV LD_LIBRARY_PATH=/usr/local/lib
+WORKDIR /app
 USER root
 RUN apt-get update && apt-get install --no-install-recommends -y libatomic1 && rm -rf /var/lib/apt/lists/*
 COPY requirements-browser.hashed.lock /app/requirements-browser.hashed.lock

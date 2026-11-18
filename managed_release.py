@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import tempfile
 
-from paper_release import safe_file, verify, sha256
+from paper_release import safe_file, verify, sha256, RUNTIME_RESOURCES
 from strategy_integrity import fingerprint
 
 ROOTS = (
@@ -70,7 +70,7 @@ def stage(root, destination, *, allow_dirty=False):
 
     paths = (
         sources(root, (*ROOTS, *(p[:-3] for p in SOURCES if p.endswith('.py'))))
-        | set(SOURCES)
+        | set(SOURCES) | set(RUNTIME_RESOURCES)
         | {
             "Dockerfile.managed-paper",
             "MANAGED_PAPER_RUNBOOK.md",

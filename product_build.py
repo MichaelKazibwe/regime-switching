@@ -7,7 +7,7 @@ from pathlib import Path
 import shutil
 import subprocess
 
-from paper_release import runtime_sources, safe_file, sha256, verify
+from paper_release import runtime_sources, safe_file, sha256, verify, RUNTIME_RESOURCES
 from productrelease import PRODUCT_SOURCES
 
 
@@ -47,7 +47,7 @@ def stage(root, destination, *, allow_dirty=False):
             ),
         )
         | set(PRODUCT_SOURCES)
-        | {".dockerignore"}
+        | {".dockerignore"} | set(RUNTIME_RESOURCES)
     )
     files = {name: sha256(safe_file(root, name)) for name in sorted(paths)}
     identity = dict(

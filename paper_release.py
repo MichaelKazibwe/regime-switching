@@ -18,7 +18,11 @@ ENTRIES = (
     "paper_qualification", "macrovintage", "lock_paper_dependencies", "paper_dashboard_server",
     "monthlyreport", "monthlydelivery",
 )
-RESOURCES = (
+RUNTIME_RESOURCES = (
+    "deploy/runtime/build_sqlite.py", "deploy/runtime/collect_runtime.py",
+    "deploy/runtime/README.md",
+)
+RESOURCES = RUNTIME_RESOURCES + (
     "research/global_asset_registry.json",
     "Dockerfile", "compose.paper.yaml", ".dockerignore", ".env.paper.example",
     "OPERATIONAL_RUNBOOK.md", "PAPER_DEPLOYMENT_GUIDE.md", "STRATEGY_ACCEPTANCE.md",

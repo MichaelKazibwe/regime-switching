@@ -60,3 +60,11 @@ Official references checked 2026-11-17:
 The post-review encrypted archive is `var/project-review/recovery-after-review/pilot-recovery-20261117-post-review.enc` (131,194,931 bytes). Its SHA-256 is `4003657c859a33a18ae8d68ccaa8ae838e38b667e2cd2686effc4658087bf6c4`. The private key is `.secrets/pilot-recovery/20261117-post-review.key`; keep it separate. Both paths are ignored by Git. The original pre-upgrade recovery point is retained. Do not upload plaintext export or restored directories.
 
 Install the pinned operator dependencies in an isolated environment before using the CLI: `python -m pip install --require-hashes -r requirements-ops.hashed.lock`. No paid tooling is required.
+
+## November 18 execution update
+
+The November 17 encrypted recovery point was uploaded to Proton, downloaded, matched by SHA-256 and restored in the exact Linux image. The key was not uploaded. Evidence is private at `var/project-review/proton-offhost-20261118/off-host-recovery-receipt.json`. Proton auto-renewal was cancelled with owner authorization; the account transitions to Free on December 18. MFA enrollment remains an owner action.
+
+A subsequent local snapshot now holds all ten registered research writer locks during export and stops the app. Use `python pilot_snapshot.py --output var/recovery/<new-id> --source-context <installed-source-context> --key <private-key-path>`. The source context must match the installed image. The initial coordinated rehearsal passed authenticated local restore and exact-image Linux restore; the measured app stop was approximately 38 seconds. This improves registered-writer consistency but does not certify arbitrary external file edits, a second independent recovery host or a second protected key copy. A newer coordinated archive must receive its own off-host test before replacing the earlier verified off-host recovery point.
+
+See [the remaining qualification requirements](PILOT_GATE_REQUIREMENTS.md). Earlier prepared-archive and signup instructions above are historical records, not the current completion status.
