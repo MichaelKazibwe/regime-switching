@@ -69,4 +69,4 @@ A subsequent local snapshot now holds all ten registered research writer locks d
 
 See [the remaining qualification requirements](PILOT_GATE_REQUIREMENTS.md). Earlier prepared-archive and signup instructions above are historical records, not the current completion status.
 
-The coordinated snapshot also includes an allowlisted  component with the restore/export code, hash-locked numerical and encryption dependencies, and deployment instructions. It does not rely on the original checkout being present on a replacement host. Independent-device restore and out-of-band key protection still require their own evidence.
+The coordinated snapshot also includes an allowlisted `operator_source` component with the restore/export code, hash-locked numerical and encryption dependencies, and deployment instructions. It does not rely on the original checkout being present on a replacement host. Independent-device restore and out-of-band key protection still require their own evidence.

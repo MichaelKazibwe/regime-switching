@@ -68,6 +68,7 @@ jobs:
           image-ref: regime-pilot:${{ github.sha }}
           scanners: vuln
           format: sarif
+          limit-severities-for-sarif: true
           output: security-reports/pilot-image.sarif
           severity: CRITICAL,HIGH
           exit-code: '1'

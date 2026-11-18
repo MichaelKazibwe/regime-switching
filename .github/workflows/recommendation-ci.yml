@@ -53,6 +53,7 @@ jobs:
           image-ref: regime-recommendations:${{ github.sha }}
           scanners: vuln
           format: sarif
+          limit-severities-for-sarif: true
           output: security-reports/recommendation-image.sarif
           exit-code: '1'
           severity: CRITICAL,HIGH

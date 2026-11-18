@@ -31,6 +31,7 @@ jobs:
           version: v0.76.2
           image-ref: managed-paper:candidate
           format: sarif
+          limit-severities-for-sarif: true
           output: var/managed-ci/image-scan.sarif
           exit-code: '1'
           severity: CRITICAL,HIGH
