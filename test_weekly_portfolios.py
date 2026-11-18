@@ -40,6 +40,7 @@ def test_allocation_caps_risk_and_no_borrowing(key):
     assert w.sum() <= 1 - POLICIES[key]["cash"] + 1e-7
     assert w[:4].sum() <= POLICIES[key]["equity"] + 1e-7
     assert np.isclose(sum(w * (cov @ w) / (w @ cov @ w)), 1)
+    assert max(w * (cov @ w) / (w @ cov @ w)) <= .35001
 
 
 @pytest.mark.parametrize(
@@ -166,6 +167,14 @@ def test_analytic_utility_gradient_matches_independent_central_differences(monke
             bump[i] = step
             numerical[i] = (fun(w + bump)[0] - fun(w - bump)[0]) / (2 * step)
         assert np.allclose(gradient, numerical, rtol=1e-4, atol=1e-6)
+        constraint = kwargs["constraints"]
+        analytical = constraint["jac"](w)
+        numerical_constraints = np.column_stack([
+            (constraint["fun"](w + np.eye(len(w))[i]*step)
+             - constraint["fun"](w - np.eye(len(w))[i]*step))/(2*step)
+            for i in range(len(w))
+        ])
+        assert np.allclose(analytical, numerical_constraints, rtol=1e-4, atol=1e-6)
         checked.append(True)
         return original(fun, x0, *args, **kwargs)
 
@@ -214,3 +223,24 @@ def test_optimizer_rejects_nonfinite_and_insolvent_market_data():
         corrupted.iloc[-1, 0] = bad
         with pytest.raises(ValueError, match='finite weekly'):
             allocate(corrupted, POLICIES['aggregate'])
+
+
+def test_asset_count_can_fall_to_cash_without_borrowing_or_forced_holdings():
+    h = history()
+    normal = allocate(h, POLICIES['medium'])[0]
+    deteriorating = h * 0 - .01
+    defensive = allocate(deteriorating, POLICIES['medium'])[0]
+    assert np.count_nonzero(normal) > np.count_nonzero(defensive)
+    assert np.count_nonzero(defensive) == 0
+    assert defensive.sum() == 0
+    from weekly_portfolios import aggregate_fit
+    assert np.count_nonzero(aggregate_fit(deteriorating)[0]) == 0
+
+
+def test_cash_does_not_dilute_signed_risk_concentration_guard():
+    from weekly_portfolios import verify_risk_concentration
+    covariance = np.eye(2)*.04
+    for exposure in [1., .001]:
+        with pytest.raises(ValueError, match='35% safeguard'):
+            verify_risk_concentration(np.array([.9, .1])*exposure, covariance)
+    verify_risk_concentration(np.zeros(2), covariance)

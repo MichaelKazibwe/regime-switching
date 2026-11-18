@@ -95,15 +95,33 @@ def aggregate_fit(history):
         drawdown = float(np.max(1 - wealth / np.maximum.accumulate(wealth)))
         return float(-projected_mean @ mix + 6 * mix @ projected_cov @ mix
                      + .10 * loss + .05 * drawdown + .001 * np.sum(mix**2))
+    def risk_residual(mix):
+        weights = sleeves @ mix
+        # Normalize risky exposure so a near-cash portfolio cannot hide a
+        # concentration violation inside an absolute numerical tolerance.
+        weights = weights / max(float(weights.sum()), 1e-9)
+        return (.35*(weights @ cov @ weights)-weights*(cov @ weights))/max(float(np.diag(cov).max()),1e-8)
     fit = minimize(utility, np.full(len(keys)+1, 1/(len(keys)+1)), method="SLSQP",
                    bounds=[(0., 1.)]*(len(keys)+1),
-                   constraints={"type":"eq", "fun":lambda x:x.sum()-1},
+                   constraints=[{"type":"eq", "fun":lambda x:x.sum()-1},
+                                {"type":"ineq", "fun":risk_residual}],
                    options=dict(maxiter=300, ftol=1e-10))
     if not fit.success or not np.isfinite(fit.x).all() or abs(fit.x.sum()-1)>1e-7:
         raise ValueError("Adaptive aggregate strategy solve failed")
     mix = np.maximum(fit.x, 0.)
     mix /= mix.sum()
+    if np.max(sleeves @ mix) < .0025:
+        mix[:] = 0.
+        mix[-1] = 1.
+    verify_risk_concentration(sleeves @ mix, cov)
     return sleeves @ mix, cov, expected, dict(zip(keys + ["cash_reserve"], map(float, mix)))
+
+
+def verify_risk_concentration(weights, covariance):
+    """Independent signed Euler-share check; negative hedge shares stay signed."""
+    variance = float(weights @ covariance @ weights)
+    if variance > 1e-15 and np.max(weights*(covariance @ weights)/variance) > .35001:
+        raise ValueError("Weekly asset risk contribution exceeds 35% safeguard")
 
 
 def allocate(history, policy, *, return_estimator="uncertainty_shrink", previous_weights=None, turnover_penalty=.01):
@@ -170,9 +188,15 @@ def allocate(history, policy, *, return_estimator="uncertainty_shrink", previous
                      core @ w - broad_floor * groups["equity"] @ w]
     constraint_jac=np.vstack([-np.ones(len(h.columns)),*[-groups[g] for g in groups],-sectors,-financials,
                               international-international_floor*groups['equity'],core-broad_floor*groups['equity']])
+    def constrained_residual(w):
+        cw = cov @ w
+        return np.r_[residual(w), (.35*(w @ cw)-w*cw)/max(float(np.diag(cov).max()),1e-8)]
+    def constrained_jac(w):
+        cw = cov @ w
+        return np.vstack([constraint_jac, (.70*cw[None,:]-np.diag(cw)-w[:,None]*cov)/max(float(np.diag(cov).max()),1e-8)])
     fit = minimize(utility, np.zeros(len(h.columns)), method="SLSQP", jac=True,
                    bounds=[(0., .20)] * len(h.columns),
-                   constraints={"type": "ineq", "fun": residual, "jac":lambda _:constraint_jac},
+                   constraints={"type": "ineq", "fun": constrained_residual, "jac":constrained_jac},
                    options=dict(maxiter=500, ftol=1e-10))
     if not fit.success or min(residual(fit.x)) < -1e-7:
         raise ValueError(f"Constrained allocation failed: {fit.message}")
@@ -185,12 +209,13 @@ def allocate(history, policy, *, return_estimator="uncertainty_shrink", previous
     elif not selected.all():
         sparse = minimize(utility, weights * selected, method="SLSQP", jac=True,
             bounds=[(0., .20 if use else 0.) for use in selected],
-            constraints={"type":"ineq", "fun":residual, "jac":lambda _:constraint_jac},
+            constraints={"type":"ineq", "fun":constrained_residual, "jac":constrained_jac},
             options=dict(maxiter=500, ftol=1e-10))
         if not sparse.success or min(residual(sparse.x)) < -1e-7:
             raise ValueError("Variable-holdings allocation failed independent feasibility check")
         weights = np.maximum(sparse.x, 0.)
     weights[weights < 1e-7] = 0
+    verify_risk_concentration(weights, cov)
     return weights, cov, expected
 
 
@@ -310,6 +335,7 @@ def build(prices, session):
         "Asset roles and regions resolve from registry metadata. These are declared constraints, not country look-through. "
         "All horizon target weights are refitted from current completed weekly closes; fixed limits are safeguards, not target allocations. "
         "104-week covariance with 30% diagonal shrinkage; clipped mean/momentum estimates shrunk by sampling uncertainty; weekly tail-loss, drawdown and concentration penalties. "
+        "A 35% maximum positive signed asset variance share is independently checked for each horizon and the aggregate. "
         "Positions below a 0.25% selection threshold are excluded and the feasible support is re-solved, allowing variable holding counts. "
         "The adaptive aggregate optimizes short/medium/long sleeve proportions and a cash sleeve from current data, with no preset strategy percentages. "
         "Monthly=4, quarterly=13, annual=52 weeks. 1,000 joint 4-week observed-block paths, fixed current target weights, "
