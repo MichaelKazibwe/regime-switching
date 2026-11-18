@@ -22,7 +22,7 @@ from strategy_receipts import atomic_json
 from strategy_report import load_training_report
 from strategy_training_data import usable_session
 
-VERSION = "DYNAMIC_GROWTH_RESILIENCE_V1"
+VERSION = "DYNAMIC_GROWTH_RESILIENCE_V2_ADAPTIVE"
 # Ordered as economic balance, defensive growth, inflation resilience, tail aware.
 MIXES = {
     "disinflationary_growth": [0.25, 0.40, 0.10, 0.25],
@@ -36,18 +36,29 @@ MIXES = {
 def allocate(ctx):
     """Recalculate all engines, then verify the blended portfolio independently.
 
-    Blend weights are declared design rules, not fitted return forecasts.
+    Blend weights fit current covariance and observed momentum estimates.
     Re-project the blend because component risk caps do not imply blend caps.
     """
-    mix = np.array(MIXES[ctx["regime"]], dtype=float)
     candidates = {name: proposal(name, ctx) for name in NAMES}
     if any(r["status"].startswith("BLOCKED") for r in candidates.values()):
         raise ValueError("A component risk solve is blocked")
     symbols = ctx["symbols"]
-    w = sum(
-        mix[i] * np.array([candidates[n]["weights"][s] for s in symbols])
-        for i, n in enumerate(NAMES)
-    )
+    sleeves = np.column_stack([[candidates[n]["weights"][s] for s in symbols] for n in NAMES])
+    # Shrink noisy observed annual momentum towards zero. This is a research
+    # input, not a validated forward return estimate or a regime lookup table.
+    expected = .25 * np.clip([ctx["momentum"][s] for s in symbols], -.12, .12)
+    c = sleeves.T @ ctx["cov"] @ sleeves
+    mean = sleeves.T @ expected
+    mixed = minimize(lambda x: float(-mean @ x + 12*x @ c @ x + .001*np.sum(x*x)),
+        np.full(len(NAMES), 1/len(NAMES)), method="SLSQP",
+        bounds=[(0., 1.)]*len(NAMES),
+        constraints={"type":"eq", "fun":lambda x:x.sum()-1},
+        options={"ftol":1e-11, "maxiter":250})
+    if not mixed.success or not np.isfinite(mixed.x).all() or abs(mixed.x.sum()-1)>1e-7:
+        raise ValueError("Adaptive strategy mix solve blocked")
+    mix = np.maximum(mixed.x, 0.)
+    mix /= mix.sum()
+    w = sleeves @ mix
     variance = float(w @ ctx["cov"] @ w)
     ceiling = 0.08 if ctx["macro_valid"] else 0.07
     w *= min(1.0, ceiling / max(np.sqrt(variance), 1e-12))
@@ -97,6 +108,8 @@ def allocate(ctx):
         "regime": ctx["regime"],
         "macro_valid": ctx["macro_valid"],
         "engine_mix": dict(zip(NAMES, map(float, mix))),
+        "mix_method": "CURRENT_COVARIANCE_SHRUNK_MOMENTUM_UTILITY",
+        "mix_note": "Strategy proportions are refitted from observed market inputs; legacy regime lookup percentages are not used. Expected growth remains unvalidated; risk limits remain safeguards.",
         "strategies": candidates,
         "weights": dict(zip(symbols, map(float, w))),
         "cash": float(1 - w.sum()),

@@ -72,6 +72,7 @@ def render_pdf(block, destination):
         ),
         p("Contract: " + snapshot["contract"]["contract_id"]),
         p("Snapshot: " + snapshot["snapshot_id"]),
+        p(snapshot.get("mix_note", "See dated strategy methodology.")),
         Spacer(1, 12),
     ]
     rows = [["Engine", "Blend"]] + [

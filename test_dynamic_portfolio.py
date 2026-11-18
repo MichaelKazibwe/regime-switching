@@ -62,3 +62,17 @@ def test_stale_report_cannot_replace_published_snapshot(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="Fresh source-matched"):
         refresh(bundle, output)
     assert output.read_text() == "previous snapshot"
+
+
+def test_adaptive_mix_ignores_legacy_percentages_and_changes_with_market(market, monkeypatch):  # noqa: F811
+    import dynamic_portfolio as module
+    ctx = context(market, len(market)-1, {})
+    a = allocate(ctx)
+    monkeypatch.setattr(module, 'MIXES', {ctx['regime']: [1., 0., 0., 0.]})
+    assert allocate(ctx)['engine_mix'] == a['engine_mix']
+    changed = deepcopy(ctx)
+    changed['cov'] *= 4
+    b = allocate(changed)
+    assert b['engine_mix'] != a['engine_mix']
+    assert sum(b['engine_mix'].values()) == pytest.approx(1)
+    assert b['mix_method'] == 'CURRENT_COVARIANCE_SHRUNK_MOMENTUM_UTILITY'

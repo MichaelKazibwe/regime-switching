@@ -20,6 +20,7 @@ POLICIES = {
     "short": dict(label="Short term · 3 months", weeks=13, aversion=12., equity=.35, cash=.15),
     "medium": dict(label="Medium term · 1 year", weeks=52, aversion=6., equity=.60, cash=.05),
     "long": dict(label="Long term · 3+ years", weeks=156, aversion=3., equity=.75, cash=.02),
+    "aggregate": dict(label="Adaptive aggregate · multi-horizon", weeks=52, aversion=6., equity=.75, cash=.02, aggregate=True),
 }
 REGIONS = {"VEA": "Developed ex-US", "VWO": "Emerging markets", "EWJ": "Japan",
            "IGOV": "International government", "GLD": "Global real assets",
@@ -73,10 +74,47 @@ def statistics(values):
                 tail_convention="Expected shortfall is a nonnegative loss; tail mean is a signed return")
 
 
-def allocate(history, policy, *, return_estimator="incumbent", previous_weights=None, turnover_penalty=.01):
+def aggregate_fit(history):
+    """Optimize current horizon sleeves; no designed sleeve percentages or asset count.
+
+    The diagnostic uses today's fitted sleeves on past observations, not realized
+    historical strategy returns. Causal replay refits this entire procedure at
+    each origin. Cash is an explicit fourth sleeve and earns zero here.
+    """
+    keys = [k for k in POLICIES if k != "aggregate"]
+    fitted = [allocate(history, POLICIES[k]) for k in keys]
+    sleeves = np.column_stack([r[0] for r in fitted] + [np.zeros(history.shape[1])])
+    cov, expected = fitted[0][1:]
+    matrix = history.tail(104).to_numpy() @ sleeves
+    projected_cov = sleeves.T @ cov @ sleeves
+    projected_mean = sleeves.T @ expected
+    def utility(mix):
+        returns = matrix @ mix
+        wealth = np.r_[1., np.cumprod(1 + returns)]
+        loss = max(0., -float(np.sort(returns)[:max(1, int(len(returns)*.05))].mean()))
+        drawdown = float(np.max(1 - wealth / np.maximum.accumulate(wealth)))
+        return float(-projected_mean @ mix + 6 * mix @ projected_cov @ mix
+                     + .10 * loss + .05 * drawdown + .001 * np.sum(mix**2))
+    fit = minimize(utility, np.full(len(keys)+1, 1/(len(keys)+1)), method="SLSQP",
+                   bounds=[(0., 1.)]*(len(keys)+1),
+                   constraints={"type":"eq", "fun":lambda x:x.sum()-1},
+                   options=dict(maxiter=300, ftol=1e-10))
+    if not fit.success or not np.isfinite(fit.x).all() or abs(fit.x.sum()-1)>1e-7:
+        raise ValueError("Adaptive aggregate strategy solve failed")
+    mix = np.maximum(fit.x, 0.)
+    mix /= mix.sum()
+    return sleeves @ mix, cov, expected, dict(zip(keys + ["cash_reserve"], map(float, mix)))
+
+
+def allocate(history, policy, *, return_estimator="uncertainty_shrink", previous_weights=None, turnover_penalty=.01):
     """Constrained utility fit; momentum is a noisy estimate, not an alpha claim."""
     cat = catalogue()
     h = history.tail(104)
+    if (len(h)<52 or h.shape[1]<1 or not np.isfinite(h.to_numpy()).all()
+            or (h.to_numpy()<=-1).any() or h.columns.has_duplicates):
+        raise ValueError("At least 52 finite weekly asset returns above -100% required")
+    if policy.get("aggregate"):
+        return aggregate_fit(history)[:3]
     cov = h.cov().to_numpy() * 52
     cov = .70 * cov + .30 * np.diag(np.diag(cov)) + np.eye(len(h.columns)) * 1e-8
     annual_mean = h.mean().to_numpy() * 52
@@ -139,6 +177,19 @@ def allocate(history, policy, *, return_estimator="incumbent", previous_weights=
     if not fit.success or min(residual(fit.x)) < -1e-7:
         raise ValueError(f"Constrained allocation failed: {fit.message}")
     weights = np.maximum(fit.x, 0.)
+    # Re-solve on the selected support, rather than renormalizing and breaking
+    # diversification constraints. Unselected capital remains available to cash.
+    selected = weights >= .0025
+    if not selected.any():
+        weights = np.zeros_like(weights)
+    elif not selected.all():
+        sparse = minimize(utility, weights * selected, method="SLSQP", jac=True,
+            bounds=[(0., .20 if use else 0.) for use in selected],
+            constraints={"type":"ineq", "fun":residual, "jac":lambda _:constraint_jac},
+            options=dict(maxiter=500, ftol=1e-10))
+        if not sparse.success or min(residual(sparse.x)) < -1e-7:
+            raise ValueError("Variable-holdings allocation failed independent feasibility check")
+        weights = np.maximum(sparse.x, 0.)
     weights[weights < 1e-7] = 0
     return weights, cov, expected
 
@@ -162,7 +213,8 @@ def replay(history, policy, fixed=None):
         values.append(float(post / nav - 1))
         nav = post
         # Decision uses closes available now, fills only next week's close.
-        pending = allocate(history.iloc[:i + 1], policy)[0] if fixed is None else fixed
+        pending = allocate(history.iloc[:i + 1], policy,
+                           previous_weights=assets/post if post > 0 else None)[0] if fixed is None else fixed
     return dict(**statistics(values), weeks=len(values), risky_dollars_traded_per_initial_dollar=turnover,
                 timing="Weekly decisions filled at the following weekly close; 15 bps risky turnover",
                 note="Historical research replay; policy constants were not selected on a separate holdout")
@@ -238,12 +290,16 @@ def build(prices, session):
             "Liquidity crisis": dict(equity=-.40, government=-.05, credit=-.20, real_assets=-.20, alternative=-.10, cash=0.),
         }
         candidates[key] = dict(policy=policy, allocations=sorted(rows, key=lambda r: -r["weight"]),
+            allocation_mode="CURRENT_MARKET_OPTIMIZED", asset_count=int(np.count_nonzero(weights)),
             group_weights=groups, exposure_labels=regions,
             estimated_volatility=float(np.sqrt(variance)), effective_holdings=float(1 / sum(r["weight"]**2 for r in rows)),
             replay=replay(history, policy), baseline_60_40=baseline, projections=projections(history, weights),
             historical_static_stress=dict(return_13w=float(rolling.iloc[worst]),
                 end=str(history.index[worst].date()), note="Worst overlapping observed 13-week block for today's fixed weights, before fees; not a held-out result"),
             declared_shocks={label: sum(r["weight"] * shocks[r["bucket"]] for r in rows) for label, shocks in shock_masks.items()})
+        if key == "aggregate":
+            candidates[key]["strategy_mix"] = aggregate_fit(history)[3]
+            candidates[key]["strategy_note"] = "Data-optimized combination of current short, medium and long horizon sleeves plus cash; sleeve returns are current-weight historical diagnostics, not historical strategy track records."
     return dict(schema_version=1, status="REVIEW_REQUIRED", market_session=session,
         generated_at=datetime.now(timezone.utc).isoformat(), execution_enabled=False, promotion_enabled=False,
         candidates=candidates, eligible_symbols=list(history), excluded_insufficient_history=excluded,
@@ -252,7 +308,10 @@ def build(prices, session):
         "Satellite exposure capped at 25% when broad funds are available, financial-sector exposure at 15%; "
         "at least half of equity in broad funds and one fifth in ex-US exposures when those categories are available. "
         "Asset roles and regions resolve from registry metadata. These are declared constraints, not country look-through. "
-        "104-week covariance with 30% diagonal shrinkage; noisy clipped mean/momentum return estimate; weekly tail-loss and drawdown penalties. "
+        "All horizon target weights are refitted from current completed weekly closes; fixed limits are safeguards, not target allocations. "
+        "104-week covariance with 30% diagonal shrinkage; clipped mean/momentum estimates shrunk by sampling uncertainty; weekly tail-loss, drawdown and concentration penalties. "
+        "Positions below a 0.25% selection threshold are excluded and the feasible support is re-solved, allowing variable holding counts. "
+        "The adaptive aggregate optimizes short/medium/long sleeve proportions and a cash sleeve from current data, with no preset strategy percentages. "
         "Monthly=4, quarterly=13, annual=52 weeks. 1,000 joint 4-week observed-block paths, fixed current target weights, "
         "weekly self-financing rebalancing at 15 bps risky turnover, zero cash yield, no tax or FX conversion fees.",
         limitations=["Research candidates, not globally optimal or approved allocations. Client review required.",
@@ -289,7 +348,9 @@ def verify(root):
         rows = candidate["allocations"]
         if (any(not np.isfinite(r["weight"]) or r["weight"] < 0 for r in rows)
                 or not np.isclose(sum(r["weight"] for r in rows), 1., atol=1e-8)
-                or not np.isclose(sum(r["risk_share"] for r in rows), 1., atol=1e-7)):
+                or any(not np.isfinite(r["risk_share"]) for r in rows)
+                or not np.isclose(sum(r["risk_share"] for r in rows),
+                                  0. if candidate.get("estimated_volatility") == 0 else 1., atol=1e-7)):
             raise ValueError("Weekly capital and risk must reconcile")
     return data
 

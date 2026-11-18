@@ -28,7 +28,7 @@ def report_pdf(data, output):
         return "Unavailable" if value is None else f"{value:.2%}"
     paragraph("Weekly portfolio research", "Title")
     paragraph(f"Completed market week: {data['market_session']} | Client review required", "Heading2")
-    paragraph("Three holding periods. One evidence trail. No trading authority.")
+    paragraph("Three adaptive holding periods plus an aggregate strategy. No trading authority.")
     paragraph(data["methodology"])
     table([["Candidate", "Model volatility", "Effective holdings", "Cash"]] + [
         [c["policy"]["label"], pct(c["estimated_volatility"]), f"{c['effective_holdings']:.1f}",
@@ -42,6 +42,11 @@ def report_pdf(data, output):
     for candidate in data["candidates"].values():
         story.append(PageBreak())
         paragraph(candidate["policy"]["label"].replace("·", "-"), "Title")
+        if candidate.get("strategy_mix"):
+            paragraph("Data-optimized strategy proportions", "Heading2")
+            table([["Horizon sleeve", "Weight"]] + [[name, pct(weight)] for name, weight in candidate["strategy_mix"].items()], [360, 140])
+            paragraph(candidate["strategy_note"])
+        paragraph(f"Selected risky assets: {candidate.get('asset_count', 'See allocation table')}. Weights refresh from completed market data.")
         paragraph("Capital allocation and signed variance contributions", "Heading2")
         table([["Asset / exposure", "Weight", "Risk share", "Bucket"]] + [
             [f"{r['symbol']} / {r['region']}", pct(r["weight"]), pct(r["risk_share"]), r["bucket"]]

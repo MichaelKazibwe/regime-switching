@@ -132,7 +132,7 @@ def run(origin, output, *, browsers=("chromium", "firefox", "webkit")):
                 page.locator('#section-jump').select_option('weekly')
                 expect(page.locator('#weekly-status')).to_contain_text('Week closed')
                 weekly = page.request.get(origin + '/api/weekly').json()
-                for key in ('short', 'medium', 'long'):
+                for key in ('short', 'medium', 'long', 'aggregate'):
                     page.locator('#weekly-horizon').select_option(key)
                     rows = weekly['candidates'][key]['allocations']
                     expect(page.locator('#weekly-holdings tr')).to_have_count(len(rows))
@@ -143,6 +143,10 @@ def run(origin, output, *, browsers=("chromium", "firefox", "webkit")):
                     expect(page.locator('#weekly-projections tr')).to_have_count(4)
                     median = weekly['candidates'][key]['projections']['52']['median_return']
                     expect(page.locator('#weekly-projections tr').nth(2).locator('td').nth(2)).to_have_text(f'{median * 100:.2f}%')
+                expect(page.locator('#weekly-comparison tr')).to_have_count(4)
+                expect(page.locator('#weekly-strategy-mix')).to_contain_text('Data-optimized')
+                for sleeve, weight in weekly['candidates']['aggregate']['strategy_mix'].items():
+                    expect(page.locator('#weekly-strategy-mix')).to_contain_text(f'{weight * 100:.2f}%')
                 page.locator('#weekly-capital').fill('200000')
                 expect(page.locator('#weekly-projections tr').nth(2).locator('td').nth(4)).to_have_text(f'${200000 * (1 + median):,.0f}')
                 with page.expect_download() as event:

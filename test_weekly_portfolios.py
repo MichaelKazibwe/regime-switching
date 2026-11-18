@@ -173,3 +173,44 @@ def test_analytic_utility_gradient_matches_independent_central_differences(monke
     h = history()
     allocate(h, POLICIES["medium"])
     assert checked
+
+
+def test_aggregate_mix_is_data_derived_and_reconciles_to_underlying_holdings():
+    from weekly_portfolios import aggregate_fit
+    h = history()
+    w, cov, expected, mix = aggregate_fit(h)
+    assert set(mix) == {'short', 'medium', 'long', 'cash_reserve'}
+    assert sum(mix.values()) == pytest.approx(1)
+    independently = sum(mix[k] * allocate(h, POLICIES[k])[0] for k in mix if k != 'cash_reserve')
+    assert np.allclose(w, independently)
+    assert np.isfinite(cov).all() and np.isfinite(expected).all()
+    changed = h.copy()
+    changed.loc[:, ['SPY', 'VEA', 'VWO', 'QQQ']] -= .015
+    changed.loc[:, ['IEF', 'SHY', 'TLT']] += .003
+    other = aggregate_fit(changed)
+    assert not np.allclose(w, other[0])
+    assert not np.allclose(list(mix.values()), list(other[3].values()))
+
+
+def test_variable_asset_support_and_sampling_uncertainty():
+    h = history()
+    a = allocate(h, POLICIES['medium'])[0]
+    changed = h.copy()
+    changed['DBC'] = -.02 + changed['DBC'] * .05
+    changed['GLD'] += .008
+    b = allocate(changed, POLICIES['medium'])[0]
+    assert not np.allclose(a, b)
+    assert b[list(h).index('DBC')] == 0
+    assert np.count_nonzero(b) <= h.shape[1]
+    _, _, shrunk = allocate(h, POLICIES['medium'])
+    _, _, raw = allocate(h, POLICIES['medium'], return_estimator='incumbent')
+    assert (np.abs(shrunk) <= np.abs(raw)+1e-12).all()
+
+
+def test_optimizer_rejects_nonfinite_and_insolvent_market_data():
+    h = history()
+    for bad in [np.inf, np.nan, -1.]:
+        corrupted = h.copy()
+        corrupted.iloc[-1, 0] = bad
+        with pytest.raises(ValueError, match='finite weekly'):
+            allocate(corrupted, POLICIES['aggregate'])

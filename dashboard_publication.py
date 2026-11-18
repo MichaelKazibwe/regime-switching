@@ -53,6 +53,7 @@ def _publish(operations, root):
                 "dashboard/investor.css",
                 "dashboard_publication.py", "strategy_eligibility.py", "research/dynamic_eligibility.json",
                 "strategy_dashboard_server.py",
+                "dynamic_portfolio.py", "evaluate_dynamic_portfolio.py", "dynamic_preview.py",
             )
         }
     )
