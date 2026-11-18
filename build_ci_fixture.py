@@ -26,7 +26,7 @@ def build(destination, *, resume=False):
     work.mkdir(exist_ok=resume)
     for p in SOURCE.glob("*.py"):
         shutil.copyfile(p, work / p.name)
-    for folder in ["dashboard", "pilot", "research"]:
+    for folder in ["dashboard", "pilot", "research", "deploy/runtime"]:
         shutil.copytree(SOURCE / folder, work / folder, dirs_exist_ok=resume)
     for pattern in ("requirements-*.lock", "Dockerfile*", ".dockerignore"):
         for p in SOURCE.glob(pattern):
