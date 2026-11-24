@@ -12,7 +12,8 @@ from institutional_return_engines import context, validate_weights
 from portfolio_contract import extended_prices
 from prospective_strategy_ledger import apply_close, schedule, next_fill
 from strategy_monthly_report import read_events
-from strategy_integrity import strict_json, file_hash, fingerprint, canonical
+from strategy_integrity import strict_json, fingerprint, canonical
+from strategy_eligibility import eligible_prices, dynamic_protocol_identity
 
 KEY = "Dynamic_Growth_Resilience"
 
@@ -24,25 +25,13 @@ def advance(bundle, database, *, now=None):
     with TemporaryDirectory() as root:
         snapshot = refresh(bundle, Path(root) / "snapshot.json", now=now)
     b = strict_json(bundle)
-    prices = extended_prices(b["capture"], b["benchmark_extension"]).drop(
-        columns=["XLV"]
-    )
+    prices = eligible_prices(extended_prices(b["capture"], b["benchmark_extension"]))
     features = {
         r["date"]: r
         for r in strict_json(Path(b["training_report"]).parent / "features.json")
     }
     ctx = context(prices, len(prices) - 1, features)
-    protocol = fingerprint(
-        {
-            p: file_hash(p)
-            for p in (
-                __file__,
-                "dynamic_portfolio.py",
-                "institutional_return_engines.py",
-                "prospective_strategy_ledger.py",
-            )
-        }
-    )
+    protocol = dynamic_protocol_identity()
     path = Path(database)
     if path.is_symlink():
         raise ValueError("Regular isolated cohort database required")

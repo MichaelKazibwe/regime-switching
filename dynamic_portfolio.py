@@ -21,6 +21,7 @@ from strategy_integrity import file_hash, fingerprint, strict_json
 from strategy_receipts import atomic_json
 from strategy_report import load_training_report
 from strategy_training_data import usable_session
+from strategy_eligibility import eligible_prices
 
 VERSION = "DYNAMIC_GROWTH_RESILIENCE_V2_ADAPTIVE"
 # Ordered as economic balance, defensive growth, inflation resilience, tail aware.
@@ -130,9 +131,7 @@ def refresh(bundle, output, *, now=None):
         usable_session(now).date()
     ):
         raise ValueError("Fresh source-matched completed-session inputs required")
-    prices = extended_prices(b["capture"], b["benchmark_extension"]).drop(
-        columns=["XLV"]
-    )
+    prices = eligible_prices(extended_prices(b["capture"], b["benchmark_extension"]))
     features = strict_json(Path(b["training_report"]).parent / "features.json")
     if str(prices.index[-1].date()) != report["market_session"]:
         raise ValueError("Market/report session mismatch")
@@ -140,7 +139,9 @@ def refresh(bundle, output, *, now=None):
     result = allocate(ctx)
     result["source_hashes"] = {
         str(p): file_hash(p)
-        for p in [bundle, __file__, "institutional_return_engines.py"]
+        for p in [bundle, __file__, "institutional_return_engines.py",
+                  "strategy_eligibility.py", "research/dynamic_eligibility.json",
+                  "global_asset_registry.py", "research/global_asset_registry.json"]
     }
     result["contract"] = make_contract(
         "Dynamic_Growth_Resilience",

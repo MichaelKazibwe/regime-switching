@@ -2,7 +2,23 @@
 
 from pathlib import Path
 from global_asset_registry import load_registry
-from strategy_integrity import strict_json
+from strategy_integrity import strict_json, fingerprint, file_hash
+
+
+def dynamic_protocol_identity(source_root=None):
+    """Content identity independent of checkout location; never rewrites ledgers."""
+    root = Path(source_root) if source_root is not None else Path(__file__).resolve().parent
+    names = (
+        "dynamic_forward.py", "dynamic_portfolio.py",
+        "institutional_return_engines.py", "prospective_strategy_ledger.py",
+        "strategy_eligibility.py", "research/dynamic_eligibility.json",
+        "global_asset_registry.py", "research/global_asset_registry.json",
+        "global_market_calendar.py",
+    )
+    return fingerprint(dict(
+        schema_version=2, policy="DYNAMIC_FORWARD_CANONICAL_SOURCES_V2",
+        sources={name: file_hash(root / name) for name in names},
+    ))
 
 
 def eligible_prices(prices, contract=Path("research/dynamic_eligibility.json")):
