@@ -8,6 +8,36 @@ from strategy_integrity import strict_json, fingerprint
 from strategy_receipts import atomic_json
 
 
+def history(root, *, reviewer, limit=100, now=None):
+    """Read only the authenticated reviewer's sealed research feedback."""
+    if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 100:
+        raise ValueError("Bounded review history required")
+    root = Path(root)
+    if root.is_symlink():
+        raise ValueError("Review directory symlinks forbidden")
+    if not root.exists():
+        return []
+    now = now or datetime.now(timezone.utc)
+    rows = []
+    for path in sorted(root.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)[:256]:
+        if path.is_symlink():
+            raise ValueError("Review symlinks forbidden")
+        row = strict_json(path)
+        identity = fingerprint(dict(
+            recommendation=row["recommendation_revision"], reviewer=row["reviewer"],
+            decision=row["decision"], rationale=row["rationale"],
+        ))
+        stamp = datetime.fromisoformat(row["recorded_at"])
+        if (row["reviewer"] != reviewer or identity != row["review_id"] or path.stem != identity
+                or row["execution_enabled"] is not False
+                or row["public_recommendation_approval"] is not False
+                or row["decision"] not in {"ACCEPTED_FOR_RESEARCH", "REJECTED", "CHANGES_REQUESTED"}
+                or stamp.tzinfo is None or stamp > now):
+            raise ValueError("Research review history integrity mismatch")
+        rows.append(row)
+    return sorted(rows, key=lambda r: r["recorded_at"], reverse=True)[:limit]
+
+
 def record_decision(
     root, recommendation, *, reviewer, decision, rationale, expected_revision
 ):

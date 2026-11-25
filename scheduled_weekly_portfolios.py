@@ -77,8 +77,13 @@ def tick(root=Path("var/weekly-portfolios"), now=None, publish_vm=False):
         return dict(status="WAITING_FOR_VERIFIED_WEEKLY_DATA", market_session=session)
     if file_hash(pointer["bundle"]) != pointer["bundle_sha256"]:
         raise ValueError("Published source bundle mismatch")
+    lookthrough_root = os.environ.get("PILOT_LOOKTHROUGH_ROOT")
+    holdings_hashes = None
+    if lookthrough_root:
+        from portfolio_exposures import reviewed_evidence
+        holdings_hashes = reviewed_evidence(lookthrough_root, now)["source_hashes"]
     key = fingerprint(dict(session=session, bundle_sha256=pointer["bundle_sha256"], document_sha256=pointer["document_sha256"],
-                           sources={s: file_hash(s) for s in SOURCES}))
+                           sources={s: file_hash(s) for s in SOURCES}, holdings_evidence=holdings_hashes))
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     with (root / "worker.lock").open("a") as lock:
@@ -100,9 +105,12 @@ def tick(root=Path("var/weekly-portfolios"), now=None, publish_vm=False):
         atomic_json(root / "latest.json", record)
         try:
             record['stage'] = 'GENERATION'
+            command = [sys.executable, "weekly_portfolios.py", "--bundle", pointer["bundle"],
+                       "--output", str(directory)]
+            if lookthrough_root:
+                command += ["--lookthrough-root", str(Path(lookthrough_root).resolve())]
             with (root / "worker.log").open("ab") as log:
-                code = run_bounded([sys.executable, "weekly_portfolios.py", "--bundle", pointer["bundle"],
-                                    "--output", str(directory)], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, timeout=1800)
+                code = run_bounded(command, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, timeout=1800)
             if code.returncode != 0:
                 raise RuntimeError("Weekly research failed; inspect worker.log")
             record['stage'] = 'VERIFY_ARTIFACTS'

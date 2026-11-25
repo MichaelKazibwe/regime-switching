@@ -76,6 +76,17 @@ def report_pdf(data, output):
         paragraph("Diversification by mandate", "Heading2")
         table([["Exposure label (not country look-through)", "Capital weight"]] + [
             [name, pct(weight)] for name, weight in candidate["exposure_labels"].items()], [360, 140])
+        paragraph("Underlying holdings evidence", "Heading2")
+        exposure = candidate.get("economic_exposures")
+        if exposure is None:
+            paragraph("Not supplied. Registered geographic labels are not verified underlying holdings coverage.")
+        else:
+            paragraph(f"Review status: {exposure['status']}; risky capital covered: "
+                      f"{pct(exposure['covered_risky_fraction'])}; cutoff: {exposure['evidence_cutoff']}.")
+            paragraph("Supplied reviewed-file integrity only; independent issuer authentication, rights and execution approval remain separate. Limits are post-optimization review checks.")
+            for breach in exposure['breaches']:
+                paragraph(f"Review exception: {breach['dimension']} / {breach['exposure']}: "
+                          f"{pct(breach['weight'])} versus declared limit {pct(breach['limit'])}.")
     story.append(PageBreak())
     paragraph("Dashboard evidence snapshot", "Title")
     context = data.get("dashboard_context", {})

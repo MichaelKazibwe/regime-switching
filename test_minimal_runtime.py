@@ -26,3 +26,9 @@ def test_dynamic_loader_retains_execution_permission(tmp_path):
     target = copy_native(source, tmp_path/'runtime')
     assert target.stat().st_mode & 0o111 == 0o111
     assert target.read_bytes() == source.read_bytes()
+
+
+def test_bad_openssl_release_and_patch_are_never_compiled():
+    from deploy.runtime.build_openssl import verified
+    with pytest.raises(ValueError, match='checksum mismatch'):
+        verified(b'corrupted native source', 'a'*64)

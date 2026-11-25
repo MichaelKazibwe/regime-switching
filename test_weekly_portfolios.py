@@ -29,6 +29,34 @@ def history():
     )
 
 
+def test_optional_support_solver_failure_retains_verified_market_optimum(monkeypatch):
+    import weekly_portfolios as module
+    from types import SimpleNamespace
+    real_minimize = module.minimize
+    dense = []
+    def solver(*args, **kwargs):
+        if dense:
+            return SimpleNamespace(success=False, x=np.full(len(dense[0]),np.nan))
+        fit = real_minimize(*args, **kwargs)
+        dense.append(fit.x.copy())
+        return fit
+    monkeypatch.setattr(module, 'minimize', solver)
+    weights, covariance, _ = module.allocate(history(), POLICIES['medium'])
+    assert (dense[0] < .0025).any() and (dense[0] >= .0025).any()
+    assert np.allclose(weights,dense[0],atol=1e-7)
+    assert weights.sum() <= 1-POLICIES['medium']['cash']+1e-7
+    assert max(weights*(covariance@weights)/(weights@covariance@weights)) <= .35001
+
+
+def test_nonfinite_primary_solution_is_never_published(monkeypatch):
+    import weekly_portfolios as module
+    from types import SimpleNamespace
+    monkeypatch.setattr(module,'minimize',lambda *a,**kw:SimpleNamespace(
+        success=True,x=np.full(history().shape[1],np.nan),message='unusable result'))
+    with pytest.raises(ValueError,match='Constrained allocation failed'):
+        module.allocate(history(),POLICIES['medium'])
+
+
 @pytest.mark.parametrize("key", list(POLICIES))
 def test_allocation_caps_risk_and_no_borrowing(key):
     h = history()

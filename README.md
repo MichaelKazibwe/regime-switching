@@ -4,6 +4,7 @@ Python portfolio research, chronological regime forecasting, risk controls, pape
 
 ## Start here
 
+- [Institutional feature and UX audit](INSTITUTIONAL_FEATURE_AND_UX_AUDIT_20261119.md) and [upgrade execution register](INSTITUTIONAL_UPGRADE_EXECUTION.md)
 - [Current project review](PROJECT_REVIEW_20261117.md) and [execution evidence](PROJECT_REVIEW_EXECUTION.md)
 - [Free pilot, official data and recovery plan](OFFICIAL_DATA_AND_BACKUP_PLAN.md) — no paid resources are authorized.
 
@@ -40,7 +41,7 @@ Mac LaunchAgent files in `deploy/` are templates. The installers resolve current
 
 Keep `var/`, `output/`, local environment files, secrets, databases, captures, reports and model artifacts private and outside Git. Research reports describe the specific dated experiments they evaluated. The dashboard distinguishes archived illustrations, dated market closes, historical reference performance and simulated scenarios. Passing software tests does not establish predictive alpha or future returns.
 
-Historical phase documents and proof reports are project history; their older counts and deployment conclusions are not current release approvals. Current limits include Firefox QA failure, unresolved external security scan findings, SBOM generation and encrypted off-host recovery. See the deployment guides before exposing the service beyond this Mac.
+Historical phase documents and proof reports are project history; their older counts and deployment conclusions are not current release approvals. The November 18 release passed Chromium/WebKit acceptance and its exact-image HIGH/CRITICAL scan; its vulnerability database is now dated. A prior encrypted off-host round trip exists, while a current-release independent-device restore, separated recovery keys and owner MFA remain open. Firefox is not part of the qualified browser set. SBOM generation is a separate uncompleted capability. Consult the execution register for new upgrade checks and the deployment guides before exposing the service beyond this Mac.
 ## Weekly portfolio research
 
 See [Weekly portfolio research](WEEKLY_PORTFOLIOS.md) for the automated weekly candidates, projections, reports and local pilot operations.

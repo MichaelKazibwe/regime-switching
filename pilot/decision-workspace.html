@@ -1,0 +1,24 @@
+<section class="view decision-view" data-panel="decision-home" hidden>
+  <p id="decision-status" role="status" aria-live="polite">Loading the latest verified proposals…</p>
+  <div class="decision-context">
+    <div><span class="eyebrow">SELECTED RESEARCH PORTFOLIO</span><h2 id="decision-title">Current proposal</h2><p id="decision-dates" class="muted"></p></div>
+    <div class="field"><label for="decision-portfolio">Portfolio</label><select id="decision-portfolio"></select></div>
+  </div>
+  <div id="decision-metrics" class="decision-metrics"></div>
+  <div class="decision-columns">
+    <article class="panel decision-allocation"><div class="decision-heading"><div><h2>Your allocation at a glance</h2><p class="muted">Proposed capital, including uninvested cash</p></div><button class="button quiet" id="decision-analyze">Explore risk →</button></div><div class="decision-chart-layout"><svg id="decision-allocation-chart" viewBox="0 0 220 220" role="img" aria-label="Selected proposal capital allocation"></svg><div id="decision-allocation-legend"></div></div><p id="decision-account-note" class="small muted">This proposal has no linked account performance. Historical research and conditional scenarios are available in Analysis.</p></article>
+    <article class="panel"><div class="decision-heading"><h2>What needs your attention</h2><span class="decision-state">Research only</span></div><div id="decision-attention"></div><button id="decision-review" class="button">Review this proposal →</button></article>
+  </div>
+  <article class="panel"><div class="decision-heading"><div><h2>What changed?</h2><p class="muted">Comparable proposal targets, not actual trades</p></div><span id="decision-change-date" class="small muted"></span></div><div id="decision-changes"></div></article>
+  <details class="decision-evidence"><summary>Data, assumptions and review evidence</summary><div id="decision-evidence"></div></details>
+</section>
+<section class="view decision-view" data-panel="proposal-analysis" hidden>
+  <p id="decision-analysis-status" role="status" aria-live="polite"></p>
+  <div class="decision-context"><div><span class="eyebrow">SAME SELECTED PORTFOLIO</span><h2 id="decision-analysis-title">Portfolio analysis</h2><p id="decision-analysis-dates" class="muted"></p></div><button id="decision-analysis-home" class="button quiet">Back to Home</button></div>
+  <div class="decision-columns">
+    <article class="panel"><h2>Where the risk sits</h2><p class="small muted">Signed contributions to modeled variance. Negative shares may hedge risk; these are not loss limits.</p><div id="decision-risk-bars"></div></article>
+    <article class="panel"><h2>Stress the proposal</h2><p class="small muted">Declared hypothetical shocks; not market predictions.</p><div id="decision-stresses"></div><h3>Underlying exposure coverage</h3><p id="decision-coverage"></p></article>
+  </div>
+  <article class="panel"><div class="decision-heading"><div><h2>Conditional outlook</h2><p class="small muted">Resampled scenarios after modeled turnover costs; not calibrated forecasts.</p></div><div class="field"><label for="decision-period">Projection period</label><select id="decision-period"><option value="4">Month · 4 weeks</option><option value="13">Quarter · 13 weeks</option><option value="52" selected>Year · 52 weeks</option><option value="156">3 years · 156 weeks</option></select></div></div><div id="decision-projection" class="decision-metrics"></div><p id="decision-projection-note" class="small muted"></p></article>
+  <details class="decision-evidence"><summary>Historical replay and full methodology</summary><div id="decision-history"></div></details>
+</section>

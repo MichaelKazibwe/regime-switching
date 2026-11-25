@@ -35,6 +35,7 @@ jobs:
           node --check pilot/login.js
           node --check pilot/benchmark.js
           node --check pilot/workspace.js
+          node --check pilot/decision-workspace.js
           node --check pilot/weekly.js
           node --check pilot/macro-monitor.js
           node --check dashboard/investor.js

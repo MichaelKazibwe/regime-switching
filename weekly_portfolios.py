@@ -26,6 +26,7 @@ REGIONS = {"VEA": "Developed ex-US", "VWO": "Emerging markets", "EWJ": "Japan",
            "IGOV": "International government", "GLD": "Global real assets",
            "SLV": "Global real assets", "DBC": "Global real assets", "DBMF": "Global futures"}
 SOURCES = ("weekly_portfolios.py", "weekly_portfolio_report.py", "investmentcatalog.py",
+           "portfolio_exposures.py",
            "global_asset_registry.py", "research/global_asset_registry.json",
            "global_market_panel.py", "macro_alpha.py", "macro_feature_contract.py", "macrovintage.py",
            "portfolio_contract.py", "global_market_calendar.py", "strategy_training_data.py")
@@ -194,11 +195,20 @@ def allocate(history, policy, *, return_estimator="uncertainty_shrink", previous
     def constrained_jac(w):
         cw = cov @ w
         return np.vstack([constraint_jac, (.70*cw[None,:]-np.diag(cw)-w[:,None]*cov)/max(float(np.diag(cov).max()),1e-8)])
+    def feasible(w):
+        if (not np.isfinite(w).all() or np.min(w) < -1e-9 or np.max(w) > .20+1e-7
+                or min(residual(w)) < -1e-7):
+            return False
+        try:
+            verify_risk_concentration(w, cov)
+        except ValueError:
+            return False
+        return True
     fit = minimize(utility, np.zeros(len(h.columns)), method="SLSQP", jac=True,
                    bounds=[(0., .20)] * len(h.columns),
                    constraints={"type": "ineq", "fun": constrained_residual, "jac":constrained_jac},
                    options=dict(maxiter=500, ftol=1e-10))
-    if not fit.success or min(residual(fit.x)) < -1e-7:
+    if not fit.success or not feasible(fit.x):
         raise ValueError(f"Constrained allocation failed: {fit.message}")
     weights = np.maximum(fit.x, 0.)
     # Re-solve on the selected support, rather than renormalizing and breaking
@@ -211,11 +221,16 @@ def allocate(history, policy, *, return_estimator="uncertainty_shrink", previous
             bounds=[(0., .20 if use else 0.) for use in selected],
             constraints={"type":"ineq", "fun":constrained_residual, "jac":constrained_jac},
             options=dict(maxiter=500, ftol=1e-10))
-        if not sparse.success or min(residual(sparse.x)) < -1e-7:
-            raise ValueError("Variable-holdings allocation failed independent feasibility check")
-        weights = np.maximum(sparse.x, 0.)
-    weights[weights < 1e-7] = 0
-    verify_risk_concentration(weights, cov)
+        if sparse.success and feasible(sparse.x):
+            weights = np.maximum(sparse.x, 0.)
+        # Sparsity is optional. Keep the independently feasible dense optimum
+        # if reducing its support fails; never relax portfolio constraints.
+    trimmed = weights.copy()
+    trimmed[trimmed < 1e-7] = 0
+    if feasible(trimmed):
+        weights = trimmed
+    if not feasible(weights):
+        raise ValueError("Final allocation failed independent feasibility check")
     return weights, cov, expected
 
 
@@ -336,7 +351,7 @@ def build(prices, session):
         "All horizon target weights are refitted from current completed weekly closes; fixed limits are safeguards, not target allocations. "
         "104-week covariance with 30% diagonal shrinkage; clipped mean/momentum estimates shrunk by sampling uncertainty; weekly tail-loss, drawdown and concentration penalties. "
         "A 35% maximum positive signed asset variance share is independently checked for each horizon and the aggregate. "
-        "Positions below a 0.25% selection threshold are excluded and the feasible support is re-solved, allowing variable holding counts. "
+        "Positions below a 0.25% preferred selection threshold are removed only when the reduced support can be solved and independently verified; otherwise the feasible dense optimum is retained. Holding counts can vary. "
         "The adaptive aggregate optimizes short/medium/long sleeve proportions and a cash sleeve from current data, with no preset strategy percentages. "
         "Monthly=4, quarterly=13, annual=52 weeks. 1,000 joint 4-week observed-block paths, fixed current target weights, "
         "weekly self-financing rebalancing at 15 bps risky turnover, zero cash yield, no tax or FX conversion fees.",
@@ -396,7 +411,7 @@ def published(root):
     return directory, data
 
 
-def run(bundle, output, now=None):
+def run(bundle, output, now=None, *, lookthrough_root=None):
     from weekly_portfolio_report import report_pdf
     bundle, output = Path(bundle), Path(output)
     b = strict_json(bundle)
@@ -406,6 +421,18 @@ def run(bundle, output, now=None):
     session = weekly_session(now or datetime.now(timezone.utc))
     prices = extended_prices(b["capture"], b["benchmark_extension"])
     data = build(prices, session)
+    if lookthrough_root is not None:
+        from portfolio_exposures import reviewed_evidence, assess_exposures
+        cutoff = now or datetime.now(timezone.utc)
+        evidence = reviewed_evidence(lookthrough_root, cutoff)
+        for candidate in data["candidates"].values():
+            candidate["economic_exposures"] = assess_exposures(
+                {r["symbol"]:r["weight"] for r in candidate["allocations"]},
+                evidence["records"], cutoff.date(), limits=evidence["limits"],
+                minimum_coverage=evidence["minimum_coverage"], max_age_days=evidence["max_age_days"])
+            candidate["economic_exposures"]["evidence_cutoff"] = evidence["cutoff"]
+            candidate["economic_exposures"]["policy_role"] = "POST_OPTIMIZATION_REVIEW_NOT_EXECUTION_APPROVAL"
+        data["holdings_evidence"] = {k:v for k,v in evidence.items() if k != "records"}
     from strategy_dashboard_server import read_payload
     from strategy_integrity import verify_seal
     pointer = strict_json("var/dashboard-live/latest.json")
@@ -446,5 +473,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--bundle", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
+    parser.add_argument("--lookthrough-root", type=Path)
     args = parser.parse_args()
-    print(run(args.bundle, args.output))
+    print(run(args.bundle, args.output, lookthrough_root=args.lookthrough_root))

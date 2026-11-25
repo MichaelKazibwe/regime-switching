@@ -201,3 +201,5 @@ function installChartInspector(canvas,values,labels,formatter){
  canvas.onpointermove=event=>{const rect=canvas.getBoundingClientRect(),x=(event.clientX-rect.left)/rect.width*canvas.width;inspect(Math.round((x-86)/(canvas.width-116)*(values.length-1)));};
  canvas.onkeydown=event=>{if(['ArrowLeft','ArrowRight','Home','End'].includes(event.key)){event.preventDefault();inspect(event.key==='Home'?0:event.key==='End'?values.length-1:selected+(event.key==='ArrowLeft'?-1:1));}};
 }
+
+if($("catalogue-count"))text("catalogue-count",String(data.catalogue.length));

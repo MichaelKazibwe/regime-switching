@@ -87,15 +87,22 @@ def run(origin, output, *, browsers=("chromium", "firefox", "webkit")):
             page.on("pageerror", lambda error: errors.append(str(error)))
             page.on("request", lambda request: benchmark_requests.append(request.url) if request.url.endswith('/api/benchmark') else None)
             page.set_default_timeout(30000)
+            def navigate(section):
+                groups = {'decision-home':'home', 'weekly':'portfolios', 'dynamic':'portfolios',
+                          'growth':'portfolios', 'proposal-analysis':'analysis', 'benchmark':'analysis',
+                          'macro':'analysis', 'news':'intelligence', 'overview':'research',
+                          'portfolio':'research', 'engines':'research', 'performance':'research', 'risk':'research'}
+                page.locator(f'[data-hub="{groups[section]}"]').click()
+                page.locator(f'[data-view="{section}"]').click()
             page.goto(origin + "/login")
             expect(page.get_by_role("heading", name="Sign in", exact=True)).to_be_visible()
             page.get_by_label("Username", exact=True).fill("alice@example.test")
             page.get_by_label("Password", exact=True).fill("Synthetic-test-password-123!")
             page.get_by_role("button", name="Sign in", exact=True).click()
-            expect(page.locator('#section-jump')).to_be_visible(timeout=90000)
+            expect(page.locator('#workspace-search')).to_be_visible(timeout=90000)
             expect(page.locator("#pilot-account")).to_contain_text("alice@example.test", timeout=90000)
             if os.environ.get("PILOT_REQUIRE_DAILY") == "1":
-                page.locator('#section-jump').select_option('weekly')
+                navigate('weekly')
                 def daily_status(route):
                     route.fulfill(json=dict(version="synthetic-new-daily-run", market_session="2026-11-13", stale=False, error=None))
                     page.unroute('**/api/dashboard-status', daily_status)
@@ -105,8 +112,9 @@ def run(origin, output, *, browsers=("chromium", "firefox", "webkit")):
                 expect(page.locator('#pilot-account')).to_contain_text('alice@example.test', timeout=90000)
                 expect(page.locator('[data-panel="weekly"]')).to_be_visible()
             if os.environ.get('PILOT_REQUIRE_MACRO_ALPHA') == '1':
-                expect(page.locator('#macro-alpha-global')).to_contain_text('testing', timeout=30000)
+                navigate('macro')
                 alpha = page.request.get(origin + '/api/macro-alpha').json()
+                expect(page.locator('#macro-alpha-global')).to_contain_text('stale snapshot' if alpha['stale'] else 'testing', timeout=30000)
                 f = alpha['forecast']
                 assert f['monitoring_enabled'] and not f['portfolio_activation_enabled'] and not f['execution_enabled']
                 assert abs(sum(f['prediction']['probabilities']) - 1) < 1e-9
@@ -123,13 +131,53 @@ def run(origin, output, *, browsers=("chromium", "firefox", "webkit")):
             navigation_ms = []
             for section in sections:
                 started = time.perf_counter()
-                page.locator('#section-jump').select_option(section)
+                navigate(section)
                 expect(page.locator(f'[data-panel="{section}"]')).to_be_visible()
                 navigation_ms.append(round((time.perf_counter() - started) * 1000, 2))
                 expect(page.locator("#page-title")).not_to_have_text("")
                 visited.append(section)
+            if os.environ.get("PILOT_REQUIRE_WORKSPACE") == "1":
+                navigate('decision-home')
+                expect(page.locator('#decision-title')).not_to_have_text('Current proposal')
+                current = page.request.get(origin + '/api/workspace').json()
+                assert not current['execution_enabled']
+                for key, portfolio in current['portfolios'].items():
+                    page.locator('#decision-portfolio').select_option(key)
+                    expect(page.locator('#decision-title')).to_have_text(portfolio['title'])
+                    expect(page.locator('#decision-dates')).to_contain_text(portfolio['context']['price_as_of'])
+                    expect(page.locator('#decision-metrics .decision-metric').first.locator('strong')).to_have_text(str(portfolio['asset_count']))
+                    assert page.locator('[data-panel="decision-home"]').get_attribute('data-context-id') == portfolio['context']['context_id']
+                    page.locator('#decision-analyze').click()
+                    expect(page.locator('[data-panel="proposal-analysis"]')).to_be_visible()
+                    assert page.locator('[data-panel="proposal-analysis"]').get_attribute('data-context-id') == portfolio['context']['context_id']
+                    for period in ('4','13','52','156'):
+                        page.locator('#decision-period').select_option(period)
+                        scenario = portfolio['projections']['periods'][period]
+                        expected = ' / '.join(f"{scenario[k]*100:.2f}%" for k in ('p05_return','median_return','p95_return'))
+                        expect(page.locator('#decision-projection .decision-metric').first.locator('strong')).to_have_text(expected)
+                    page.locator('#decision-analysis-home').click()
+                page.screenshot(path=str(root / f'{name}-decision-home.png'), full_page=True)
+                page.locator('#decision-review').click()
+                expect(page.locator('[data-panel="weekly"]')).to_be_visible()
+                expect(page.locator('#weekly-horizon')).to_have_value(key)
+                page.set_viewport_size(dict(width=390,height=844))
+                navigate('decision-home')
+                assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+                page.screenshot(path=str(root / f'{name}-decision-mobile.png'), full_page=True)
+                if os.environ.get('PILOT_REQUIRE_DAILY') == '1':
+                    retained_context = page.locator('[data-panel="decision-home"]').get_attribute('data-context-id')
+                    def unavailable_workspace(route):
+                        route.fulfill(status=503, json={'error':'Synthetic update failure'})
+                    page.route('**/api/workspace', unavailable_workspace)
+                    page.clock.fast_forward(61000)
+                    expect(page.locator('#decision-status')).to_contain_text('retaining the last verified proposal')
+                    assert page.locator('[data-panel="decision-home"]').get_attribute('data-context-id') == retained_context
+                    page.unroute('**/api/workspace', unavailable_workspace)
+                    page.clock.fast_forward(61000)
+                    expect(page.locator('#decision-status')).not_to_contain_text('Update failed')
+                page.set_viewport_size(dict(width=1440,height=1000))
             if os.environ.get("PILOT_REQUIRE_WEEKLY") == "1":
-                page.locator('#section-jump').select_option('weekly')
+                navigate('weekly')
                 expect(page.locator('#weekly-status')).to_contain_text('Week closed')
                 weekly = page.request.get(origin + '/api/weekly').json()
                 for key in ('short', 'medium', 'long', 'aggregate'):
@@ -167,14 +215,14 @@ def run(origin, output, *, browsers=("chromium", "firefox", "webkit")):
                 assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
                 page.screenshot(path=str(root / f'{name}-weekly-mobile.png'), full_page=True)
                 page.set_viewport_size(dict(width=1440, height=1000))
-            page.locator('#section-jump').select_option('benchmark')
+            navigate('benchmark')
             if os.environ.get('PILOT_REQUIRE_RESEARCH_REVIEW') == '1':
-                page.locator('#section-jump').select_option('weekly')
+                navigate('weekly')
                 page.locator('#weekly-review-rationale').fill('Synthetic reviewer requests validation of risk assumptions')
                 page.locator('#weekly-review-submit').click()
                 expect(page.locator('#weekly-review-status')).to_contain_text('Recorded',timeout=30000)
             if os.environ.get("PILOT_REQUIRE_MACRO_MONITOR") == "1":
-                page.locator('#section-jump').select_option('macro')
+                navigate('macro')
                 expect(page.locator('#macro-monitor-status')).to_contain_text('Market session', timeout=90000)
                 monitor = page.request.get(origin + '/api/macro-monitor').json()
                 assert monitor['execution_enabled'] is False
@@ -201,7 +249,7 @@ def run(origin, output, *, browsers=("chromium", "firefox", "webkit")):
                 assert page.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
                 page.screenshot(path=str(root / f'{name}-macro-mobile.png'), full_page=True)
                 page.set_viewport_size(dict(width=1440, height=1000))
-                page.locator('#section-jump').select_option('benchmark')
+                navigate('benchmark')
             expect(page.locator("#benchmark-note")).to_contain_text("Research reference", timeout=90000)
             expect(page.locator("#portfolio-identity")).to_contain_text("Cycle-diversified")
             expect(page.locator("#benchmark-weights tr")).to_have_count(len(page.request.get(origin + "/api/benchmark").json()["latest"]["weights"]) + 1)
@@ -259,15 +307,15 @@ def run(origin, output, *, browsers=("chromium", "firefox", "webkit")):
             for merged in ['observations', 'assumptions']:
                 page.locator(f'[data-merged="{merged}"] > summary').click()
                 expect(page.locator(f'[data-merged="{merged}"]')).to_have_attribute('open', '')
-            page.locator('#section-jump').select_option('benchmark')
+            navigate('benchmark')
             page.screenshot(path=str(root / f"{name}-benchmark-desktop.png"), full_page=True)
-            page.locator('#section-jump').select_option('portfolio')
+            navigate('portfolio')
             page.locator("#asset-search").fill("SPY")
             expect(page.locator("#asset-rows")).to_contain_text("SPY")
             page.locator("#asset-search").fill("NO-SUCH-ASSET")
             expect(page.locator("#asset-rows")).to_contain_text("No instruments match")
             page.locator("#asset-search").fill("")
-            page.locator('#section-jump').select_option('overview')
+            navigate('overview')
             median_before = page.locator("#median-value").inner_text()
             page.locator("#capital").fill("250000")
             page.locator("#capital").dispatch_event("change")

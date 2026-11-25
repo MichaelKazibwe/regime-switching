@@ -12,3 +12,17 @@ Official references:
 - https://www.sqlite.org/releaselog/3_54_1.html
 
 A clean scan is one release requirement. It does not approve investment use, data rights or remote exposure.
+
+OpenSSL uses the checksum-pinned official 3.5.9 LTS source plus the exact
+upstream fixes for CVE-2026-107494 and CVE-2026-124709. It is labelled as a patched
+3.5.9 build, not an unreleased 3.5.10 release. QUIC is also excluded at compile time:
+this application requires ordinary TLS. Build qualification checks the actually
+linked CPython library, absence of the QUIC entry point, and trusted local TLS 1.2
+and TLS 1.3 handshakes with encrypted application data. The runtime retains the
+source/patch checksums and upstream license. The original Debian OpenSSL libraries
+are omitted only when no copied runtime dependency links them; their metadata is
+never deleted to conceal a copied library. A fresh image scan is still required.
+
+- https://openssl-library.org/news/vulnerabilities/
+- https://security-tracker.debian.org/tracker/CVE-2026-107494
+- https://security-tracker.debian.org/tracker/CVE-2026-124709

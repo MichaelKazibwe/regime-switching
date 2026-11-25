@@ -19,9 +19,18 @@ from strategy_report import load_training_report
 
 
 def replay_dynamic(prices, features, *, start=253, cost=0.0015):
+    return _replay_dynamic(Replay(prices, features), {}, start=start, cost=cost)
+
+
+def _replay_dynamic(runner, candidates, *, start=253, cost=0.0015):
+    """Share only causal pure decisions within one exact-input evaluation.
+
+    Holdings, drift, fee calculations, fills and NAV remain per-cost-run state.
+    The cache cannot escape this evaluation or be reused with a new price panel.
+    """
+    prices = runner.prices
     if not 253 <= start < len(prices) or not 0 <= cost <= 0.01:
         raise ValueError("Observed warmup and valid cost required")
-    runner = Replay(prices, features)
     symbols = list(prices)
     daily = prices.pct_change(fill_method=None)
     w = np.zeros(len(symbols))
@@ -36,7 +45,9 @@ def replay_dynamic(prices, features, *, start=253, cost=0.0015):
         )
         target = None
         if (i - start) % 21 == 0 or urgent:
-            candidate = allocate(ctx)
+            if i - 1 not in candidates:
+                candidates[i - 1] = allocate(ctx)
+            candidate = candidates[i - 1]
             desired = np.array([candidate["weights"].get(s, 0) for s in symbols])
             if urgent or i == start or abs(desired - w).sum() >= 0.04:
                 target = desired
@@ -97,8 +108,9 @@ def evaluate(bundle, output):
     root = Path(output)
     root.mkdir(parents=True, exist_ok=False, mode=0o700)
     frames = {}
+    runner, candidates = Replay(prices, features), {}
     for cost in (0.0, 0.0015, 0.003):
-        frame, trades = replay_dynamic(prices, features, start=start, cost=cost)
+        frame, trades = _replay_dynamic(runner, candidates, start=start, cost=cost)
         key = str(round(cost * 10000)) + "bps"
         path = root / (key + ".csv")
         frame.to_csv(path)

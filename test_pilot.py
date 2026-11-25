@@ -268,6 +268,21 @@ def test_viewer_cannot_record_research_approval(service):
     assert request('/api/review',{},cookie=cookie,csrf=csrf)[0]==403
 
 
+def test_workspace_requires_login_and_uses_authenticated_actor(service, monkeypatch):
+    pilot, request = service
+    assert request('/api/workspace')[0] == 401
+    def payload(session):
+        return dict(actor=session['user_id'], role=session['role'], execution_enabled=False)
+    monkeypatch.setattr(pilot, 'workspace_payload', payload)
+    alice, _ = sign_in(request)
+    viewer, _ = sign_in(request, 'viewer@example.test')
+    a = json.loads(request('/api/workspace', cookie=alice)[2])
+    b = json.loads(request('/api/workspace', cookie=viewer)[2])
+    assert a['actor'] != b['actor']
+    assert a['role'] == 'tester' and b['role'] == 'viewer'
+    assert not a['execution_enabled'] and not b['execution_enabled']
+
+
 def test_overloaded_server_returns_bounded_service_unavailable():
     class Request:
         sent=b''

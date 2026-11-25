@@ -20,6 +20,7 @@ ENTRIES = (
 )
 RUNTIME_RESOURCES = (
     "deploy/runtime/build_sqlite.py", "deploy/runtime/collect_runtime.py",
+    "deploy/runtime/build_openssl.py", "deploy/runtime/verify_native_tls.py",
     "deploy/runtime/README.md",
 )
 RESOURCES = RUNTIME_RESOURCES + (

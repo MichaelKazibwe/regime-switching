@@ -42,17 +42,21 @@ def shell():
                + "\n" + (PILOT_ASSETS / "weekly.js").read_text()
                + "\n" + (PILOT_ASSETS / "macro-monitor.js").read_text()
                + "\n" + (PILOT_ASSETS / "workspace.js").read_text()
+               + "\n" + (PILOT_ASSETS / "decision-workspace.js").read_text()
                + "\n}catch(error){document.getElementById('source-description').textContent='Workspace unavailable. Please sign in again or contact the operator.';}})();")
     digest = base64.b64encode(hashlib.sha256(script.encode()).digest()).decode()
     html = (ASSETS / "investor.html").read_text()
     html = html.replace('</nav>', '<button class="nav" data-view="benchmark">Cycle benchmark</button><button class="nav" data-view="weekly">Weekly portfolios</button></nav>', 1)
     html = html.replace('</aside>', '<div id="pilot-account" class="small"></div><button id="pilot-logout" class="button">Sign out</button></aside>', 1)
+    html = html.replace('</nav>', '<button class="nav" data-view="decision-home">Home</button><button class="nav" data-view="proposal-analysis">Proposal analysis</button></nav>', 1)
+    html = html.replace('</main>', (PILOT_ASSETS / "decision-workspace.html").read_text() + '</main>', 1)
     html = html.replace('</main>', (PILOT_ASSETS / "benchmark.html").read_text() + '</main>', 1)
     html = html.replace('</main>', (PILOT_ASSETS / "weekly.html").read_text() + '</main>', 1)
     html = html.replace('</main>', (PILOT_ASSETS / "macro-monitor.html").read_text() + '</main>', 1)
     return (html.replace("default-src 'none';", "default-src 'none'; connect-src 'self';")
             .replace("__SCRIPT_HASH__", digest).replace("__STYLE__", (ASSETS / "investor.css").read_text()
-                     + "\n" + (PILOT_ASSETS / "pilot.css").read_text())
+                     + "\n" + (PILOT_ASSETS / "pilot.css").read_text()
+                     + "\n" + (PILOT_ASSETS / "decision-workspace.css").read_text())
             .replace("__SCRIPT__", script).replace("__DATA__", "{}").encode())
 
 
@@ -152,6 +156,26 @@ class Pilot:
         while len(self.users) > 64:
             self.users.popitem(last=False)
         return self.users[key][1]
+
+    def workspace_payload(self, session):
+        from weekly_portfolios import published, weekly_session
+        from portfolio_workspace import workspace
+        from review_workflow import history
+        root = Path(os.environ.get("PILOT_WEEKLY_ROOT", "var/weekly-portfolios/published"))
+        directory, research = published(root)
+        manifest = strict_json(directory/"manifest.json")
+        market_session = self.application.payload["training"]["market_session"]
+        result = workspace(research, manifest["source_hashes"], market_session, archive_root=root)
+        result["stale"] = (
+            research["market_session"] != weekly_session(datetime.now(timezone.utc))
+            or market_session != str(usable_session(datetime.now(timezone.utc)).date()))
+        result["update_error"] = self.application.refresh_error
+        reviews = history(self.state/"reviews"/session["user_id"], reviewer=session["user_id"])
+        result["review_history"] = [
+            {k:r[k] for k in ("review_id", "recommendation_id", "recommendation_revision",
+                              "decision", "rationale", "recorded_at")} for r in reviews]
+        result["role"] = session["role"]
+        return result
 
     def macro_alpha_payload(self):
         root = Path(self.daily_root) / self.daily_revision if self.daily_root and self.daily_revision else self.snapshot_root
@@ -329,6 +353,10 @@ def handler(pilot):
                     self.send(shell(), kind="text/html; charset=utf-8")
                 elif self.path == "/api/news":
                     self.json(app.news.get())
+                elif self.path == "/api/workspace":
+                    with app.lock:
+                        pilot.refresh()
+                        self.json(pilot.workspace_payload(session))
                 elif self.path == "/api/observations":
                     from dashboard_runtime import runtime, age_runtime
                     with app.lock:
@@ -364,9 +392,8 @@ def handler(pilot):
                         root, weekly = published(root)
                         weekly["stale"] = weekly["market_session"] != weekly_session(datetime.now(timezone.utc))
                         from strategy_integrity import fingerprint
-                        weekly['review_revisions'] = {k:fingerprint(dict(recommendation_id=weekly['research_id']+':'+k,
-                            mandate=v['policy'],as_of=weekly['market_session'],release={'release_id':weekly['research_id']},allocation=v))
-                            for k,v in weekly['candidates'].items()}
+                        from portfolio_workspace import review_target
+                        weekly['review_revisions'] = {k:fingerprint(review_target(weekly,k)) for k in weekly['candidates']}
                         if self.path.endswith("/pdf"):
                             self.send((root / "dashboard-report.pdf").read_bytes(), kind="application/pdf")
                         else:
@@ -447,10 +474,8 @@ def handler(pilot):
                     _, research = published(Path(os.environ.get('PILOT_WEEKLY_ROOT','var/weekly-portfolios/published')))
                     if research['research_id'] != body['research_id'] or body['horizon'] not in research['candidates']:
                         raise ValueError('Research revision changed; refresh before review')
-                    target = dict(recommendation_id=research['research_id']+':'+body['horizon'],
-                                  mandate=research['candidates'][body['horizon']]['policy'],
-                                  as_of=research['market_session'],release={'release_id':research['research_id']},
-                                  allocation=research['candidates'][body['horizon']])
+                    from portfolio_workspace import review_target
+                    target = review_target(research,body['horizon'])
                     decision = record_decision(pilot.state/'reviews'/session['user_id'],target,
                         reviewer=session['user_id'],decision=body['decision'],rationale=body['rationale'],expected_revision=body['expected_revision'])
                     self.json(decision)

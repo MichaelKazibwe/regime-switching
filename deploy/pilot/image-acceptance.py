@@ -205,6 +205,7 @@ print(json.dumps({'status':'PASSED_LOCAL_PILOT_LOAD_BUDGET','workers':4,'request
                     "MACRO_ALPHA",
                     "MACRO_MONITOR",
                     "WEEKLY",
+                    "WORKSPACE",
                     "DAILY",
                     "RESEARCH_REVIEW",
                 ]
