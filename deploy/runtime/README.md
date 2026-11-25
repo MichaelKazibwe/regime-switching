@@ -1,6 +1,6 @@
 # Minimal application runtime
 
-The final application image uses digest-pinned Google distroless Debian 13 cc, CPython 3.12 and the existing hash-locked numerical dependencies. Build tools, shells, OS administration utilities and package installers are not required at runtime. Browser QA uses a separate image with its own browser/OS tools.
+The final application image uses digest-pinned Google distroless Debian 13 base-nossl, CPython 3.12 and the existing hash-locked numerical dependencies. Build tools, shells, OS administration utilities and package installers are not required at runtime. Browser QA uses a separate image with its own browser/OS tools.
 
 SQLite 3.54.1 is compiled from the official release after checking its published SHA3-256. The original vulnerable Debian SQLite library is not copied into the final image. `sqlite-build.json` records its origin and checksum; runtime acceptance must confirm the actual linked SQLite version. Debian dependency metadata is preserved beside every copied OS library so the vulnerability scanner retains package coverage. No CVE ignore list or severity threshold reduction is used.
 
@@ -26,3 +26,5 @@ never deleted to conceal a copied library. A fresh image scan is still required.
 - https://openssl-library.org/news/vulnerabilities/
 - https://security-tracker.debian.org/tracker/CVE-2026-107494
 - https://security-tracker.debian.org/tracker/CVE-2026-124709
+
+The final base explicitly excludes the distribution OpenSSL copy. Only the patched upstream runtime is retained; required GCC/C++ libraries are copied with their own Debian provenance by the dependency collector. Exact-image acceptance verifies that no second system OpenSSL remains.

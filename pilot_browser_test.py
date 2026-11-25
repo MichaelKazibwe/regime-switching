@@ -125,7 +125,7 @@ def run(origin, output, *, browsers=("chromium", "firefox", "webkit")):
                 expect(page.locator('#macro-alpha-panel')).to_be_visible()
                 expect(page.locator('#macro-alpha-probabilities tr')).to_have_count(4)
                 expect(page.locator('#macro-alpha-inputs tr')).to_have_count(4)
-                expect(page.locator('#macro-alpha-outcomes')).to_contain_text('pending')
+                expect(page.locator('#macro-alpha-outcomes')).to_contain_text('pending' if alpha.get('monitoring') else 'Prospective receipt unavailable')
             sections = page.locator("[data-view]").evaluate_all("nodes=>nodes.map(n=>n.dataset.view)")
             visited = []
             navigation_ms = []

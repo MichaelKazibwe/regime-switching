@@ -172,6 +172,23 @@ def run(app_image, browser_image, fixture, output):
             logs = subprocess.run([docker, "logs", app], capture_output=True, text=True, timeout=15)
             (output / "app-startup.log").write_text(logs.stdout + logs.stderr)
             raise RuntimeError("Isolated exact-image app failed to start")
+        native_script = r"""
+import ctypes,json,ssl,hashlib
+from pathlib import Path
+receipt=json.loads(Path('/usr/local/share/regime/openssl-build.json').read_text())
+assert ssl.OPENSSL_VERSION.startswith('OpenSSL 3.5.9 ')
+assert receipt['quic_included'] is False and receipt['tls_12_13_verified'] is True
+assert len(receipt['upstream_backports'])==2
+assert not hasattr(ctypes.CDLL('libssl.so.3'),'OSSL_QUIC_client_method')
+assert not list(Path('/usr/lib').rglob('libssl.so*'))
+assert not list(Path('/usr/lib').rglob('libcrypto.so*'))
+libraries={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in
+ [Path('/usr/local/lib/libssl.so.3'),Path('/usr/local/lib/libcrypto.so.3')]}
+print(json.dumps(dict(openssl=ssl.OPENSSL_VERSION,receipt=receipt,libraries=libraries,
+                     quic_excluded=True,duplicate_system_ssl_absent=True)))
+"""
+        native = json.loads(command(["exec", app, "python", "-c", native_script]))
+        (output / "native-runtime.json").write_text(json.dumps(native, indent=2))
         performance_script = r"""
 import json,time,urllib.request,http.cookiejar,concurrent.futures,math
 origin='http://127.0.0.1:8781'
@@ -179,7 +196,7 @@ jar=http.cookiejar.CookieJar();opener=urllib.request.build_opener(urllib.request
 request=urllib.request.Request(origin+'/api/login',data=json.dumps({'username':'alice@example.test','password':'Synthetic-test-password-123!'}).encode(),headers={'Content-Type':'application/json','Origin':origin})
 opener.open(request,timeout=30).read()
 cookie='; '.join(c.name+'='+c.value for c in jar)
-paths=['/api/dashboard','/api/weekly','/api/benchmark','/api/macro-monitor','/api/observations']
+paths=['/api/dashboard','/api/workspace','/api/weekly','/api/benchmark','/api/macro-monitor','/api/observations']
 def measure(path):
  start=time.perf_counter()
  with urllib.request.urlopen(urllib.request.Request(origin+path,headers={'Cookie':cookie}),timeout=30) as response:
