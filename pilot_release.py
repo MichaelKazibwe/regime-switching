@@ -188,6 +188,10 @@ def seed_runtime(source_root, runtime, input_root):
     monitoring_streams = {}
     for name in ["macro-alpha", "forecast-coverage"]:
         source = source_root / "var" / name
+        if name == "macro-alpha":
+            source = Path(__import__('os').environ.get('PILOT_MACRO_ALPHA_STATE_ROOT', source))
+        if source.is_symlink():
+            raise ValueError("Monitoring stream directory symlinks forbidden")
         if not source.is_dir():
             continue
         for path in sorted(source.rglob("*")):

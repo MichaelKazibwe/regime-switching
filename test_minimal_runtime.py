@@ -32,3 +32,24 @@ def test_bad_openssl_release_and_patch_are_never_compiled():
     from deploy.runtime.build_openssl import verified
     with pytest.raises(ValueError, match='checksum mismatch'):
         verified(b'corrupted native source', 'a'*64)
+
+
+def test_snapshot_import_uses_the_same_configured_macro_stream_as_its_forecast(tmp_path,monkeypatch):
+    from pilot_release import seed_runtime
+    from strategy_receipts import atomic_json
+    from strategy_integrity import strict_json,file_hash
+    root=tmp_path/'source'
+    runtime=tmp_path/'runtime'
+    inputs=runtime/'pilot-input'
+    atomic_json(inputs/'market/capture.json',dict(macro_manifest='macro-manifest.json',price_session='2026-11-24'))
+    atomic_json(inputs/'market/macro-manifest.json',dict(series={}))
+    atomic_json(inputs/'snapshot-manifest.json',dict(files={}))
+    atomic_json(root/'var/macro-alpha/latest.json',dict(scope='wrong default stream'))
+    configured=tmp_path/'configured-monitor'
+    atomic_json(configured/'latest.json',dict(scope='configured stream'))
+    monkeypatch.setenv('PILOT_MACRO_ALPHA_STATE_ROOT',str(configured))
+    seed_runtime(root,runtime,inputs)
+    copied=runtime/'macro-alpha/latest.json'
+    assert strict_json(copied)['scope']=='configured stream'
+    assert file_hash(copied)==file_hash(configured/'latest.json')
+    assert strict_json(inputs/'cohort-import.json')['monitoring_streams']['macro-alpha/latest.json']==file_hash(copied)
