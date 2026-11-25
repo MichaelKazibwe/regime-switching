@@ -22,3 +22,7 @@ body[data-current-view="decision-home"] #download-plan,body[data-current-view="d
 [data-panel="weekly"] .table-scroll table{min-width:680px}#weekly-holdings td:last-child{min-width:0;white-space:normal}#weekly-holdings details{max-width:380px}#weekly-holdings summary{white-space:nowrap}
 @media(max-width:800px){.decision-columns{grid-template-columns:1fr}.decision-context{align-items:start;flex-wrap:wrap}.decision-chart-layout{grid-template-columns:180px minmax(110px,1fr)}}
 @media(max-width:550px){.decision-metrics{grid-template-columns:1fr}.decision-metric{grid-template-columns:1fr auto}.decision-metric small{grid-column:1/-1}.decision-context .field{min-width:0;width:100%}.decision-chart-layout{grid-template-columns:1fr}.decision-chart-layout svg{max-height:180px}.decision-risk-row{grid-template-columns:50px minmax(25px,1fr) 95px;gap:8px}.decision-change-row{flex-wrap:wrap}.decision-context h2{font-size:21px}}
+
+#weekly-holdings .weekly-rationale{margin:0;padding:0;border:0}
+#weekly-holdings .weekly-rationale summary{font-size:11px;color:var(--accent)}
+#weekly-holdings .weekly-rationale p{min-width:220px;margin:10px 0;line-height:1.5}

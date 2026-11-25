@@ -263,7 +263,7 @@ def run(origin, output, *, browsers=("chromium", "firefox", "webkit")):
             report = json.loads((root / f"{name}-benchmark.json").read_text())
             assert report["execution_enabled"] is False
             assert page.locator('[data-hub]').count() == 5
-            assert len(sections) == 11
+            assert set(sections) == {'decision-home','proposal-analysis','weekly','dynamic','growth','benchmark','macro','news','overview','portfolio','engines','performance','risk'}
             fixed_allocation = page.locator('#benchmark-weights tr').evaluate_all(
                 "rows=>rows.map(r=>[...r.cells].slice(0,3).map(c=>c.textContent))")
             medians = set()
@@ -331,7 +331,7 @@ def run(origin, output, *, browsers=("chromium", "firefox", "webkit")):
             page.get_by_role("button", name="Day mode").click()
             page.set_viewport_size(dict(width=390, height=844))
             for section in sections:
-                page.locator("#section-jump").select_option(section)
+                navigate(section)
                 expect(page.locator(f'[data-panel="{section}"]')).to_be_visible()
                 if not page.evaluate("document.documentElement.scrollWidth <= innerWidth + 2"):
                     overflow = page.evaluate("""()=>({viewport:innerWidth,width:document.documentElement.scrollWidth,
@@ -341,13 +341,13 @@ def run(origin, output, *, browsers=("chromium", "firefox", "webkit")):
                     atomic_json(root / f"{name}-{section}-overflow.json", overflow)
                     page.screenshot(path=str(root / f"{name}-{section}-overflow.png"), full_page=True)
                     raise AssertionError("Mobile overflow: " + section)
-            page.locator("#section-jump").select_option("benchmark")
+            navigate("benchmark")
             expect(page.locator('[data-panel="benchmark"]')).to_be_visible()
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth + 2")
             assert page.locator('#benchmark-chart').bounding_box()['height'] >= 240
             assert page.locator('.market-tile strong').evaluate_all('nodes=>nodes.every(n=>n.scrollWidth<=n.clientWidth+1)')
             page.screenshot(path=str(root / f"{name}-benchmark-mobile.png"), full_page=True)
-            page.locator("#section-jump").select_option("macro")
+            navigate("macro")
             expect(page.locator("#lab-strategy")).to_be_visible()
             for i in range(4):
                 page.locator(f"#lab-prob-{i}").fill("25")
@@ -368,8 +368,8 @@ def run(origin, output, *, browsers=("chromium", "firefox", "webkit")):
             page.get_by_label("Username", exact=True).fill("viewer@example.test")
             page.get_by_label("Password", exact=True).fill("Synthetic-test-password-123!")
             page.get_by_role("button", name="Sign in", exact=True).click()
-            expect(page.locator("#section-jump")).to_be_visible(timeout=90000)
-            page.locator("#section-jump").select_option("macro")
+            expect(page.locator("#workspace-search")).to_be_visible(timeout=90000)
+            navigate("macro")
             expect(page.locator("#lab-prob-0")).to_be_disabled()
             expect(page.locator("#lab-quarters")).to_be_disabled()
             if os.environ.get('PILOT_REQUIRE_RESEARCH_REVIEW') == '1':
@@ -377,7 +377,7 @@ def run(origin, output, *, browsers=("chromium", "firefox", "webkit")):
             page.locator("#pilot-logout").click()
             expect(page).to_have_url(origin + "/login")
             assert not errors, errors
-            assert len(benchmark_requests) == (3 if os.environ.get("PILOT_REQUIRE_DAILY") == "1" else 2)
+            assert len(benchmark_requests) == 1
             evidence[name] = dict(sections=visited, viewport_desktop=[1440, 1000], viewport_mobile=[390, 844],
                                   benchmark_scenarios=len(report["scenarios"]), page_errors=errors,
                                   logout_revoked=True, viewer_controls_disabled=True,
@@ -394,6 +394,8 @@ def run(origin, output, *, browsers=("chromium", "firefox", "webkit")):
                    source_hashes={p: file_hash(p) for p in ["pilot_server.py", "pilot_auth.py", "pilot_browser_test.py",
                                                            "pilot/bootstrap.js", "pilot/login.js", "pilot/benchmark.js", "pilot/pilot.css",
                                                            "pilot/workspace.js", "pilot/weekly.js", "pilot/macro-monitor.js",
+                                                           "portfolio_workspace.py", "pilot/decision-workspace.js",
+                                                           "pilot/decision-workspace.html", "pilot/decision-workspace.css",
                                                            "pilot/weekly.html", "pilot/macro-monitor.html", "dashboard/investor.js",
                                                            "dashboard/investor.html", "dashboard/investor.css"]})
     if Path('pilot-release.json').is_file():
