@@ -16,10 +16,12 @@ def verify():
     library = ctypes.CDLL('libssl.so.3')
     if hasattr(library, 'OSSL_QUIC_client_method'):
         raise ValueError('Excluded QUIC entry point remains available')
+    if not ssl.create_default_context().cert_store_stats()['x509_ca']:
+        raise ValueError('System TLS trust anchors are missing')
     with tempfile.TemporaryDirectory() as temporary:
         root = Path(temporary)
         key, cert = root/'key.pem', root/'cert.pem'
-        subprocess.run(['/usr/local/bin/openssl','req','-x509','-newkey','rsa:2048',
+        subprocess.run(['/usr/local/bin/openssl','req','-config','/dev/null','-x509','-newkey','rsa:2048',
                         '-nodes','-subj','/CN=localhost','-addext','subjectAltName=DNS:localhost',
                         '-days','1','-keyout',str(key),'-out',str(cert)],
                        check=True, capture_output=True, timeout=30)
