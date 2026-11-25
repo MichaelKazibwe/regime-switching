@@ -29,6 +29,7 @@ const ribbonCaption=el('p',`Adjusted closes · ${data.latest_market?.session||da
 const evidenceIdentity=el('details',undefined,'workspace-evidence'),evidenceSummary=el('summary',`Research evidence · market close ${data.training.market_session} · execution disabled`);evidenceIdentity.id='workspace-evidence';evidenceIdentity.append(evidenceSummary,el('p','Weekly candidates, saved plans and hypothetical scenarios have separate dates and revisions. Review the date and assumptions within each view before comparing results. Macro monitoring does not activate portfolio weights.','small'));ribbonCaption.after(evidenceIdentity);
 $('download-pdf').textContent='Saved plan PDF ↗';$('download-pdf').title='Original saved plan and amount. Illustration scaling does not change the saved PDF.';
 document.querySelector('.workspace-label').textContent='RESEARCH TERMINAL';document.querySelector('.sidebar-note p').textContent='Scenario research. No orders or account access.';
+document.querySelector('.brand').setAttribute('href','#decision-home');
 document.querySelector('.brand').addEventListener('click',event=>{event.preventDefault();view('decision-home');});
 const initialWorkspaceView=location.hash.slice(1);view(Object.hasOwn(workspaceLabels,initialWorkspaceView)||Object.hasOwn(workspaceAliases,initialWorkspaceView)?initialWorkspaceView:'decision-home');
 

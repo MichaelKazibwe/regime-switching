@@ -272,6 +272,10 @@ print(json.dumps({'status':'PASSED_LOCAL_PILOT_LOAD_BUDGET','workers':4,'request
             )
         )
     finally:
+        if containers:
+            # Preserve screenshots and exports even when a later assertion fails.
+            subprocess.run([docker, "cp", seed + ":/qa/browser/.", str(output)],
+                           capture_output=True, timeout=60)
         for name in containers:
             logs = subprocess.run(
                 [docker, "logs", name], capture_output=True, text=True

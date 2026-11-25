@@ -299,7 +299,8 @@ def run(origin, output, *, browsers=("chromium", "firefox", "webkit")):
             assert float(comparison_rows[0]['Median return']) == last_scenario['median_return']
             assert float(comparison_rows[0]['Illustration USD']) == 200000
             page.locator('.brand').click()
-            expect(page.locator('[data-panel="overview"]')).to_be_visible()
+            expect(page.locator('[data-panel="decision-home"]')).to_be_visible()
+            expect(page.locator('.brand')).to_have_attribute('href','#decision-home')
             page.locator('#workspace-search').click()
             page.locator('#workspace-search-input').fill('risk')
             page.locator('.command-result').first.click()
