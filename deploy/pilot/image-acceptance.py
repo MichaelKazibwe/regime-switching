@@ -173,8 +173,11 @@ def run(app_image, browser_image, fixture, output):
             (output / "app-startup.log").write_text(logs.stdout + logs.stderr)
             raise RuntimeError("Isolated exact-image app failed to start")
         native_script = r"""
-import ctypes,json,ssl,hashlib
+import ctypes,json,ssl,hashlib,contextlib,io
 from pathlib import Path
+from deploy.runtime.verify_native_tls import verify
+handshakes=io.StringIO()
+with contextlib.redirect_stdout(handshakes):verify()
 receipt=json.loads(Path('/usr/local/share/regime/openssl-build.json').read_text())
 assert ssl.OPENSSL_VERSION.startswith('OpenSSL 3.5.9 ')
 assert receipt['quic_included'] is False and receipt['tls_12_13_verified'] is True
@@ -185,7 +188,7 @@ assert not list(Path('/usr/lib').rglob('libcrypto.so*'))
 libraries={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in
  [Path('/usr/local/lib/libssl.so.3'),Path('/usr/local/lib/libcrypto.so.3')]}
 print(json.dumps(dict(openssl=ssl.OPENSSL_VERSION,receipt=receipt,libraries=libraries,
-                     quic_excluded=True,duplicate_system_ssl_absent=True)))
+                     quic_excluded=True,duplicate_system_ssl_absent=True,tls_checks=handshakes.getvalue())))
 """
         native = json.loads(command(["exec", app, "python", "-c", native_script]))
         (output / "native-runtime.json").write_text(json.dumps(native, indent=2))
