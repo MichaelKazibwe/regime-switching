@@ -57,6 +57,18 @@ def test_nonfinite_primary_solution_is_never_published(monkeypatch):
         module.allocate(history(),POLICIES['medium'])
 
 
+def test_empty_support_is_cash_before_relative_risk_validation(monkeypatch):
+    import weekly_portfolios as module
+    from types import SimpleNamespace
+    dust = np.zeros(history().shape[1])
+    dust[0] = 3e-6  # Numerical cash solution, but a 100% relative risk share.
+    monkeypatch.setattr(module, 'minimize', lambda *a, **kw: SimpleNamespace(
+        success=True, x=dust, message='Optimization terminated successfully'))
+    weights, covariance, _ = module.allocate(history(), POLICIES['short'])
+    assert np.array_equal(weights, np.zeros_like(dust))
+    module.verify_risk_concentration(weights, covariance)
+
+
 @pytest.mark.parametrize("key", list(POLICIES))
 def test_allocation_caps_risk_and_no_borrowing(key):
     h = history()

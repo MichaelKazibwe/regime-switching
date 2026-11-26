@@ -6,9 +6,9 @@ qualification. It does not certify an institutional investment service.
 
 ## Release boundary
 
-Development is isolated on `institutional-upgrade`. The existing loopback pilot
-continues to use its earlier qualified image until the replacement passes its
-release gates. Research reviews create no orders, public recommendation approval
+The upgrade was isolated on `institutional-upgrade`, then merged into `main`
+and pushed. On 26 November the independently tested image was installed into the
+existing loopback Linux VM, preserving its account and previous rollback inputs. Research reviews create no orders, public recommendation approval
 or model promotion. Preserve every original observation cohort and report.
 
 ## Execution register
@@ -19,7 +19,7 @@ or model promotion. Preserve every original observation cohort and report.
 | Portable protocol identity | Canonical logical source names replace absolute identity keys. Relocation and source-mutation tests pass. Source changes require a new prospective cohort; earlier ledgers remain immutable. |
 | One portfolio context | `portfolio_workspace.py` supplies proposal type, price/context dates, currency, costs, model identity, revision and exact review revision. Shared Home/Analysis selection. No funded performance is invented. |
 | Semantic change log | Compare target weights only across the same portfolio/model/basis. New revisions with unchanged targets say unchanged. Missing/corrupt prior evidence is unavailable. |
-| Home and navigation | Compact Home, Portfolios, Analysis, Intelligence and Research library. Archived plans explicitly labelled. Market ribbon appears with market intelligence. Critical update warnings remain visible. Browser acceptance pending. |
+| Home and navigation | Compact Home, Portfolios, Analysis, Intelligence and Research library. Archived plans explicitly labelled. Market ribbon appears with market intelligence. Critical update warnings remain visible. Chromium/WebKit desktop and mobile acceptance passed. |
 | Progressive disclosure | Capital visual, three primary metrics and review needs first; detailed methodology, identifiers and holding rationales expand on demand. Full research tables/PDF retained. |
 | Review lifecycle | One exact-revision target contract and actor-scoped immutable review history. Viewer cannot submit decisions; research acceptance never authorizes execution. No organizational roles or approvers are invented. |
 | Data/model inventory | Source-bound catalogue exposes model identity, input evidence and explicit unassigned ownership, missing independent validation and unresolved rights/reconciliation. Hashes are not data licenses. |
@@ -42,9 +42,17 @@ or model promotion. Preserve every original observation cohort and report.
 - Exposure/context/weekly focused batch: 38 passed.
 - Python lint and whitespace checks pass at the intermediate checkpoint.
 - Rendered the updated PDF allocation and holdings-evidence pages; inspected legibility and alignment.
-- Native security build: official backports applied and actual linked TLS 1.2/1.3 trusted handshakes passed. Final image scan remains pending.
+- Native security build: official backports applied; actual linked TLS 1.2/1.3 trusted handshakes and default trust-store checks passed. The exact installed image has zero HIGH/CRITICAL findings against the fresh November 26 vulnerability database; no waivers. A CycloneDX inventory for the exact installed image is retained with its hash and pinned native build receipts; inventory completeness is not certified.
 - Genuine capture, training, report, benchmark, weekly research and daily artifacts prepared for the completed November 24 session. Historical forecast/observation approval is not inferred from these builds.
-- Chromium/WebKit final acceptance, exact image security, GitHub and rollout: pending.
+- Chromium/WebKit acceptance passed on the main project's November 25 daily context and November 20 completed-week prices, including shared selection/projections, review permissions, refresh failure/recovery, tables/PDFs and mobile navigation. No page errors. Desktop/mobile screenshots and the 14-page weekly PDF inspected.
+- Four local concurrent readers / 24 requests: measured warm p95 1.60 seconds. No WAN or mixed optimizer/export load qualification.
+- Installed image `sha256:8296ed95cf0db3667e593c3363ecac413637a17473a9456f4799f5ca06dc78b7`, code `1cc8d0f`, source release `9712e3c2b95753755b04927ba6875589a1f79ea0c679aaa89d4ddd0d22038cee`. All ten local runtime checks and all four feature checks passed; account metadata and old inputs preserved.
+- Full post-rollout pipeline completed without waiting stages: genuine collection already current, benchmark current, daily alpha already trained, daily published, weekly current. November 26 is a US market holiday; November 25 is the latest completed configured session.
+- New dynamic protocol uses its own canonical V2 cohort: one observed session, zero return sessions at migration, unapproved. Previous ledger hash unchanged; no stitched history or promotion.
+- Coordinated encrypted snapshot under ten writer locks and isolated local restore passed. Current off-host/independent-device recovery remains unproven. Existing private key was used without disclosure.
+- Installed refresh (15-minute check), weekly/training/observation (hourly checks) LaunchAgents remain loaded with successful prior exit codes. Checks do not imply new data every interval.
+- GitHub clean builds initially exposed a build-stage TLS trust-bundle lookup failure. Commit `88be1f3` explicitly selects Debian's actual CA bundle during the build-only verification; the deployed TLS library already passed the final base's real default trust-store test. Hosted reruns pending; no successful clean-build claim yet.
+- Local native artifacts were reused only after pinned source/patch receipts were checked; all application sources were staged fresh. Hosted workflows independently rebuild native sources.
 
 Tests using synthetic data verify software behavior only. They are never counted
 as genuine market outcomes, data-provider qualification or forecasting advantage.

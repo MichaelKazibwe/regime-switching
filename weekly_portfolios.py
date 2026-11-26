@@ -208,9 +208,16 @@ def allocate(history, policy, *, return_estimator="uncertainty_shrink", previous
                    bounds=[(0., .20)] * len(h.columns),
                    constraints={"type": "ineq", "fun": constrained_residual, "jac":constrained_jac},
                    options=dict(maxiter=500, ftol=1e-10))
-    if not fit.success or not feasible(fit.x):
+    # A cash solution can contain solver dust with an arbitrary relative risk
+    # share. Apply the existing empty-support policy before checking that share:
+    # no sub-threshold positions are published as an invested portfolio.
+    weights = np.asarray(fit.x, float)
+    if (fit.success and np.isfinite(weights).all() and np.min(weights) >= -1e-9
+            and not (weights >= .0025).any()):
+        weights = np.zeros_like(weights)
+    if not fit.success or not feasible(weights):
         raise ValueError(f"Constrained allocation failed: {fit.message}")
-    weights = np.maximum(fit.x, 0.)
+    weights = np.maximum(weights, 0.)
     # Re-solve on the selected support, rather than renormalizing and breaking
     # diversification constraints. Unselected capital remains available to cash.
     selected = weights >= .0025
