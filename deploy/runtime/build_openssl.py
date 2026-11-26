@@ -46,7 +46,11 @@ def main():
                  '--openssldir=/etc/ssl','shared','no-quic']
     for command in (configure, ['make','-j2'], ['make','install_sw']):
         subprocess.run(command, cwd=directory, check=True, timeout=1200)
-    environment = {**os.environ, 'LD_LIBRARY_PATH':'/usr/local/lib'}
+    # Debian stores its bundle here; the freshly compiled OpenSSL defaults to
+    # /etc/ssl/cert.pem, which is supplied by the final distroless base only.
+    # Exercise the build against the real Debian trust bundle as well.
+    environment = {**os.environ, 'LD_LIBRARY_PATH':'/usr/local/lib',
+                   'SSL_CERT_FILE':'/etc/ssl/certs/ca-certificates.crt'}
     subprocess.run([sys.executable,'deploy/runtime/verify_native_tls.py'],
                    check=True, env=environment, timeout=60)
     receipt = Path('/usr/local/share/regime/openssl-build.json')
